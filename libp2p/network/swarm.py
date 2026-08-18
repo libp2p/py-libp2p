@@ -3,6 +3,7 @@ from collections.abc import (
     Callable,
 )
 import ipaddress
+import json
 import logging
 import random
 import time
@@ -13,6 +14,8 @@ from libp2p.rcmgr import Direction
 
 if TYPE_CHECKING:
     from libp2p.network.connection.swarm_connection import SwarmConn
+    from libp2p.network.health.data_structures import ConnectionHealth
+    from libp2p.network.health.monitor import ConnectionHealthMonitor
 
 from multiaddr import (
     Multiaddr,
@@ -157,6 +160,11 @@ class Swarm(Service, INetworkService):
     auto_connector: AutoConnector
     tag_store: TagStore
 
+    # Health monitoring (optional Python extension)
+    health_data: dict[ID, dict[INetConn, "ConnectionHealth"]]
+    _health_metrics_collector: dict[str, Any]
+    _health_monitor: "ConnectionHealthMonitor | None"
+
     def __init__(
         self,
         peer_id: ID,
@@ -233,6 +241,18 @@ class Swarm(Service, INetworkService):
         # Initialize connection management components
         self._init_connection_management()
         self._negative_peer_cache = _NegativePeerCache()
+
+        # Initialize health monitoring (opt-in Python extension)
+        self.health_data = {}
+        self._health_metrics_collector = {}
+        self._health_monitor = None
+        if (
+            isinstance(self.connection_config, ConnectionConfig)
+            and self.connection_config.enable_health_monitoring
+        ):
+            logger.info("Health monitoring enabled")
+        else:
+            logger.debug("Health monitoring disabled")
 
     def _init_connection_management(self) -> None:
         """
@@ -318,6 +338,17 @@ class Swarm(Service, INetworkService):
             except Exception as e:
                 logger.error(f"Error starting connection management components: {e}")
                 raise
+
+            # Start health monitoring service if enabled (Python-local extension)
+            if (
+                isinstance(self.connection_config, ConnectionConfig)
+                and self.connection_config.enable_health_monitoring
+            ):
+                from libp2p.network.health.monitor import ConnectionHealthMonitor
+
+                self._health_monitor = ConnectionHealthMonitor(self)
+                nursery.start_soon(self._health_monitor.run)
+                logger.info("Started health monitoring service")
 
             try:
                 await self.manager.wait_finished()
@@ -1131,6 +1162,44 @@ class Swarm(Service, INetworkService):
         """
         return await self._dial_with_retry(addr, peer_id)
 
+    async def dial_peer_replacement(self, peer_id: ID) -> INetConn | None:
+        """
+        Create a new connection to peer_id for replacement purposes.
+
+        This bypasses the existing-connection short-circuit used by dial_peer
+        and always attempts to create a new connection (used by the optional
+        health monitor).
+        """
+        logger.debug("attempting to dial replacement connection to peer %s", peer_id)
+
+        try:
+            addrs = self.peerstore.addrs(peer_id)
+        except PeerStoreError:
+            logger.warning("No known addresses to peer %s for replacement", peer_id)
+            return None
+
+        if not addrs:
+            logger.warning("No addresses available for %s for replacement", peer_id)
+            return None
+
+        for multiaddr in addrs:
+            try:
+                connection = await self._dial_with_retry(multiaddr, peer_id)
+                logger.info(
+                    "Successfully established replacement connection to %s", peer_id
+                )
+                return connection
+            except SwarmException as e:
+                logger.debug(
+                    "encountered swarm exception when trying to connect to %s, "
+                    "trying next address...",
+                    multiaddr,
+                    exc_info=e,
+                )
+
+        logger.warning("Failed to establish replacement connection to %s", peer_id)
+        return None
+
     async def new_stream(self, peer_id: ID) -> INetStream:
         """
         Enhanced: Create a new stream with load balancing across multiple connections.
@@ -1351,20 +1420,9 @@ class Swarm(Service, INetworkService):
         """
         Select connection based on load balancing strategy.
 
-        Parameters
-        ----------
-        connections : list[INetConn]
-            List of available connections.
-        peer_id : ID
-            The peer ID for round-robin tracking.
-        strategy : str
-            Load balancing strategy ("round_robin", "least_loaded", etc.).
-
-        Returns
-        -------
-        INetConn
-            Selected connection.
-
+        Default ``best`` follows go-libp2p ``isBetterConn`` heuristics:
+        prefer direct over relayed, then more open streams, then newest.
+        ``health_based`` / ``latency_based`` are Python-local extensions.
         """
         if not connections:
             raise ValueError("No connections available")
@@ -1372,21 +1430,55 @@ class Swarm(Service, INetworkService):
         strategy = self.connection_config.load_balancing_strategy
 
         if strategy == "round_robin":
-            # Simple round-robin selection
             if peer_id not in self._round_robin_index:
                 self._round_robin_index[peer_id] = 0
-
             index = self._round_robin_index[peer_id] % len(connections)
             self._round_robin_index[peer_id] += 1
             return connections[index]
 
-        elif strategy == "least_loaded":
-            # Find connection with least streams
+        if strategy == "least_loaded":
             return min(connections, key=lambda c: len(c.get_streams()))
 
-        else:
-            # Default to first connection
-            return connections[0]
+        if strategy == "health_based":
+            if peer_id in self.health_data:
+
+                def get_health_score(conn: INetConn) -> float:
+                    health = self.health_data[peer_id].get(conn)
+                    return health.health_score if health else 0.0
+
+                return max(connections, key=get_health_score)
+            return min(connections, key=lambda c: len(c.get_streams()))
+
+        if strategy == "latency_based":
+            if peer_id in self.health_data:
+
+                def get_latency(conn: INetConn) -> float:
+                    health = self.health_data[peer_id].get(conn)
+                    return health.ping_latency if health else float("inf")
+
+                return min(connections, key=get_latency)
+            return min(connections, key=lambda c: len(c.get_streams()))
+
+        # Default "best" (and any unknown): go-libp2p-style heuristics
+        return self._best_connection(connections)
+
+    def _best_connection(self, connections: list[INetConn]) -> INetConn:
+        """Pick best connection using go-libp2p ``isBetterConn``-style rules."""
+        from libp2p.connection_types import ConnectionType
+
+        def sort_key(conn: INetConn) -> tuple[bool, int, int]:
+            try:
+                is_direct = conn.get_connection_type() == ConnectionType.DIRECT
+            except Exception:
+                is_direct = True
+            try:
+                n_streams = len(conn.get_streams())
+            except Exception:
+                n_streams = 0
+            # Prefer direct (True>False), more streams, then identity as stable tiebreak
+            return (is_direct, n_streams, id(conn))
+
+        return max(connections, key=sort_key)
 
     async def listen(self, *multiaddrs: Multiaddr) -> bool:
         """
@@ -1858,6 +1950,7 @@ class Swarm(Service, INetworkService):
         # Close all connections
         for connection in connections:
             try:
+                self.cleanup_connection_health(peer_id, connection)
                 await connection.close()
             except Exception as e:
                 logger.warning(f"Error closing connection to {peer_id}: {e}")
@@ -2005,6 +2098,9 @@ class Swarm(Service, INetworkService):
 
             self.connections[peer_id].append(swarm_conn)
 
+            # Initialize health tracking for the new connection
+            self.initialize_connection_health(peer_id, swarm_conn)
+
             # Trim if we exceed max connections per peer
             max_conns = self.connection_config.max_connections_per_peer
             if len(self.connections[peer_id]) > max_conns:
@@ -2098,6 +2194,7 @@ class Swarm(Service, INetworkService):
 
         for conn in connections_to_remove:
             logger.debug(f"Trimming old connection for peer {peer_id}")
+            self.cleanup_connection_health(peer_id, conn)
             trio.lowlevel.spawn_system_task(self._close_connection_async, conn)
 
         # Keep only the most recent connections
@@ -2118,12 +2215,204 @@ class Swarm(Service, INetworkService):
         """
         peer_id = swarm_conn.muxed_conn.peer_id
 
+        # Clean up health tracking before removing the connection
+        self.cleanup_connection_health(peer_id, swarm_conn)
+
         if peer_id in self.connections:
             self.connections[peer_id] = [
                 conn for conn in self.connections[peer_id] if conn != swarm_conn
             ]
             if not self.connections[peer_id]:
                 del self.connections[peer_id]
+
+    # Health monitoring methods (conditional on health monitoring being enabled)
+
+    @property
+    def _is_health_monitoring_enabled(self) -> bool:
+        """Check if health monitoring is enabled."""
+        return (
+            hasattr(self, "health_data")
+            and isinstance(self.connection_config, ConnectionConfig)
+            and self.connection_config.enable_health_monitoring
+        )
+
+    def initialize_connection_health(self, peer_id: ID, connection: INetConn) -> None:
+        """Initialize health tracking for a new connection."""
+        if not self._is_health_monitoring_enabled:
+            return
+
+        from libp2p.network.health.data_structures import (
+            create_default_connection_health,
+        )
+
+        if peer_id not in self.health_data:
+            self.health_data[peer_id] = {}
+
+        # Pass user-defined weights from connection config
+        # Type narrowed to ConnectionConfig by _is_health_monitoring_enabled()
+        assert isinstance(self.connection_config, ConnectionConfig)
+        self.health_data[peer_id][connection] = create_default_connection_health(
+            latency_weight=self.connection_config.latency_weight,
+            success_rate_weight=self.connection_config.success_rate_weight,
+            stability_weight=self.connection_config.stability_weight,
+        )
+        logger.debug(f"Initialized health tracking for connection to peer {peer_id}")
+
+    def cleanup_connection_health(self, peer_id: ID, connection: INetConn) -> None:
+        """Clean up health tracking for a closed connection."""
+        if not self._is_health_monitoring_enabled:
+            return
+
+        if peer_id in self.health_data and connection in self.health_data[peer_id]:
+            del self.health_data[peer_id][connection]
+            if not self.health_data[peer_id]:  # Remove peer if no connections left
+                del self.health_data[peer_id]
+            logger.debug(f"Cleaned up health tracking for connection to peer {peer_id}")
+
+    def record_connection_event(
+        self, peer_id: ID, connection: INetConn, event: str
+    ) -> None:
+        """Record a connection lifecycle event."""
+        if (
+            self._is_health_monitoring_enabled
+            and peer_id in self.health_data
+            and connection in self.health_data[peer_id]
+        ):
+            self.health_data[peer_id][connection].add_connection_event(event)
+
+    def record_connection_error(
+        self, peer_id: ID, connection: INetConn, error: str
+    ) -> None:
+        """Record a connection error."""
+        if (
+            self._is_health_monitoring_enabled
+            and peer_id in self.health_data
+            and connection in self.health_data[peer_id]
+        ):
+            self.health_data[peer_id][connection].add_error(error)
+
+    def get_peer_health_summary(self, peer_id: ID) -> dict[str, Any]:
+        """Get health summary for a specific peer."""
+        if not self._is_health_monitoring_enabled:
+            return {}
+
+        if peer_id not in self.health_data:
+            return {}
+
+        connections = self.health_data[peer_id]
+        if not connections:
+            return {}
+
+        # Aggregate health metrics across all connections
+        total_health_score = sum(health.health_score for health in connections.values())
+        avg_latency = sum(health.ping_latency for health in connections.values()) / len(
+            connections
+        )
+        avg_success_rate = sum(
+            health.ping_success_rate for health in connections.values()
+        ) / len(connections)
+
+        return {
+            "peer_id": str(peer_id),
+            "connection_count": len(connections),
+            "average_health_score": total_health_score / len(connections),
+            "average_latency_ms": avg_latency,
+            "average_success_rate": avg_success_rate,
+            "total_streams": sum(
+                health.stream_count for health in connections.values()
+            ),
+            "unhealthy_connections": sum(
+                1 for health in connections.values() if health.health_score < 0.5
+            ),
+            "connections": [
+                health.get_health_summary() for health in connections.values()
+            ],
+        }
+
+    def get_global_health_summary(self) -> dict[str, Any]:
+        """Get global health summary across all peers."""
+        if not self._is_health_monitoring_enabled:
+            return {}
+
+        all_peers = list(self.health_data.keys())
+
+        if not all_peers:
+            return {
+                "total_peers": 0,
+                "total_connections": 0,
+                "average_peer_health": 0.0,
+                "peers_with_issues": 0,
+                "peer_details": [],
+            }
+
+        peer_summaries = [
+            self.get_peer_health_summary(peer_id) for peer_id in all_peers
+        ]
+
+        return {
+            "total_peers": len(all_peers),
+            "total_connections": sum(ps["connection_count"] for ps in peer_summaries),
+            "average_peer_health": sum(
+                ps["average_health_score"] for ps in peer_summaries
+            )
+            / len(all_peers),
+            "peers_with_issues": sum(
+                1 for ps in peer_summaries if ps["unhealthy_connections"] > 0
+            ),
+            "peer_details": peer_summaries,
+        }
+
+    def export_health_metrics(self, format: str = "json") -> str:
+        """Export health metrics in various formats."""
+        if not self._is_health_monitoring_enabled:
+            return "{}" if format == "json" else ""
+
+        summary = self.get_global_health_summary()
+
+        if format == "json":
+            return json.dumps(summary, indent=2)
+        elif format == "prometheus":
+            return self._format_prometheus_metrics(summary)
+        else:
+            raise ValueError(f"Unsupported format: {format}")
+
+    def _format_prometheus_metrics(self, summary: dict[str, Any]) -> str:
+        """Format metrics for Prometheus monitoring."""
+        metrics = []
+
+        metrics.append("# HELP libp2p_peers_total Total number of peers")
+        metrics.append("# TYPE libp2p_peers_total gauge")
+        metrics.append(f"libp2p_peers_total {summary['total_peers']}")
+        metrics.append("")
+
+        metrics.append("# HELP libp2p_connections_total Total number of connections")
+        metrics.append("# TYPE libp2p_connections_total gauge")
+        metrics.append(f"libp2p_connections_total {summary['total_connections']}")
+        metrics.append("")
+
+        metrics.append(
+            "# HELP libp2p_average_peer_health Average health score across all peers"
+        )
+        metrics.append("# TYPE libp2p_average_peer_health gauge")
+        metrics.append(f"libp2p_average_peer_health {summary['average_peer_health']}")
+        metrics.append("")
+
+        metrics.append(
+            "# HELP libp2p_peers_with_issues Number of peers with unhealthy connections"
+        )
+        metrics.append("# TYPE libp2p_peers_with_issues gauge")
+        metrics.append(f"libp2p_peers_with_issues {summary['peers_with_issues']}")
+
+        return "\n".join(metrics)
+
+    async def get_health_monitor_status(self) -> dict[str, Any]:
+        """Get status information about the health monitoring service."""
+        if not self._is_health_monitoring_enabled or self._health_monitor is None:
+            return {"enabled": False}
+
+        status = await self._health_monitor.get_monitoring_status()
+        # Convert to dict for backward compatibility
+        return status.to_dict()
 
     # Notifee
 

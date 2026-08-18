@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from pathlib import Path
 import ssl
@@ -734,6 +735,8 @@ def new_host(
     :param bootstrap_dns_timeout: DNS resolution timeout in seconds per attempt
     :param bootstrap_dns_max_retries: max DNS resolution retries with backoff
     :param connection_config: optional connection configuration for connection manager
+        and health monitoring. When both connection_config and quic_transport_opt
+        are provided, all ConnectionConfig attributes are merged into the QUIC config.
     :param announce_addrs: if set, these replace listen addrs in get_addrs()
     :param transports: explicit list of transport instances to register.  When
         provided, all ``enable_*`` flags and ``listen_addrs``-based detection
@@ -767,6 +770,20 @@ def new_host(
     effective_config: ConnectionConfig | QUICTransportConfig | None
     if enable_quic and quic_transport_opt is not None:
         effective_config = quic_transport_opt
+        # When both connection_config and quic_transport_opt are provided,
+        # merge all ConnectionConfig attributes (including health fields such as
+        # critical_health_threshold) so new ConnectionConfig fields are never missed.
+        if connection_config is not None:
+            connection_config_attrs = [
+                f.name for f in dataclasses.fields(ConnectionConfig)  # type: ignore[arg-type]
+            ]
+            for attr in connection_config_attrs:
+                if hasattr(connection_config, attr):
+                    setattr(quic_transport_opt, attr, getattr(connection_config, attr))
+            logger.debug(
+                "Merged all ConnectionConfig attributes from "
+                "connection_config into QUIC config"
+            )
     else:
         effective_config = connection_config
 
