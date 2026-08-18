@@ -98,6 +98,22 @@ async def _handle_ping(stream: INetStream, peer_id: PeerID) -> bool:
     return True
 
 
+async def perform_ping_roundtrip(
+    stream: INetStream, cancel_scope: trio.CancelScope | None = None
+) -> int:
+    """
+    Perform a single ping round-trip and return RTT in **milliseconds**.
+
+    Public entry point for health probes and other callers that already
+    negotiated ``/ipfs/ping/1.0.0`` on a stream.
+
+    Matches go-libp2p's Result.RTT.Milliseconds() convention.
+    Raises ValueError if the pong payload does not match the sent ping.
+    Raises trio.TooSlowError if the peer takes longer than RESP_TIMEOUT seconds.
+    """
+    return await _ping(stream, cancel_scope=cancel_scope)
+
+
 async def _ping(
     stream: INetStream, cancel_scope: trio.CancelScope | None = None
 ) -> int:
