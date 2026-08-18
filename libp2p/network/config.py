@@ -197,6 +197,12 @@ class ConnectionConfig:
     # Health score threshold below which a connection is considered critically
     # unhealthy and can be replaced even at minimum connections
     critical_health_threshold: float = 0.1  # 0.0 to 1.0
+    # When True, skip ping probes if the connection already has open streams
+    skip_ping_when_streams_open: bool = False
+    # Record successful ping RTT in peerstore LatencyEWMA (seconds)
+    record_ping_latency_in_peerstore: bool = True
+    # When True, close the connection immediately after a failed ping probe
+    abort_connection_on_ping_failure: bool = False
 
     def __post_init__(self) -> None:
         """Validate configuration after initialization."""

@@ -20,6 +20,7 @@ from libp2p.network.health.data_structures import (
     create_default_connection_health,
 )
 from libp2p.network.health.monitor import ConnectionHealthMonitor
+from libp2p.network.health.ping_probe import ConnectionPingResult
 from libp2p.peer.id import ID
 from libp2p.tools.anyio_service import background_trio_service
 
@@ -96,6 +97,8 @@ class MockSwarm:
         self.dial_peer_replacement_called = 0
         self.tag_store = Mock()
         self.tag_store.is_protected = Mock(return_value=False)
+        self.peerstore = Mock()
+        self.peerstore.record_latency = Mock()
 
     @property
     def _is_health_monitoring_enabled(self) -> bool:
@@ -184,8 +187,16 @@ async def test_health_monitor_starts_with_initial_delay() -> None:
 
 
 @pytest.mark.trio
-async def test_check_all_connections() -> None:
+async def test_check_all_connections(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test checking health of all connections."""
+    ping_calls: list[INetConn] = []
+
+    async def fake_ping(conn: INetConn, **kwargs: object) -> ConnectionPingResult:
+        ping_calls.append(conn)
+        return ConnectionPingResult(success=True, rtt_ms=1.0, protocol_supported=True)
+
+    monkeypatch.setattr("libp2p.network.health.monitor.ping_connection", fake_ping)
+
     config = ConnectionConfig(enable_health_monitoring=True, health_warmup_window=0.0)
     swarm = MockSwarm(config)
 
@@ -208,10 +219,7 @@ async def test_check_all_connections() -> None:
     # Check all connections
     await monitor._check_all_connections()
 
-    # Verify new_stream was called for each connection (ping check)
-    assert conn1.new_stream_called
-    assert conn2.new_stream_called
-    assert conn3.new_stream_called
+    assert ping_calls == [conn1, conn2, conn3]
 
 
 @pytest.mark.trio
@@ -259,8 +267,14 @@ async def test_check_connection_health_initializes_missing() -> None:
 
 
 @pytest.mark.trio
-async def test_ping_connection_success() -> None:
-    """Test successful ping operation."""
+async def test_ping_connection_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test successful ping operation delegates to ping probe."""
+
+    async def fake_ping(conn: INetConn, **kwargs: object) -> ConnectionPingResult:
+        return ConnectionPingResult(success=True, rtt_ms=5.0, protocol_supported=True)
+
+    monkeypatch.setattr("libp2p.network.health.monitor.ping_connection", fake_ping)
+
     config = ConnectionConfig(enable_health_monitoring=True, ping_timeout=1.0)
     swarm = MockSwarm(config)
     peer_id = ID(b"peer1")
@@ -268,66 +282,109 @@ async def test_ping_connection_success() -> None:
 
     monitor = ConnectionHealthMonitor(swarm)  # type: ignore[arg-type]
 
-    # Ping the connection
     result = await monitor._ping_connection(conn)
 
-    assert result is True
-    assert conn.new_stream_called
+    assert result.success is True
+    assert result.rtt_ms == 5.0
+    assert result.protocol_supported is True
 
 
 @pytest.mark.trio
-async def test_ping_connection_failure() -> None:
+async def test_ping_connection_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test failed ping operation."""
+
+    async def fake_ping(conn: INetConn, **kwargs: object) -> ConnectionPingResult:
+        return ConnectionPingResult(success=False)
+
+    monkeypatch.setattr("libp2p.network.health.monitor.ping_connection", fake_ping)
+
     config = ConnectionConfig(enable_health_monitoring=True, ping_timeout=1.0)
     swarm = MockSwarm(config)
     peer_id = ID(b"peer1")
-    conn = MockConnection(peer_id, fail_new_stream=True)
+    conn = MockConnection(peer_id)
 
     monitor = ConnectionHealthMonitor(swarm)  # type: ignore[arg-type]
 
-    # Ping the connection (should fail)
     result = await monitor._ping_connection(conn)
 
-    assert result is False
+    assert result.success is False
 
 
 @pytest.mark.trio
-async def test_ping_connection_with_active_streams() -> None:
-    """Test ping skipped when connection has active streams."""
+async def test_ping_connection_with_active_streams_default_pings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """By default, ping runs even when streams are open."""
+    seen_skip: list[bool] = []
+
+    async def fake_ping(conn: INetConn, **kwargs: object) -> ConnectionPingResult:
+        seen_skip.append(bool(kwargs.get("skip_when_streams_open")))
+        return ConnectionPingResult(success=True, rtt_ms=3.0, protocol_supported=True)
+
+    monkeypatch.setattr("libp2p.network.health.monitor.ping_connection", fake_ping)
+
     config = ConnectionConfig(enable_health_monitoring=True)
     swarm = MockSwarm(config)
     peer_id = ID(b"peer1")
     conn = MockConnection(peer_id)
-
-    # Add active streams
-    mock_stream = Mock(spec=INetStream)
-    conn.streams.add(mock_stream)
+    conn.streams.add(Mock(spec=INetStream))
 
     monitor = ConnectionHealthMonitor(swarm)  # type: ignore[arg-type]
-
-    # Ping the connection
     result = await monitor._ping_connection(conn)
 
-    # Should succeed without creating new stream
-    assert result is True
-    assert not conn.new_stream_called
+    assert result.success is True
+    assert seen_skip == [False]
 
 
 @pytest.mark.trio
-async def test_ping_connection_timeout() -> None:
+async def test_ping_connection_skip_when_streams_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Legacy skip-if-busy when skip_ping_when_streams_open is enabled."""
+    seen_skip: list[bool] = []
+
+    async def fake_ping(conn: INetConn, **kwargs: object) -> ConnectionPingResult:
+        seen_skip.append(bool(kwargs.get("skip_when_streams_open")))
+        if kwargs.get("skip_when_streams_open"):
+            return ConnectionPingResult(success=True, skipped=True)
+        return ConnectionPingResult(success=True, rtt_ms=3.0, protocol_supported=True)
+
+    monkeypatch.setattr("libp2p.network.health.monitor.ping_connection", fake_ping)
+
+    config = ConnectionConfig(
+        enable_health_monitoring=True, skip_ping_when_streams_open=True
+    )
+    swarm = MockSwarm(config)
+    peer_id = ID(b"peer1")
+    conn = MockConnection(peer_id)
+    conn.streams.add(Mock(spec=INetStream))
+
+    monitor = ConnectionHealthMonitor(swarm)  # type: ignore[arg-type]
+    result = await monitor._ping_connection(conn)
+
+    assert result.skipped is True
+    assert seen_skip == [True]
+
+
+@pytest.mark.trio
+async def test_ping_connection_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test ping timeout handling."""
+
+    async def fake_ping(conn: INetConn, **kwargs: object) -> ConnectionPingResult:
+        return ConnectionPingResult(success=False)
+
+    monkeypatch.setattr("libp2p.network.health.monitor.ping_connection", fake_ping)
+
     config = ConnectionConfig(enable_health_monitoring=True, ping_timeout=0.1)
     swarm = MockSwarm(config)
     peer_id = ID(b"peer1")
-    conn = MockConnection(peer_id, stream_timeout=True)
+    conn = MockConnection(peer_id)
 
     monitor = ConnectionHealthMonitor(swarm)  # type: ignore[arg-type]
 
-    # Ping the connection (should timeout)
-    with trio.fail_after(1.0):  # Overall timeout
-        result = await monitor._ping_connection(conn)
+    result = await monitor._ping_connection(conn)
 
-    assert result is False
+    assert result.success is False
 
 
 @pytest.mark.trio
@@ -714,8 +771,16 @@ async def test_has_health_data() -> None:
 
 
 @pytest.mark.trio
-async def test_health_check_updates_metrics() -> None:
+async def test_health_check_updates_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Test health check updates connection metrics correctly."""
+
+    async def fake_ping(conn: INetConn, **kwargs: object) -> ConnectionPingResult:
+        return ConnectionPingResult(success=True, rtt_ms=12.5, protocol_supported=True)
+
+    monkeypatch.setattr("libp2p.network.health.monitor.ping_connection", fake_ping)
+
     config = ConnectionConfig(
         enable_health_monitoring=True,
         health_warmup_window=0.0,  # Disable warmup for test
@@ -730,19 +795,46 @@ async def test_health_check_updates_metrics() -> None:
 
     monitor = ConnectionHealthMonitor(swarm)  # type: ignore[arg-type]
 
-    # Get initial health state
     health = swarm.health_data[peer_id][conn]
     initial_last_ping = health.last_ping
 
-    # Small delay to ensure timestamp changes
     await trio.sleep(0.01)
 
-    # Perform health check
     await monitor._check_connection_health(peer_id, conn)
 
-    # Verify metrics updated
     assert health.last_ping > initial_last_ping
-    assert health.ping_latency >= 0
+    assert health.ping_latency == 12.5
+    swarm.peerstore.record_latency.assert_called_once_with(peer_id, 12.5 / 1000.0)
+
+
+@pytest.mark.trio
+async def test_abort_connection_on_ping_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Failed ping closes connection when abort_connection_on_ping_failure is set."""
+
+    async def fake_ping(conn: INetConn, **kwargs: object) -> ConnectionPingResult:
+        return ConnectionPingResult(success=False)
+
+    monkeypatch.setattr("libp2p.network.health.monitor.ping_connection", fake_ping)
+
+    config = ConnectionConfig(
+        enable_health_monitoring=True,
+        health_warmup_window=0.0,
+        abort_connection_on_ping_failure=True,
+    )
+    swarm = MockSwarm(config)
+    peer_id = ID(b"peer1")
+    conn = MockConnection(peer_id)
+    swarm.connections[peer_id] = [conn]
+    swarm.initialize_connection_health(peer_id, conn)
+
+    monitor = ConnectionHealthMonitor(swarm)  # type: ignore[arg-type]
+    await monitor._check_connection_health(peer_id, conn)
+
+    assert conn.close_called
+    assert conn not in swarm.connections[peer_id]
+    assert swarm.cleanup_connection_health_called == 1
 
 
 if __name__ == "__main__":

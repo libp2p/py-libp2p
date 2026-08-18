@@ -29,6 +29,22 @@ def test_parser_defaults() -> None:
     args = build_parser().parse_args([])
     assert args.peers == 25
     assert args.scenario == "all"
+    assert args.gui == "none"
+    assert args.gui_port == 8765
+
+
+def test_parser_gui_options() -> None:
+    args = build_parser().parse_args(["--gui", "web", "--gui-port", "9000"])
+    assert args.gui == "web"
+    assert args.gui_port == 9000
+
+
+def test_health_view_imports() -> None:
+    from examples.health_monitoring import health_view, tui, web_gui
+
+    assert callable(health_view.build_peer_table)
+    assert callable(tui.run_health_tui)
+    assert callable(web_gui.run_health_web)
 
 
 @pytest.mark.trio

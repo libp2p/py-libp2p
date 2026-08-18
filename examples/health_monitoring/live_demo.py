@@ -64,6 +64,8 @@ class DemoOptions:
     streams_per_peer: int = 3
     strategy: str = "health_based"
     connect_limit: int = 8
+    gui: str = "none"
+    gui_port: int = 8765
 
 
 def parse_scenarios(raw: str | Sequence[str]) -> tuple[str, ...]:
@@ -422,6 +424,8 @@ async def run_live_demo(
     streams_per_peer: int = 3,
     strategy: str = "health_based",
     connect_limit: int = 8,
+    gui: str = "none",
+    gui_port: int = 8765,
 ) -> dict[str, Any]:
     """
     Run the live multi-peer health demo.
@@ -441,6 +445,8 @@ async def run_live_demo(
         streams_per_peer=streams_per_peer,
         strategy=strategy,
         connect_limit=connect_limit,
+        gui=gui,
+        gui_port=gui_port,
     )
     leaf_count = peers - 1
     protect_n, churn_n = _clamp_counts(options, leaf_count)
@@ -482,6 +488,22 @@ async def run_live_demo(
         swarm = hub.get_network()
         print(f"  Connected. Hub connections: {swarm.get_total_connections()}")
         result["total_connections"] = swarm.get_total_connections()
+
+        if options.gui != "none":
+            print(f"\n  Entering GUI mode ({options.gui})...")
+            await trio.sleep(options.wait_for_monitor)
+            result["network_health"] = hub.get_network_health_summary()
+            result["monitor_status"] = await hub.get_health_monitor_status()
+            if options.gui == "tui":
+                from examples.health_monitoring.tui import run_health_tui
+
+                await run_health_tui(hub)
+            elif options.gui == "web":
+                from examples.health_monitoring.web_gui import run_health_web
+
+                await run_health_web(hub, port=options.gui_port)
+            result["json_metrics"] = hub.export_health_metrics("json")
+            return result
 
         remaining_leaves: list[IHost] = list(leaves)
         protected_leaves: list[IHost] = []
@@ -545,7 +567,10 @@ async def run_live_demo(
         print("    1. Health monitoring is off by default; enable via ConnectionConfig")
         print("    2. Scores update after the background monitor pings idle conns")
         print("    3. Protect() is ConnMgr importance — health must not fight it")
-        print("    4. Default LB 'best' matches go-libp2p; health_based is Python-only")
+        print(
+            "    4. Default LB 'best' is direct/stream heuristic; "
+            "health_based uses scores"
+        )
         print()
 
     return result
@@ -622,6 +647,18 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print available scenarios and exit",
     )
+    parser.add_argument(
+        "--gui",
+        choices=("none", "tui", "web"),
+        default="none",
+        help="Live health view: terminal (tui) or local web server (web)",
+    )
+    parser.add_argument(
+        "--gui-port",
+        type=int,
+        default=8765,
+        help="Port for --gui web (default: 8765)",
+    )
     return parser
 
 
@@ -644,6 +681,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             churn_count=args.churn_count,
             streams_per_peer=args.streams_per_peer,
             strategy=args.strategy,
+            gui=args.gui,
+            gui_port=args.gui_port,
         )
 
     trio.run(_run)
