@@ -7,7 +7,7 @@ This module tests core functionality of the Kademlia DHT including:
 - Content provider advertisement and discovery (provide, find_providers)
 """
 
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 import hashlib
 import logging
 import os
@@ -122,6 +122,69 @@ async def wait_for_peer_record(
     raise TimeoutError("Unreachable code path")
 
 
+async def wait_until_routing_tables_linked(
+    dht_a: KadDHT,
+    dht_b: KadDHT,
+    timeout: float = TEST_TIMEOUT,
+    delay: float = 0.05,
+) -> None:
+    """
+    Wait until both DHT routing tables contain the other peer.
+
+    Re-attempts linkage with ``skip_server_mode_check=True`` so test setup does
+    not depend on Identify finishing after KAD handler registration.
+    """
+    peer_a_info = PeerInfo(dht_a.host.get_id(), dht_a.host.get_addrs())
+    peer_b_info = PeerInfo(dht_b.host.get_id(), dht_b.host.get_addrs())
+    start_time = trio.current_time()
+
+    while True:
+        if dht_a.routing_table.peer_in_table(peer_b_info.peer_id) and (
+            dht_b.routing_table.peer_in_table(peer_a_info.peer_id)
+        ):
+            return
+
+        await dht_a.routing_table.add_peer(peer_b_info, skip_server_mode_check=True)
+        await dht_b.routing_table.add_peer(peer_a_info, skip_server_mode_check=True)
+
+        if trio.current_time() - start_time > timeout:
+            raise TimeoutError(
+                "Routing tables did not link within "
+                f"{timeout} seconds. "
+                f"Node A peers: {dht_a.routing_table.get_peer_ids()} "
+                f"Node B peers: {dht_b.routing_table.get_peer_ids()}"
+            )
+
+        await trio.sleep(delay)
+
+    raise TimeoutError("Unreachable code path")
+
+
+async def wait_until(
+    predicate: Callable[[], bool | Awaitable[bool]],
+    timeout: float = TEST_TIMEOUT,
+    delay: float = 0.05,
+) -> None:
+    """
+    Poll until a predicate returns a truthy value.
+
+    This keeps DHT tests event-driven instead of relying on propagation sleeps.
+    """
+    start_time = trio.current_time()
+    while True:
+        result = predicate()
+        if isinstance(result, bool):
+            if result:
+                return
+        elif await result:
+            return
+        if trio.current_time() - start_time > timeout:
+            raise TimeoutError(f"Condition not met within {timeout} seconds")
+        await trio.sleep(delay)
+
+    raise TimeoutError("Unreachable code path")
+
+
 class BlankValidator(Validator):
     def validate(self, key: str, value: bytes) -> None:
         return
@@ -158,27 +221,7 @@ async def dht_pair(security_protocol):
 
         # Start both DHT services
         async with background_trio_service(dht_a), background_trio_service(dht_b):
-            # Allow time for bootstrap to complete and connections to establish
-            await trio.sleep(0.1)
-
-            # Force a connection between nodes to ensure routing table is populated
-            # This eliminates the race condition by ensuring both nodes
-            # know about each other
-            try:
-                await dht_a.find_peer(dht_b.host.get_id())
-                await dht_b.find_peer(dht_a.host.get_id())
-            except Exception as e:
-                logger.warning(f"Initial peer discovery failed: {e}")
-                # Continue anyway, the retry mechanism will handle it
-
-            # Verify both nodes know about each other in their routing tables
-            # This ensures the test won't have race conditions
-            assert dht_a.routing_table.peer_in_table(dht_b.host.get_id()), (
-                "Node A should know about Node B"
-            )
-            assert dht_b.routing_table.peer_in_table(dht_a.host.get_id()), (
-                "Node B should know about Node A"
-            )
+            await wait_until_routing_tables_linked(dht_a, dht_b)
 
             logger.debug(
                 "After bootstrap: Node A peers: %s", dht_a.routing_table.get_peer_ids()
@@ -327,8 +370,7 @@ async def test_put_and_get_value(dht_pair: tuple[KadDHT, KadDHT]):
     logger.debug("Put value with key %s...", key[:10])
     logger.debug("Node A value store: %s", dht_a.value_store.store)
 
-    # # Allow more time for the value to propagate
-    await trio.sleep(0.5)
+    await wait_until(lambda: dht_b.value_store.get(key_bytes) is not None)
 
     # # Try direct connection between nodes to ensure they're properly linked
     logger.debug("Node A peers: %s", dht_a.routing_table.get_peer_ids())
@@ -435,24 +477,17 @@ async def test_provide_and_find_providers(dht_pair: tuple[KadDHT, KadDHT]):
     assert record_a.seq == record_a_add_prov.seq
     assert record_b.seq == record_b_add_prov.seq
 
-    # Allow time for the provider record to propagate
-    await trio.sleep(0.5)
-
-    # Find providers using the second node with retry logic for CI robustness
-    # Retry to handle potential race conditions where provider hasn't propagated yet
+    # Find providers using the second node with a bounded condition wait.
     with trio.fail_after(TEST_TIMEOUT):
+        providers: list[PeerInfo] = []
 
-        async def find_and_verify_providers() -> list[PeerInfo]:
+        async def provider_is_visible() -> bool:
+            nonlocal providers
             providers = await dht_b.find_providers(content_id)
-            # Verify that we found the first node as a provider
-            assert providers, "No providers found"
-            assert any(p.peer_id == dht_a.local_peer_id for p in providers), (
-                "Expected provider not found"
-            )
-            return providers
+            return any(p.peer_id == dht_a.local_peer_id for p in providers)
 
-        # Retry with verification to handle race conditions
-        await retry(find_and_verify_providers(), retries=5, delay=0.3)
+        await wait_until(provider_is_visible)
+        assert providers, "No providers found"
 
     # These are the records in each peer after the find_provider execution
     envelope_a_find_prov = dht_a.host.get_peerstore().get_peer_record(
