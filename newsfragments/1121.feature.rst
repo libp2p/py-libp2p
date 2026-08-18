@@ -1,0 +1,11 @@
+Add optional connection health monitoring and load-balancing strategies.
+
+This is a Python-local, opt-in QoS extension inspired by go-libp2p ConnMgr
+(Protect/tags), peerstore LatencyEWMA, and swarm best-connection selection.
+go-libp2p does not provide a proactive health monitor or auto-replace of
+unhealthy connections; those behaviors are disabled by default here.
+
+When enabled, hosts can track per-connection health metrics, run periodic
+checks, select connections with ``best`` / ``health_based`` / ``latency_based``
+strategies, and replace unhealthy connections only after a successful
+replacement dial (skipping ConnMgr-protected peers).

@@ -14,6 +14,10 @@ QUERY_TIMEOUT = 10
 
 TTL = DEFAULT_TTL = 24 * 60 * 60  # 24 hours in seconds
 
+# Cap on varint-prefixed DHT RPC payloads. Reject larger claimed lengths before
+# reading to avoid remote memory exhaustion (GHSA-xqvc-92cf-94j4).
+MAX_DHT_MESSAGE_SIZE = 4 * 1024 * 1024  # 4 MiB
+
 # Default parameters
 BUCKET_SIZE = 20  # k in the Kademlia paper
 MAXIMUM_BUCKETS = 256  # Maximum number of buckets (for 256-bit keys)

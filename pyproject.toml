@@ -86,6 +86,7 @@ tls-demo = "examples.tls.example_tls_server:main"
 tls-client-demo = "examples.tls.example_tls_client:main"
 path-handling = "examples.path_handling.path_handling_demo:main"
 metrics-demo = "examples.metrics.runner:cli"
+health-monitoring-demo = "examples.health_monitoring.live_demo:main"
 oso-health-report = "libp2p.observability.oso.cli:main"
 filecoin-dx = "libp2p.filecoin.cli:main"
 filecoin-connect-demo = "examples.filecoin.filecoin_connect_demo:main"
@@ -337,6 +338,7 @@ project_excludes = [
     "./tests/core/transport/webrtc",
     "./libp2p/transport/webrtc/_asyncio_bridge.py",
     "./libp2p/transport/webrtc/_aiortc_helpers.py",
+    "./libp2p/transport/webrtc/_udp_mux.py",
     "./libp2p/transport/webrtc/certificate.py",
     "./libp2p/transport/webrtc/transport.py",
     "./libp2p/transport/webrtc/listener.py",

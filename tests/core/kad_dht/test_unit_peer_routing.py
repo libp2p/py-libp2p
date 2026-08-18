@@ -25,6 +25,7 @@ import varint
 from libp2p.crypto.secp256k1 import (
     create_new_key_pair,
 )
+from libp2p.kad_dht.common import MAX_DHT_MESSAGE_SIZE
 from libp2p.kad_dht.pb.kademlia_pb2 import (
     Message,
 )
@@ -454,6 +455,30 @@ class TestPeerRouting:
 
         assert result == []
         mock_stream.close.assert_called_once()
+
+    @pytest.mark.trio
+    async def test_query_peer_for_closest_rejects_oversized_response(
+        self, peer_routing, mock_host, sample_peer_info
+    ):
+        """Oversized response length must fail closed without allocating the body."""
+        target_key = b"target_key"
+
+        mock_stream = AsyncMock()
+        claimed = MAX_DHT_MESSAGE_SIZE + 1
+        varint_bytes = varint.encode(claimed)
+        mock_stream.read.side_effect = [bytes([b]) for b in varint_bytes] + [
+            b"SHOULD_NOT_BE_READ"
+        ]
+        mock_host.new_stream.return_value = mock_stream
+        mock_host.get_peerstore().addrs.return_value = [sample_peer_info.addrs[0]]
+
+        result = await peer_routing._query_peer_for_closest(
+            sample_peer_info.peer_id, target_key
+        )
+
+        assert result == []
+        mock_stream.close.assert_called_once()
+        assert mock_stream.read.await_count == len(varint_bytes)
 
     @pytest.mark.trio
     async def test_refresh_routing_table(self, peer_routing, mock_host):
