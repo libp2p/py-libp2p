@@ -584,7 +584,13 @@ class TestAttachMuxedConnection:
             assert mux._by_ufrag == {}
             assert mux._by_addr == {}
         finally:
+            # Bound cleanup: a hung close() after a primary failure would
+            # otherwise outlive asyncio.wait_for and be killed by pytest-timeout
+            # (reported as an xdist "worker crashed", hiding the real error).
             for pc in (pc_s, pc_c):
                 if pc is not None:
-                    await pc.close()
-            await mux.close()
+                    try:
+                        await asyncio.wait_for(pc.close(), 10)
+                    except Exception:
+                        pass
+            await asyncio.wait_for(mux.close(), 10)
