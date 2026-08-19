@@ -226,3 +226,55 @@ class TestHappyPath:
         finally:
             server.close()
             await server.wait_closed()
+
+
+# ---------------------------------------------------------------------------
+# get_remote_fingerprint
+# ---------------------------------------------------------------------------
+
+
+class TestGetRemoteFingerprint:
+    def test_matches_peer_certificate_after_dtls(self) -> None:
+        asyncio.run(self._run())
+
+    async def _run(self) -> None:
+        from aiortc import RTCSessionDescription
+
+        from libp2p.transport.webrtc._aiortc_helpers import (
+            create_noise_channel,
+            create_peer_connection,
+            get_remote_fingerprint,
+            wait_for_connected,
+        )
+        from libp2p.transport.webrtc.certificate import WebRTCCertificate
+
+        cert_a = WebRTCCertificate.from_aiortc()
+        cert_b = WebRTCCertificate.from_aiortc()
+        pc_a = await create_peer_connection(cert_a._rtc_certificate, ice_servers=[])
+        pc_b = await create_peer_connection(cert_b._rtc_certificate, ice_servers=[])
+        try:
+            with pytest.raises(ValueError):
+                get_remote_fingerprint(pc_a)  # no SCTP/DTLS yet
+
+            await create_noise_channel(pc_a)
+            await create_noise_channel(pc_b)
+            offer = await pc_a.createOffer()
+            await pc_a.setLocalDescription(offer)
+            await pc_b.setRemoteDescription(
+                RTCSessionDescription(sdp=pc_a.localDescription.sdp, type="offer")
+            )
+            answer = await pc_b.createAnswer()
+            await pc_b.setLocalDescription(answer)
+            await pc_a.setRemoteDescription(
+                RTCSessionDescription(sdp=pc_b.localDescription.sdp, type="answer")
+            )
+            await asyncio.gather(
+                wait_for_connected(pc_a, timeout=15.0),
+                wait_for_connected(pc_b, timeout=15.0),
+            )
+
+            assert get_remote_fingerprint(pc_a) == cert_b.fingerprint
+            assert get_remote_fingerprint(pc_b) == cert_a.fingerprint
+        finally:
+            await pc_a.close()
+            await pc_b.close()
