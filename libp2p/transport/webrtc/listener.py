@@ -4,8 +4,16 @@ WebRTC Direct listener.
 Runs a lightweight HTTP signaling server on TCP (same port number as the
 WebRTC UDP endpoint) that accepts SDP offers and returns answers.  After
 the SDP exchange each incoming connection completes ICE/DTLS, a Noise XX
-handshake over data-channel 0, and then hands the fully-authenticated
-:class:`WebRTCConnection` to the registered handler.
+handshake over data-channel 0 (the listener is the Noise *initiator*, per
+spec), and then hands the fully-authenticated :class:`WebRTCConnection` to
+the registered handler on the trio side.
+
+Threading model: aiortc runs on the :class:`AsyncioBridge` thread; the Noise
+handshake and the handler run on trio inside a listener-owned nursery
+(started as a system task, like the TCP listener). The asyncio → trio hop is
+``trio.from_thread.run_sync(nursery.start_soon, ...)`` — non-blocking, so
+the asyncio loop keeps servicing the data-channel callbacks the handshake
+needs.
 
 Published multiaddr format::
 
@@ -22,6 +30,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from multiaddr import Multiaddr
+import trio
 
 from libp2p.abc import IListener
 from libp2p.crypto.keys import PrivateKey
@@ -71,6 +80,16 @@ class WebRTCDirectListener(IListener):
         self._signaling_server: asyncio.Server | None = None
         self._bridge: AsyncioBridge | None = None
 
+        # trio side: long-lived nursery for inbound handshakes/handlers.
+        self._trio_token: trio.lowlevel.TrioToken | None = None
+        self._nursery: trio.Nursery | None = None
+        self._nursery_ready = trio.Event()
+        self._nursery_done = trio.Event()
+        # Bound the number of not-yet-authenticated inbound connections.
+        # ponytail: soft cap — updated from both the asyncio and trio threads
+        # (GIL-atomic int ops); use a lock if it ever needs to be exact.
+        self._in_flight = 0
+
     async def listen(self, maddr: Multiaddr) -> None:
         """
         Start listening for incoming WebRTC Direct connections.
@@ -91,6 +110,8 @@ class WebRTCDirectListener(IListener):
             raise WebRTCConnectionError(
                 "WebRTC certificate was not generated via aiortc"
             )
+
+        await self._start_trio_nursery()
 
         from ._aiortc_helpers import run_signaling_server
 
@@ -122,6 +143,30 @@ class WebRTCDirectListener(IListener):
         self._listening_addrs.append(advertised)
         logger.info("WebRTC Direct listener on %s", advertised)
 
+    async def _start_trio_nursery(self) -> None:
+        """
+        Open a listener-owned nursery in a trio system task.
+
+        ``IListener.listen`` takes no nursery, so (like the TCP listener) we
+        spawn a system task that holds one open until :meth:`close`.
+        """
+        if self._nursery is not None:
+            return
+        self._trio_token = trio.lowlevel.current_trio_token()
+
+        async def _run() -> None:
+            try:
+                async with trio.open_nursery() as nursery:
+                    self._nursery = nursery
+                    self._nursery_ready.set()
+                    await trio.sleep_forever()
+            finally:
+                self._nursery = None
+                self._nursery_done.set()
+
+        trio.lowlevel.spawn_system_task(_run)
+        await self._nursery_ready.wait()
+
     def _make_offer_handler(
         self,
         bridge: AsyncioBridge,
@@ -138,17 +183,27 @@ class WebRTCDirectListener(IListener):
                 make_noise_channel_callbacks,
             )
 
-            # Create PC, set remote (offer), create answer.
-            pc = await create_peer_connection(rtc_cert)
-            noise_ch = await create_noise_channel(pc)
-            noise_send, noise_recv, _ = make_noise_channel_callbacks(noise_ch)
+            if self._in_flight >= self._config.max_in_flight_connections:
+                raise WebRTCConnectionError(
+                    "Too many in-flight inbound WebRTC connections"
+                )
+            self._in_flight += 1
 
-            offer = RTCSessionDescription(sdp=offer_sdp, type="offer")
-            await pc.setRemoteDescription(offer)
+            try:
+                # Create PC, set remote (offer), create answer.
+                pc = await create_peer_connection(rtc_cert)
+                noise_ch = await create_noise_channel(pc)
+                noise_send, noise_recv, _ = make_noise_channel_callbacks(noise_ch)
 
-            answer = await pc.createAnswer()
-            await pc.setLocalDescription(answer)
-            answer_sdp = pc.localDescription.sdp
+                offer = RTCSessionDescription(sdp=offer_sdp, type="offer")
+                await pc.setRemoteDescription(offer)
+
+                answer = await pc.createAnswer()
+                await pc.setLocalDescription(answer)
+                answer_sdp = pc.localDescription.sdp
+            except BaseException:
+                self._in_flight -= 1
+                raise
 
             # Spawn background task to complete the connection after ICE.
             asyncio.ensure_future(
@@ -169,15 +224,58 @@ class WebRTCDirectListener(IListener):
         """
         Finish an inbound connection after the SDP answer has been sent.
 
-        Runs on the asyncio thread.  Waits for ICE, runs the Noise
-        handshake (via trio), and hands the connection to the handler.
+        Runs on the asyncio thread: waits for ICE/DTLS, reads the dialer's
+        DTLS fingerprint, then hands off to :meth:`_finish_inbound` on trio
+        without blocking the loop.
         """
         try:
-            from ._aiortc_helpers import wait_for_connected, wire_pc_to_connection
+            from ._aiortc_helpers import get_remote_fingerprint, wait_for_connected
 
-            await wait_for_connected(pc)
+            await wait_for_connected(pc, timeout=self._config.handshake_timeout)
+            dialer_fp = get_remote_fingerprint(pc)
 
-            # Build WebRTCConnection (on trio side via bridge).
+            nursery, token = self._nursery, self._trio_token
+            if self._closed or nursery is None or token is None:
+                raise WebRTCConnectionError("listener closed")
+            trio.from_thread.run_sync(
+                nursery.start_soon,
+                self._finish_inbound,
+                pc,
+                bridge,
+                dialer_fp,
+                noise_send,
+                noise_recv,
+                trio_token=token,
+            )
+        except BaseException:
+            self._in_flight -= 1
+            logger.debug("Failed to complete inbound WebRTC connection", exc_info=True)
+            try:
+                await pc.close()
+            except Exception:
+                pass
+
+    async def _finish_inbound(
+        self,
+        pc: Any,
+        bridge: AsyncioBridge,
+        dialer_fp: bytes,
+        noise_send: Any,
+        noise_recv: Any,
+    ) -> None:
+        """
+        Trio side of an inbound connection: Noise handshake, then handler.
+
+        Must run on trio: :class:`WebRTCConnection` captures the trio token
+        in its constructor, and the Noise pattern code is trio-async.
+        """
+        from libp2p.crypto.x25519 import create_new_key_pair as create_x25519_keypair
+
+        from ._aiortc_helpers import wire_pc_to_connection
+        from .noise_handshake import DataChannelReadWriter, perform_noise_handshake
+
+        conn: WebRTCConnection | None = None
+        try:
             conn = WebRTCConnection(
                 peer_id=ID(b"\x00" * 32),  # updated after Noise
                 bridge=bridge,
@@ -185,18 +283,6 @@ class WebRTCDirectListener(IListener):
                 config=self._config,
             )
             wire_pc_to_connection(pc, conn)
-
-            # Noise handshake must run on the trio side.
-            from libp2p.crypto.x25519 import (
-                create_new_key_pair as create_x25519_keypair,
-            )
-
-            from .noise_handshake import (
-                DataChannelReadWriter,
-                perform_noise_handshake,
-            )
-
-            noise_kp = create_x25519_keypair()
 
             async def _trio_noise_send(data: bytes) -> None:
                 await bridge.run_coro(noise_send(data))
@@ -207,53 +293,45 @@ class WebRTCDirectListener(IListener):
             noise_rw = DataChannelReadWriter(
                 send_cb=_trio_noise_send,
                 recv_cb=_trio_noise_recv,
-                is_initiator=False,
+                is_initiator=True,
             )
-
-            # perform_noise_handshake is a trio function; schedule it
-            # on the trio thread.
-            def _run_noise_and_handler() -> None:
-                # This runs on the trio thread via trio.from_thread.
-                import trio as _trio
-
-                async def _inner() -> None:
-                    authenticated_peer = await perform_noise_handshake(
-                        conn=noise_rw,
-                        local_peer=self._local_peer_id,
-                        libp2p_privkey=self._private_key,
-                        noise_static_key=noise_kp.private_key,
-                        local_fingerprint=self._certificate.fingerprint,
-                        remote_fingerprint=b"\x00" * 32,  # TODO: extract from PC
-                        is_initiator=False,
-                    )
-                    conn.peer_id = authenticated_peer
-                    await conn.start()
-                    logger.info(
-                        "Inbound WebRTC connection from %s",
-                        authenticated_peer,
-                    )
-                    await self._handler(conn)
-
-                _trio.from_thread.run_sync(
-                    lambda: None  # placeholder — full wiring in follow-up
+            with trio.fail_after(self._config.handshake_timeout):
+                # Server = Noise initiator (spec); we do not know the dialer's
+                # peer ID up front, so remote_peer=None.
+                authenticated_peer = await perform_noise_handshake(
+                    conn=noise_rw,
+                    local_peer=self._local_peer_id,
+                    libp2p_privkey=self._private_key,
+                    noise_static_key=create_x25519_keypair().private_key,
+                    dialer_fingerprint=dialer_fp,
+                    server_fingerprint=self._certificate.fingerprint,
+                    is_initiator=True,
+                    remote_peer=None,
                 )
-
-            # For now, log that the inbound connection flow reached this point.
-            # Full trio-side Noise handshake wiring requires a TrioToken and
-            # careful cross-thread coordination that will be completed when
-            # the loopback integration test validates the full path.
-            logger.info(
-                "Inbound WebRTC connection: ICE connected, "
-                "Noise handshake pending (full wiring in integration test)"
-            )
-
-        except Exception:
-            logger.debug(
-                "Failed to complete inbound WebRTC connection",
-                exc_info=True,
-            )
+            conn.peer_id = authenticated_peer
+            await conn.start()
+            self._in_flight -= 1
+            logger.info("Inbound WebRTC connection from %s", authenticated_peer)
+        except BaseException:
+            self._in_flight -= 1
+            logger.debug("Inbound WebRTC handshake failed", exc_info=True)
             try:
-                await pc.close()
+                if conn is not None:
+                    await conn.close()
+                else:
+                    await bridge.run_coro(pc.close())
+            except Exception:
+                pass
+            return
+
+        # The nursery lives in a trio system task: an exception escaping here
+        # would take down the whole trio run, not just this connection.
+        try:
+            await self._handler(conn)
+        except Exception:
+            logger.exception("WebRTC Direct handler failed for %s", conn.peer_id)
+            try:
+                await conn.close()
             except Exception:
                 pass
 
@@ -273,6 +351,10 @@ class WebRTCDirectListener(IListener):
             except Exception:
                 logger.debug("Error closing signaling server", exc_info=True)
             self._signaling_server = None
+
+        if self._nursery is not None:
+            self._nursery.cancel_scope.cancel()
+            await self._nursery_done.wait()
 
         self._listening_addrs.clear()
         logger.debug("WebRTC Direct listener closed")
