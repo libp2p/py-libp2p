@@ -1,7 +1,3 @@
-from collections.abc import (
-    Awaitable,
-    Callable,
-)
 import ipaddress
 import json
 import logging
@@ -53,6 +49,7 @@ from libp2p.peer.id import (
 from libp2p.peer.peerstore import (
     PeerStoreError,
 )
+from libp2p.rcmgr.exceptions import ResourceLimitExceeded
 from libp2p.rcmgr.manager import ResourceManager
 from libp2p.security.pnet.protector import new_protected_conn
 from libp2p.tools.anyio_service import (
@@ -67,6 +64,11 @@ from libp2p.transport.manager import TransportManager
 from libp2p.transport.quic.config import QUICTransportConfig
 from libp2p.transport.upgrader import (
     TransportUpgrader,
+)
+from libp2p.utils.address_validation import (
+    has_public_ipv6,
+    is_public_ipv6_address,
+    is_relay_address,
 )
 from libp2p.utils.multiaddr_utils import (
     extract_ip_from_multiaddr,
@@ -87,8 +89,14 @@ from .exceptions import (
 
 logger = logging.getLogger(__name__)
 
-_HAPPY_EYEBALLS_DELAY = 0.250
-_MAX_PARALLEL_DIALS = 8
+_HAPPY_EYEBALLS_DELAY = (
+    0.250  # 250ms head start for primary transport (matches go-libp2p DialDelay)
+)
+# Global max concurrent in-flight dials
+# (matches go-libp2p DefaultMaxConcurrentDials: 32)
+MAX_CONCURRENT_DIALS = 32
+MAX_ADDRS_PER_PEER = 2  # Top 1-2 addresses per peer (at most 1 per transport class)
+_MAX_PARALLEL_DIALS = 2
 
 
 def create_default_stream_handler(network: INetworkService) -> StreamHandlerFn:
@@ -101,7 +109,9 @@ def create_default_stream_handler(network: INetworkService) -> StreamHandlerFn:
 class _NegativePeerCache:
     """Short-lived cache of peers whose all addresses recently failed."""
 
-    def __init__(self, ttl: float = 300.0, max_size: int = 10000) -> None:
+    # 60s (was 300s): transient failures (temporarily closed port, NAT, gate
+    # reconfiguration) should not blacklist a peer for minutes (Bug 10).
+    def __init__(self, ttl: float = 60.0, max_size: int = 10000) -> None:
         self._cache: dict[str, float] = {}  # peer_id -> expiry timestamp
         self._ttl = ttl
         self._max_size = max_size
@@ -109,6 +119,12 @@ class _NegativePeerCache:
     def mark_failed(self, peer_id: str) -> None:
         if len(self._cache) >= self._max_size:
             self._evict_expired()
+        # If eviction of expired entries did not free a slot (all entries are
+        # still fresh), drop the oldest entry so the cache never exceeds
+        # max_size (Bug 10 hardening).
+        if len(self._cache) >= self._max_size and peer_id not in self._cache:
+            oldest = min(self._cache, key=lambda k: self._cache[k])
+            del self._cache[oldest]
         self._cache[peer_id] = time.monotonic() + self._ttl
 
     def _evict_expired(self) -> None:
@@ -129,6 +145,10 @@ class _NegativePeerCache:
     def evict(self, peer_id: str) -> None:
         """Remove from cache when a peer successfully connects."""
         self._cache.pop(peer_id, None)
+
+    def clear(self) -> None:
+        """Clear the whole cache (e.g. after gate/peerstore reconfiguration)."""
+        self._cache.clear()
 
 
 class Swarm(Service, INetworkService):
@@ -235,8 +255,34 @@ class Swarm(Service, INetworkService):
         self._resource_manager = None
         self._stream_semaphore: trio.Semaphore | None = None
 
+        # Background pruning state (Bug 5): pruning runs fire-and-forget with
+        # a debounce so the dial/accept hot path never blocks on the
+        # O(n log n) sort and the per-connection closes (each close performs
+        # a 100ms sleep in SwarmConn._cleanup).
+        self._last_prune_attempt: float = 0.0
+        self._prune_debounce: float = 1.0
+        self._prune_task_running = False
+
+        # Global Swarm dial limiter matching go-libp2p DefaultMaxConcurrentDials
+        max_dials = getattr(
+            self.connection_config, "max_concurrent_dials", MAX_CONCURRENT_DIALS
+        )
+        self._global_dial_limiter = trio.CapacityLimiter(max_dials)
+
+        # Auto-connect trigger state (Bug 6): when connections drop below the
+        # low watermark we trigger auto-connect immediately (cooldown-limited)
+        # instead of waiting up to auto_connect_interval for the periodic tick.
+        self._last_auto_connect_trigger: float = 0.0
+        self._auto_connect_trigger_min_interval: float = 5.0
+        # Set while the swarm is shutting down; disconnects during close()
+        # must not trigger the auto-connector to dial new peers (Bug 9).
+        self._closing = False
+
         # Metrics
         self.metric_send_channel = metric_send_channel
+
+        # Inbound limiter initialized before connection management
+        self._inbound_limiter: trio.CapacityLimiter = trio.CapacityLimiter(1)
 
         # Initialize connection management components
         self._init_connection_management()
@@ -291,6 +337,26 @@ class Swarm(Service, INetworkService):
         # so record_connection/remove_connection fire automatically on every dial/close.
         self.tag_store = TagStore()
         self.register_notifee(TagStoreNotifee(self.tag_store))
+
+        # Inbound connection limiter — prevents the DHT query flood from overwhelming
+        # the event loop.  939 Kubo nodes connected in 5 minutes (3/sec) means
+        # 3 TLS+Yamux handshakes/sec which saturates the Python event loop at 100% CPU.
+        # Limit inbound slots to (max_connections - min_connections) so outbound
+        # auto-connector connections always have room.
+        # acquire_nowait() is synchronous (no await), so check+acquire is atomic
+        # in Trio's cooperative scheduler — no race condition.
+        _max_inbound = max(
+            1,
+            self.connection_config.max_connections
+            - self.connection_config.min_connections,
+        )
+        self._inbound_limiter = trio.CapacityLimiter(_max_inbound)
+        logger.debug(
+            "Inbound connection cap: %d (max_connections=%d, min_connections=%d)",
+            _max_inbound,
+            self.connection_config.max_connections,
+            self.connection_config.min_connections,
+        )
 
     def set_resource_manager(
         self,
@@ -396,8 +462,10 @@ class Swarm(Service, INetworkService):
             if peer_id is None.
 
         """
+        # Defensive copies so callers cannot mutate the swarm's internal
+        # connection tracking (Bug 13).
         if peer_id is not None:
-            return self.connections.get(peer_id, [])
+            return list(self.connections.get(peer_id, []))
 
         # Return all connections from all peers
         all_conns = []
@@ -424,10 +492,11 @@ class Swarm(Service, INetworkService):
         Returns
         -------
         dict[ID, list[INetConn]]
-            The complete mapping of peer IDs to their connection lists.
+            The complete mapping of peer IDs to their connection lists
+            (defensive copy — mutation does not affect internal state, Bug 13).
 
         """
-        return self.connections.copy()
+        return {peer_id: list(conns) for peer_id, conns in self.connections.items()}
 
     def get_connection(self, peer_id: ID) -> INetConn | None:
         """
@@ -600,6 +669,15 @@ class Swarm(Service, INetworkService):
         """
         return self.tag_store.is_protected(peer_id, tag)
 
+    def unblock_peer(self, peer_id: ID) -> None:
+        """
+        Remove a peer from the negative cache so it can be dialed again.
+
+        Useful when a peer's addresses change or a transient failure caused
+        the peer to be temporarily blocked (Bug 10).
+        """
+        self._negative_peer_cache.evict(str(peer_id))
+
     def get_conn_mgr_info(self) -> CMInfo:
         """
         Return a unified snapshot of connection manager state.
@@ -687,7 +765,7 @@ class Swarm(Service, INetworkService):
 
             # Filter addresses through connection gate (InterceptAddrDial)
             gate = self.connection_gate
-            allowed_addrs = []
+            allowed_addrs: list[Multiaddr] = []
             for addr in addrs:
                 if await gate.is_allowed(addr):
                     allowed_addrs.append(addr)
@@ -708,34 +786,106 @@ class Swarm(Service, INetworkService):
             if public_addrs:
                 allowed_addrs = public_addrs
 
-            from libp2p.utils.address_validation import is_ipv6_available
+            # Skip relay (p2p-circuit) addresses: this node has no relay
+            # transport, so these can never be dialed (mirrors go-libp2p,
+            # which only uses relay addresses when a relay client is
+            # configured).  The QUIC transport cannot even derive a peer id
+            # from a ``/p2p-circuit`` address and wastes CPU failing every
+            # attempt.
+            allowed_addrs = [a for a in allowed_addrs if not is_relay_address(a)]
+            if not allowed_addrs:
+                raise SwarmException(
+                    f"All addresses for peer {peer_id} are unusable "
+                    "(relay-only or blocked by connection gate)"
+                )
 
-            if not is_ipv6_available():
+            # Only dial public IPv6 (and DNS6) addresses when the host actually has
+            # a non-loopback IPv6 interface. Loopback-only IPv6 (``::1``)
+            # does not imply IPv6 routing: on hosts without a public IPv6
+            # address every IPv6 dial to a public peer fails with "Network is
+            # unreachable", burning CPU and churning the auto-connector.
+            # Local loopback / private IPv6 addresses (e.g. ::1) can still be dialed.
+            if not has_public_ipv6():
                 allowed_addrs = [
-                    a for a in allowed_addrs if not str(a).startswith("/ip6/")
+                    a for a in allowed_addrs if not is_public_ipv6_address(a)
                 ]
+                if not allowed_addrs:
+                    raise SwarmException(
+                        f"All addresses for peer {peer_id} require public IPv6 "
+                        "but the host has no public IPv6"
+                    )
+
+            # Filter addresses to only those supported by local transports
+            # (matches go-libp2p addrFilter discarding unsupported multiaddrs)
+            def _is_supported_transport(addr: Multiaddr) -> bool:
+                try:
+                    return (
+                        self.transport_manager.transport_for_dialing(addr) is not None
+                    )
+                except Exception:
+                    return False
+
+            allowed_addrs = [a for a in allowed_addrs if _is_supported_transport(a)]
+            if not allowed_addrs:
+                raise SwarmException(
+                    f"No supported transport found for peer {peer_id} addresses"
+                )
+
+            # Transport Priority Ranking (matches go-libp2p):
+            # QUIC-v1 (0) > WebRTC Direct (1) > TCP (2) > WS (3) > Relay (4)
+            def _transport_priority(addr: Multiaddr) -> int:
+                protos = {p.name for p in addr.protocols()}
+                if "quic-v1" in protos or "quic" in protos:
+                    return 0
+                if "webrtc-direct" in protos or "webrtc" in protos:
+                    return 1
+                if "tcp" in protos and "ws" not in protos and "wss" not in protos:
+                    return 2
+                if "ws" in protos or "wss" in protos:
+                    return 3
+                if "p2p-circuit" in protos:
+                    return 4
+                return 5
+
+            allowed_addrs.sort(key=_transport_priority)
+
+            # Smart Address Selection: pick top 1-2 addrs (at most 1 per class)
+            selected_addrs: list[Multiaddr] = []
+            seen_ranks: set[int] = set()
+            for addr in allowed_addrs:
+                rank = _transport_priority(addr)
+                if rank not in seen_ranks:
+                    seen_ranks.add(rank)
+                    selected_addrs.append(addr)
+                    if len(selected_addrs) >= MAX_ADDRS_PER_PEER:
+                        break
+            if not selected_addrs:
+                selected_addrs = allowed_addrs[:MAX_ADDRS_PER_PEER]
 
             connections = []
             exceptions: list[SwarmException] = []
 
-            # Try allowed addresses using Happy Eyeballs algorithm
+            # Try addresses using Happy Eyeballs with global concurrency limiter
             with trio.CancelScope() as cancel_scope:
                 async with trio.open_nursery() as nursery:
-                    for multiaddr in allowed_addrs[:_MAX_PARALLEL_DIALS]:
+                    for multiaddr in selected_addrs:
                         failed_event = trio.Event()
 
                         async def dial_task(
                             addr: Any = multiaddr, ev: Any = failed_event
                         ) -> None:
                             try:
-                                connection = await self._dial_with_retry(addr, peer_id)
-                                connections.append(connection)
-                                # Limit number of connections per peer
-                                if (
-                                    len(connections)
-                                    >= self.connection_config.max_connections_per_peer
-                                ):
-                                    cancel_scope.cancel()
+                                async with self._global_dial_limiter:
+                                    connection = await self._dial_with_retry(
+                                        addr, peer_id
+                                    )
+                                    connections.append(connection)
+                                    # Limit number of connections per peer
+                                    max_per_peer = (
+                                        self.connection_config.max_connections_per_peer
+                                    )
+                                    if len(connections) >= max_per_peer:
+                                        cancel_scope.cancel()
                             except SwarmException as e:
                                 exceptions.append(e)
                                 logger.debug(
@@ -745,10 +895,15 @@ class Swarm(Service, INetworkService):
                                     exc_info=e,
                                 )
                                 ev.set()
+                            except Exception as e:
+                                logger.debug(
+                                    f"Unexpected exception dialing {addr}: {e}"
+                                )
+                                ev.set()
 
                         nursery.start_soon(dial_task)
 
-                        # Start next dial immediately if this one fails, or after 250ms
+                        # Start fallback dial after 250ms or if primary fails
                         with trio.move_on_after(_HAPPY_EYEBALLS_DELAY):
                             await failed_event.wait()
 
@@ -770,6 +925,20 @@ class Swarm(Service, INetworkService):
                     peer_id=peer_id,
                     num_addrs_tried=len(exceptions),
                 ) from MultiError(exceptions)
+
+            # The happy-eyeballs cancellation is asynchronous: a few extra
+            # dials may have succeeded before it landed.  Cap the returned
+            # connections at max_connections_per_peer and close the excess so
+            # the per-peer limit is never exceeded (Bug 11).
+            max_conns = self.connection_config.max_connections_per_peer
+            if len(connections) > max_conns:
+                excess = connections[max_conns:]
+                connections = connections[:max_conns]
+                for conn in excess:
+                    try:
+                        await conn.close()
+                    except Exception as e:
+                        logger.debug(f"Error closing excess connection: {e}")
 
             self._negative_peer_cache.evict(str(peer_id))
             return connections
@@ -811,6 +980,9 @@ class Swarm(Service, INetworkService):
                         self.peerstore.clear_addrs(peer_id)
                     except Exception:
                         pass
+                    # Addresses changed — lift any negative-cache block so the
+                    # corrected addresses can be tried immediately (Bug 10).
+                    self._negative_peer_cache.evict(str(peer_id))
                     break
 
                 if attempt < self.retry_config.max_retries:
@@ -867,6 +1039,13 @@ class Swarm(Service, INetworkService):
         :raises SwarmException: raised when an error occurs
         :return: network connection
         """
+        # Enforce the global connection limit on outbound dials too.
+        # Previously only the inbound path checked ``max_connections``, so a
+        # node could exceed its configured cap purely through outbound dials
+        # (concurrent application dials, DHT queries, auto-connector).
+        if len(self.get_connections()) >= self.connection_config.max_connections:
+            raise SwarmException("Maximum connections limit reached")
+
         # For the dial to be successful, there needs to be a registered transport
         # that can dial the provided `maddr`
         transport = self.transport_manager.transport_for_dialing(addr)
@@ -949,7 +1128,21 @@ class Swarm(Service, INetworkService):
                 type(transport).__name__,
             )
             try:
-                swarm_conn = await self.add_conn(raw_conn, direction="outbound")
+                # The transport handshake has already completed successfully
+                # (peer cert verified).  An enclosing dial deadline (e.g. the
+                # auto-connector's dial_timeout) must NOT tear this
+                # connection down: the deadline can fire while add_conn() is
+                # still registering the connection, cancelling
+                # event_started.wait() and closing a healthy connection — the
+                # swarm then never accumulates connections and peers decay to
+                # 0.  Shield the registration from outer cancellation and
+                # bound it with the upgrade timeout so a wedged connection
+                # cannot hang the caller forever.
+                with trio.CancelScope(shield=True):  # type: ignore[call-arg]
+                    with trio.fail_after(
+                        self.connection_config.outbound_upgrade_timeout
+                    ):
+                        swarm_conn = await self.add_conn(raw_conn, direction="outbound")
 
                 # Release pre-upgrade scope now that we have a real scope in add_conn
                 try:
@@ -1623,6 +1816,37 @@ class Swarm(Service, INetworkService):
         # Metric event for inbound connection failure
         failure_event = SwarmEvent()
 
+        # --- Inbound connection cap (race-condition free) ---
+        # acquire_nowait() is synchronous: check+acquire with no intervening
+        # checkpoint so multiple concurrent coroutines cannot all pass.
+        # Releases automatically in the finally block when the connection ends.
+        try:
+            self._inbound_limiter.acquire_nowait()
+        except trio.WouldBlock:
+            logger.debug(
+                "Inbound connection cap (%d) reached; rejecting new inbound connection",
+                int(self._inbound_limiter.total_tokens),
+            )
+            try:
+                await read_write_closer.close()
+            except Exception:
+                pass
+            return
+
+        try:
+            await self._do_handle_inbound_connection(
+                read_write_closer, maddr, failure_event
+            )
+        finally:
+            self._inbound_limiter.release()
+
+    async def _do_handle_inbound_connection(
+        self,
+        read_write_closer: ReadWriteCloser,
+        maddr: Multiaddr,
+        failure_event: "SwarmEvent",
+    ) -> None:
+        """Inner inbound-connection handler, called after acquiring the inbound slot."""
         # Enforce connection gate on inbound connections.
         remote_maddr = self._build_remote_multiaddr(read_write_closer)
         logger.debug(
@@ -1700,7 +1924,10 @@ class Swarm(Service, INetworkService):
         :raises SwarmException: raised when security or muxer upgrade fails
         :return: network connection with security and multiplexing established
         """
-        # Check global connection limit
+        # Fast-fail check on the global connection limit: avoid doing the
+        # expensive security+muxer handshake when we are already at capacity.
+        # NOTE: this is a best-effort fast path — the race-free, authoritative
+        # enforcement happens at registration time in add_conn() (Bug 8).
         total_connections = len(self.get_connections())
         if total_connections >= self.connection_config.max_connections:
             logger.debug(
@@ -1777,11 +2004,14 @@ class Swarm(Service, INetworkService):
                 try:
                     secured_conn = await self.upgrader.upgrade_security(raw_conn, False)
                 except SecurityUpgradeFailure as exc:
-                    logger.error(
+                    # Expected churn on a public node: peers dial in that do
+                    # not share a security protocol (or drop mid-handshake).
+                    # Kubo logs these at debug; a full traceback per failure
+                    # at ERROR burned a CPU core (60+ tracebacks/sec).
+                    logger.debug(
                         "failed to upgrade security for peer at %s: %s",
                         maddr,
                         exc,
-                        exc_info=True,
                     )
                     await _cleanup_inbound_upgrade()
                     raise SwarmException(
@@ -1899,37 +2129,51 @@ class Swarm(Service, INetworkService):
     async def close(self) -> None:
         """
         Close the swarm instance and cleanup resources.
+
+        Active connections are closed explicitly (best-effort) BEFORE the
+        manager is stopped, so resource scopes are released and sockets are
+        torn down deterministically instead of relying on task cancellation
+        (Bug 9).
         """
-        # Check if manager exists before trying to stop it
+        self._closing = True
+
+        # Close all connections manually first.
+        if hasattr(self, "connections"):
+            for peer_id, conns in list(self.connections.items()):
+                for conn in list(conns):
+                    try:
+                        await conn.close()
+                    except Exception as e:
+                        logger.warning(f"Error closing connection to {peer_id}: {e}")
+
+            # Clear connection tracking dictionary
+            self.connections.clear()
+
+        # Close all listeners
+        if hasattr(self, "listeners"):
+            for maddr_str, listener in list(self.listeners.items()):
+                await listener.close()
+                # Notify about listener closure
+                try:
+                    multiaddr = Multiaddr(maddr_str)
+                    await self.notify_listen_close(multiaddr)
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to notify listen_close for {maddr_str}: {e}"
+                    )
+            self.listeners.clear()
+
+        # Close all transports
+        try:
+            await self.transport_manager.close_all()
+        except Exception as e:
+            logger.warning(f"Error closing transports: {e}")
+
+        # Check if manager exists before trying to stop it.  Stopping the
+        # manager cancels the remaining background tasks (muxed connection
+        # monitors, auto-connector, etc.).
         if hasattr(self, "_manager") and self._manager is not None:
             await self._manager.stop()
-        else:
-            # Perform alternative cleanup if the manager isn't initialized
-            # Close all connections manually
-            if hasattr(self, "connections"):
-                for peer_id, conns in list(self.connections.items()):
-                    for conn in conns:
-                        await conn.close()
-
-                # Clear connection tracking dictionary
-                self.connections.clear()
-
-            # Close all listeners
-            if hasattr(self, "listeners"):
-                for maddr_str, listener in self.listeners.items():
-                    await listener.close()
-                    # Notify about listener closure
-                    try:
-                        multiaddr = Multiaddr(maddr_str)
-                        await self.notify_listen_close(multiaddr)
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to notify listen_close for {maddr_str}: {e}"
-                        )
-                self.listeners.clear()
-
-            # Close all transports
-            await self.transport_manager.close_all()
 
         logger.debug("swarm successfully closed")
 
@@ -1983,6 +2227,120 @@ class Swarm(Service, INetworkService):
             Connection direction: "inbound" or "outbound". Default: "unknown"
 
         """
+        # Deduplication: if this exact muxed connection is already registered
+        # (e.g. concurrent add_conn calls for the same IMuxedConn object),
+        # return the existing SwarmConn immediately.  Doing this BEFORE
+        # acquiring a second resource scope or starting the muxed connection
+        # keeps the dedup non-destructive — the duplicate must never close
+        # the underlying muxed connection, because it is shared with the
+        # existing connection (Bug 3).
+        peer_id = muxed_conn.peer_id
+        if peer_id in self.connections:
+            for existing_conn in self.connections[peer_id]:
+                if existing_conn.muxed_conn == muxed_conn:
+                    logger.debug(f"Connection already exists for peer {peer_id}")
+                    return existing_conn  # type: ignore[return-value]
+
+        # Self-heal the lifecycle tracker before enforcing limits: dead
+        # connections that were torn down mid-registration (rcmgr denial,
+        # upgrade-timeout cancellation) leak their established slot forever,
+        # ratcheting the per-direction caps to their maximum and permanently
+        # wedging the node at 0 peers.  Reconcile the tracker against the
+        # swarm's live connection table — any established entry whose
+        # connection no longer exists is a phantom and is pruned here on
+        # every dial/accept attempt.
+        if self._resource_manager is not None:
+            reconcile_lifecycle = getattr(
+                self._resource_manager, "connection_lifecycle", None
+            )
+            if reconcile_lifecycle is not None:
+                try:
+                    live_ids = {
+                        str(id(sc.muxed_conn))
+                        for peer_conns in self.connections.values()
+                        for sc in peer_conns
+                    }
+                    pruned = reconcile_lifecycle.reconcile_live_connections(live_ids)
+                    if pruned:
+                        logger.warning(
+                            "Lifecycle reconcile pruned %d phantom connection(s)",
+                            pruned,
+                        )
+                except Exception:
+                    logger.debug("Lifecycle reconcile failed", exc_info=True)
+
+        # Enforce the connection lifecycle limits (per-direction, per-peer and
+        # total established connections) that were previously never enforced
+        # (Bug 1).  When the limit is exceeded the connection is rejected
+        # before it is registered.
+        if self._resource_manager is not None:
+            lifecycle = getattr(self._resource_manager, "connection_lifecycle", None)
+            if lifecycle is not None:
+                try:
+                    connection_id = str(id(muxed_conn))
+                    # The lifecycle handlers only use the addresses for
+                    # logging, but build the real remote one best-effort.
+                    remote_maddr = Multiaddr("/ip4/0.0.0.0/tcp/0")
+                    try:
+                        if hasattr(muxed_conn, "get_remote_address"):
+                            remote = muxed_conn.get_remote_address()  # type: ignore[attr-defined]
+                        else:
+                            remote = None
+                        if remote is not None:
+                            host, port = remote
+                            ip = ipaddress.ip_address(host)
+                            proto = (
+                                "ip6"
+                                if isinstance(ip, ipaddress.IPv6Address)
+                                else "ip4"
+                            )
+                            remote_maddr = Multiaddr(f"/{proto}/{host}/tcp/{port}")
+                    except Exception:
+                        pass
+                    if direction == "inbound":
+                        await lifecycle.handle_established_inbound_connection(
+                            connection_id, peer_id, remote_maddr, remote_maddr
+                        )
+                    else:
+                        await lifecycle.handle_established_outbound_connection(
+                            connection_id, peer_id, remote_maddr, "outbound"
+                        )
+                except ResourceLimitExceeded as e:
+                    logger.warning(
+                        "[ADDCONN_DENY] Connection to %s denied by connection "
+                        "limits: %s (tracker counts: outbound=%s inbound=%s "
+                        "total=%s peer=%s)",
+                        peer_id,
+                        e,
+                        getattr(
+                            getattr(lifecycle, "tracker", None),
+                            "get_connection_count",
+                            lambda k: "n/a",
+                        )("established_outbound"),
+                        getattr(
+                            getattr(lifecycle, "tracker", None),
+                            "get_connection_count",
+                            lambda k: "n/a",
+                        )("established_inbound"),
+                        getattr(
+                            getattr(lifecycle, "tracker", None),
+                            "get_connection_count",
+                            lambda k: "n/a",
+                        )("established_total"),
+                        getattr(
+                            getattr(lifecycle, "tracker", None),
+                            "get_peer_connection_count",
+                            lambda k: "n/a",
+                        )(peer_id),
+                    )
+                    try:
+                        await muxed_conn.close()
+                    except Exception:
+                        pass
+                    raise SwarmException(
+                        f"Connection denied by connection limits: {e}"
+                    ) from e
+
         # Apply resource manager checks to ALL connection types (TCP, WebSocket, QUIC)
         conn_scope = getattr(muxed_conn, "_resource_scope", None)
         if self._resource_manager is not None and conn_scope is None:
@@ -1994,6 +2352,32 @@ class Swarm(Service, INetworkService):
                 )
                 if conn_scope is None:
                     # Resource manager denied the connection.
+                    # The lifecycle tracker already counted this connection
+                    # during admission — release its slot so a denied
+                    # connection cannot ratchet the established limit up to
+                    # its cap and wedge the node at 0 peers (Bug: the 127
+                    # RCMGR_DENIED events leaked one established slot each).
+                    try:
+                        _deny_lifecycle = getattr(
+                            self._resource_manager, "connection_lifecycle", None
+                        )
+                        if _deny_lifecycle is not None:
+                            _deny_lifecycle.notify_connection_closed(
+                                str(id(muxed_conn)), muxed_conn.peer_id
+                            )
+                    except Exception:
+                        pass
+                    logger.warning(
+                        "[ADDCONN_DENY] Connection to %s denied by resource "
+                        "manager (rcmgr current_connections=%s max=%s)",
+                        peer_id,
+                        getattr(self._resource_manager, "_current_connections", "n/a"),
+                        getattr(
+                            getattr(self._resource_manager, "limits", None),
+                            "max_connections",
+                            "n/a",
+                        ),
+                    )
                     # Keep the message concise so it fits within the
                     # project's line-length limit.
                     raise SwarmException(
@@ -2087,10 +2471,19 @@ class Swarm(Service, INetworkService):
                 self.connections[peer_id] = []
 
             # Check for duplicate connections by comparing the
-            # underlying muxed connection
+            # underlying muxed connection.  This catches the race where two
+            # concurrent add_conn calls for the same IMuxedConn both passed
+            # the early check above before either registered.
             for existing_conn in self.connections[peer_id]:
                 if existing_conn.muxed_conn == muxed_conn:
                     logger.debug(f"Connection already exists for peer {peer_id}")
+                    # CRITICAL: do NOT close the underlying muxed_conn — it
+                    # is shared with `existing_conn` and closing it would tear
+                    # down the live connection we are about to return.  Mark
+                    # the duplicate as shared so SwarmConn.close() skips
+                    # muxed_conn.close(), then release only the duplicate's
+                    # own resources.
+                    swarm_conn._shared_muxed_conn = True  # type: ignore[attr-defined]
                     await swarm_conn.close()
                     # existing_conn is a SwarmConn since it's stored
                     # in the connections list
@@ -2101,27 +2494,121 @@ class Swarm(Service, INetworkService):
             # Initialize health tracking for the new connection
             self.initialize_connection_health(peer_id, swarm_conn)
 
+            # Enforce the global connection limit at registration time.
+            # The append and this check are contiguous (no awaits between
+            # them), so concurrent upgrades cannot all pass a pre-registration
+            # check and overshoot the cap: the connection that pushes the
+            # count beyond max_connections is closed immediately.  This is
+            # the race-free, authoritative gate for BOTH directions (Bug 8).
+            if len(self.get_connections()) > self.connection_config.max_connections:
+                logger.debug(
+                    "Rejecting connection to %s: max_connections (%s) "
+                    "exceeded at registration",
+                    peer_id,
+                    self.connection_config.max_connections,
+                )
+                self.connections[peer_id].remove(swarm_conn)
+                if not self.connections[peer_id]:
+                    del self.connections[peer_id]
+                await swarm_conn.close()
+                raise SwarmException("Maximum connections limit reached")
+
             # Trim if we exceed max connections per peer
             max_conns = self.connection_config.max_connections_per_peer
             if len(self.connections[peer_id]) > max_conns:
                 self._trim_connections(peer_id)
 
-            # Trigger connection pruning if global limit is exceeded
-            await self.connection_pruner.maybe_prune_connections()
+            # Trigger connection pruning if the global limit is exceeded.
+            # Runs in the background (debounced) so this hot path never blocks
+            # on the sort + closes (Bug 5).
+            self._schedule_prune()
 
             # Call notifiers since event occurred
             await self.notify_connected(swarm_conn)
             return swarm_conn
 
-        except BaseException:
+        except BaseException as exc:
+            import traceback as _tb
+
+            tb_str = "".join(_tb.format_exception(type(exc), exc, exc.__traceback__))
+            logger.warning(
+                "[ADDCONN_FAIL] add_conn failed for peer %s: %r\n%s",
+                getattr(muxed_conn, "peer_id", None),
+                exc,
+                tb_str[-2000:],
+            )
             # swarm_conn is not yet registered in self.connections — close it
-            # explicitly so its resource scope (rcmgr _current_connections slot)
-            # is always released, even under trio.Cancelled.
+            # explicitly so its resource scope (rcmgr _current_connections
+            # slot) and its lifecycle tracker slot are always released.
+            #
+            # This MUST run shielded: the enclosing fail_after upgrade
+            # timeout may already have fired (Cancelled is pending), and an
+            # unshielded await inside close() would immediately re-raise
+            # Cancelled, aborting _cleanup() → remove_conn() and leaking the
+            # lifecycle established slot forever (ratcheting the limit to its
+            # cap and wedging the node at 0 peers).
             try:
-                await swarm_conn.close()
+                with trio.CancelScope(shield=True):  # type: ignore[call-arg]
+                    await swarm_conn.close()
             except Exception:
                 pass
             raise
+
+    def _schedule_auto_connect(self) -> None:
+        """
+        Fire-and-forget auto-connect trigger, cooldown-limited (Bug 6).
+
+        Runs AutoConnector.maybe_connect in a background task so the
+        disconnect path never blocks on dials.  At most one trigger per
+        cooldown window.
+        """
+        # Disconnects during shutdown must not cause new dials.
+        if self._closing:
+            return
+        if getattr(self.auto_connector, "_is_connecting", False):
+            return
+        now = time.monotonic()
+        if (
+            now - self._last_auto_connect_trigger
+            < self._auto_connect_trigger_min_interval
+        ):
+            return
+        self._last_auto_connect_trigger = now
+        try:
+            self.manager.run_task(self.auto_connector.maybe_connect)
+        except Exception:
+            # No running manager — auto-connector is not started either.
+            logger.debug("Failed to schedule auto-connect", exc_info=True)
+
+    def _schedule_prune(self) -> None:
+        """
+        Debounced, fire-and-forget connection pruning.
+
+        Runs ConnectionPruner in a background task instead of blocking the
+        dial/accept path. At most one prune starts per debounce window and
+        at most one prune runs concurrently.
+        """
+        now = time.monotonic()
+        if now - self._last_prune_attempt < self._prune_debounce:
+            return
+        self._last_prune_attempt = now
+        try:
+            self.manager.run_task(self._prune_in_background)
+        except Exception:
+            # No running manager (e.g. swarm not started yet) — pruner is not
+            # started either, so there is nothing to do.
+            logger.debug("Failed to schedule background prune", exc_info=True)
+
+    async def _prune_in_background(self) -> None:
+        if self._prune_task_running:
+            return
+        self._prune_task_running = True
+        try:
+            await self.connection_pruner.maybe_prune_connections()
+        except Exception as e:
+            logger.error("Error in background prune: %s", e, exc_info=True)
+        finally:
+            self._prune_task_running = False
 
     def _build_remote_multiaddr(
         self, read_write_closer: ReadWriteCloser
@@ -2181,25 +2668,77 @@ class Swarm(Service, INetworkService):
 
     def _trim_connections(self, peer_id: ID) -> None:
         """
-        Remove oldest connections when limit is exceeded.
+        Remove connections when the per-peer limit is exceeded.
+
+        Unlike the original implementation (which closed the oldest
+        connections with no safeguards via untracked system tasks), this
+        applies the same safety checks as the global pruner (Bug 4):
+
+        - connections within the grace period are never trimmed
+        - protected peers are never trimmed
+        - connections with the fewest active streams are trimmed first
+        - closes run through the swarm manager (tracked, cancellable)
         """
         connections = self.connections[peer_id]
         if len(connections) <= self.connection_config.max_connections_per_peer:
             return
 
-        # Sort by creation time and remove oldest
-        # For now, just keep the most recent connections
         max_conns = self.connection_config.max_connections_per_peer
-        connections_to_remove = connections[:-max_conns]
+        grace_period = self.connection_config.grace_period
+        now = time.time()
 
-        for conn in connections_to_remove:
-            logger.debug(f"Trimming old connection for peer {peer_id}")
+        # Build a list of trimmable candidates with safety checks.
+        candidates: list[tuple[int, float, INetConn]] = []
+        for conn in connections:
+            # Skip connections within the grace period.
+            created_at = getattr(conn, "_created_at", None)
+            if (
+                isinstance(created_at, (int, float))
+                and (now - created_at) < grace_period
+            ):
+                continue
+            # Skip protected peers.
+            try:
+                if self.tag_store.is_protected(conn.muxed_conn.peer_id):
+                    continue
+            except Exception:
+                pass
+            # Fewest active streams first, then oldest.
+            try:
+                stream_count = len(conn.get_streams())
+            except Exception:
+                stream_count = 0
+            candidates.append((stream_count, float(created_at or 0.0), conn))
+
+        # Sort by (stream count, age) — trim fewest-streams/oldest first.
+        candidates.sort(key=lambda item: (item[0], item[1]))
+        to_trim = candidates[: max(0, len(connections) - max_conns)]
+        trim_ids = {id(conn) for _, _, conn in to_trim}
+
+        for _, _, conn in to_trim:
+            logger.debug(f"Trimming connection for peer {peer_id}")
             self.cleanup_connection_health(peer_id, conn)
-            trio.lowlevel.spawn_system_task(self._close_connection_async, conn)
+            try:
+                self.manager.run_task(self._close_connection_async, conn)
+            except Exception:
+                # No running manager — fall back to a best-effort inline close.
+                logger.debug("Failed to schedule trimmed connection close")
+                try:
+                    background_nursery = self.background_nursery
+                    if background_nursery is not None:
+                        background_nursery.start_soon(
+                            self._close_connection_async, conn
+                        )
+                except Exception:
+                    logger.warning(
+                        "Could not schedule close for trimmed connection",
+                        exc_info=True,
+                    )
 
-        # Keep only the most recent connections
-        max_conns = self.connection_config.max_connections_per_peer
-        self.connections[peer_id] = connections[-max_conns:]
+        # Keep only the connections that were not trimmed.
+        self.connections[peer_id] = [
+            conn for conn in self.connections[peer_id] if id(conn) not in trim_ids
+        ]
 
     async def _close_connection_async(self, connection: INetConn) -> None:
         """Close a connection asynchronously."""
@@ -2224,6 +2763,30 @@ class Swarm(Service, INetworkService):
             ]
             if not self.connections[peer_id]:
                 del self.connections[peer_id]
+
+        # Decrement the connection-lifecycle tracker so per-direction and
+        # per-peer established counts stay in sync (Bug 1).  Safe to call for
+        # connections that were never admitted (no-op).
+        #
+        # NOTE: duplicate wrappers from the add_conn race (Bug 3) share the
+        # same muxed_conn and therefore the same tracker connection_id — the
+        # admission was a set no-op, so their close must NOT decrement, or it
+        # would remove the slot held by the surviving connection.
+        if self._resource_manager is not None:
+            lifecycle = getattr(self._resource_manager, "connection_lifecycle", None)
+            if lifecycle is not None and not getattr(
+                swarm_conn, "_shared_muxed_conn", False
+            ):
+                try:
+                    lifecycle.notify_connection_closed(
+                        str(id(swarm_conn.muxed_conn)), peer_id
+                    )
+                except Exception:
+                    logger.debug(
+                        "Failed to notify connection lifecycle for %s",
+                        peer_id,
+                        exc_info=True,
+                    )
 
     # Health monitoring methods (conditional on health monitoring being enabled)
 
@@ -2423,25 +2986,60 @@ class Swarm(Service, INetworkService):
         """
         self.notifees.append(notifee)
 
-    async def notify_opened_stream(self, stream: INetStream) -> None:
+    def remove_notifee(self, notifee: INotifee) -> None:
+        """Unregister a notifee so it stops receiving network events."""
+        if notifee in self.notifees:
+            self.notifees.remove(notifee)
+
+    async def _notify(self, method: str, *args: Any) -> None:
+        """
+        Fan out a notifee callback to all registered notifees.
+
+        Each notifee runs in its own task with exceptions isolated: a raising
+        notifee can no longer tear down the connection by propagating an error
+        into ``add_conn`` or ``SwarmConn._cleanup`` (Bug 7).  Notifees run
+        concurrently and the nursery awaits them all, so a notifee that blocks
+        forever would still stall the caller — this matches go-libp2p, where
+        notifee callbacks are invoked inline on the event path.
+        """
         async with trio.open_nursery() as nursery:
             for notifee in self.notifees:
-                nursery.start_soon(notifee.opened_stream, self, stream)
+
+                async def _call(
+                    method_name: str = method, n: INotifee = notifee
+                ) -> None:
+                    try:
+                        await getattr(n, method_name)(self, *args)
+                    except Exception:
+                        logger.exception(
+                            "Notifee %s.%s raised", type(n).__name__, method_name
+                        )
+
+                nursery.start_soon(_call)
+
+    async def notify_opened_stream(self, stream: INetStream) -> None:
+        await self._notify("opened_stream", stream)
 
     async def notify_connected(self, conn: INetConn) -> None:
-        async with trio.open_nursery() as nursery:
-            for notifee in self.notifees:
-                nursery.start_soon(notifee.connected, self, conn)
+        await self._notify("connected", conn)
 
     async def notify_disconnected(self, conn: INetConn) -> None:
-        async with trio.open_nursery() as nursery:
-            for notifee in self.notifees:
-                nursery.start_soon(notifee.disconnected, self, conn)
+        # Record the disconnect so the auto-connector backs off from
+        # immediately re-dialing this peer (avoids reconnect loops).
+        try:
+            peer_id = conn.muxed_conn.peer_id
+            self.auto_connector.record_disconnect(peer_id)
+        except Exception:
+            pass
+        # Replenish connections promptly when disconnects drop us below the
+        # low watermark, instead of waiting up to auto_connect_interval for
+        # the periodic tick (Bug 6).  `maybe_connect` is a cheap no-op when
+        # we are at/above the low watermark; the cooldown prevents storms.
+        self._schedule_auto_connect()
+        await self._notify("disconnected", conn)
 
     async def notify_listen(self, multiaddr: Multiaddr) -> None:
-        async with trio.open_nursery() as nursery:
-            for notifee in self.notifees:
-                nursery.start_soon(notifee.listen, self, multiaddr)
+        await self._notify("listen", multiaddr)
 
     async def notify_closed_stream(self, stream: INetStream) -> None:
         # Release RM + semaphore resources exactly once per stream
@@ -2465,20 +3063,10 @@ class Swarm(Service, INetworkService):
                             "failed to release stream semaphore", exc_info=True
                         )
 
-        async with trio.open_nursery() as nursery:
-            for notifee in self.notifees:
-                nursery.start_soon(notifee.closed_stream, self, stream)
+        await self._notify("closed_stream", stream)
 
     async def notify_listen_close(self, multiaddr: Multiaddr) -> None:
-        async with trio.open_nursery() as nursery:
-            for notifee in self.notifees:
-                nursery.start_soon(notifee.listen_close, self, multiaddr)
-
-    # Generic notifier used by NetStream._notify_closed
-    async def notify_all(self, notifier: Callable[[INotifee], Awaitable[None]]) -> None:
-        async with trio.open_nursery() as nursery:
-            for notifee in self.notifees:
-                nursery.start_soon(notifier, notifee)
+        await self._notify("listen_close", multiaddr)
 
     # Backward compatibility properties
     @property

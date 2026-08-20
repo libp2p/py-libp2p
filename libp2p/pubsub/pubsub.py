@@ -122,6 +122,13 @@ _ANNOUNCE_RETRY_MIN_DELAY_MS = 1
 _ANNOUNCE_RETRY_JITTER_MS = 1000
 _ANNOUNCE_RETRY_MAX_ATTEMPTS = 10
 
+# Peer-registration retry policy. The network ``connected`` notifee can fire
+# before the muxer handshake completes, so a one-shot ``new_stream`` may fail;
+# pubsub keeps retrying with capped exponential backoff while the peer remains
+# connected so a peer is never silently left unregistered.
+_PEER_STREAM_BACKOFF_INITIAL = 0.5
+_PEER_STREAM_BACKOFF_MAX = 10.0
+
 logger = logging.getLogger(__name__)
 
 
@@ -456,6 +463,9 @@ class Pubsub(Service, IPubsub):
         self._subscription_events: dict[tuple[ID, str], trio.Event] = {}
         self._pending_announce_retries = set()
         self._replayed_recent_topics = {}
+        # Peers with a background stream-registration retry task already in
+        # flight, so concurrent stream failures cannot pile up duplicate tasks.
+        self._peer_stream_retries_pending: set[ID] = set()
 
         self.event_handle_peer_queue_started = trio.Event()
         self.event_handle_dead_peer_queue_started = trio.Event()
@@ -771,6 +781,28 @@ class Pubsub(Service, IPubsub):
         with trio.fail_after(timeout):
             await event.wait()
 
+    async def ensure_peer_stream(self, peer_id: ID, timeout: float = 15.0) -> bool:
+        """
+        Ensure a pubsub stream with *peer_id* is open (idempotent).
+
+        Useful when the application established the connection out-of-band —
+        e.g. ``connect_peer`` reusing an existing mDNS connection does not fire
+        a fresh ``connected`` notifee, so without this the peer would never be
+        registered with pubsub. Opens the stream and registers the peer with
+        the router, retrying while the peer stays connected until it succeeds
+        or *timeout* seconds elapse.
+
+        :param peer_id: the peer to register with pubsub
+        :param timeout: maximum seconds to keep retrying (default 15.0)
+        :return: True if the peer is registered with pubsub, False otherwise
+        """
+        if peer_id in self.peers:
+            return True
+        if self.is_peer_blacklisted(peer_id):
+            return False
+        await self._handle_new_peer_with_retry(peer_id, timeout)
+        return peer_id in self.peers
+
     async def _handle_new_peer(self, peer_id: ID) -> None:
         # Check if we already have a pubsub stream with this peer to avoid duplicates
         if peer_id in self.peers:
@@ -784,8 +816,14 @@ class Pubsub(Service, IPubsub):
         try:
             stream: INetStream = await self.host.new_stream(peer_id, self.protocols)
         except SwarmException as error:
-            logger.debug("fail to add new peer %s, error %s", peer_id, error)
-            return
+            # The `connected` notifee can fire before the muxer handshake
+            # completes, so a single stream open may legitimately fail. Raise so
+            # callers (e.g. `_handle_new_peer_with_retry`) can retry while the
+            # peer stays connected instead of silently never registering it.
+            logger.debug(
+                "fail to open pubsub stream to peer %s, error %s", peer_id, error
+            )
+            raise
 
         # Build hello packet.
         hello = self.get_hello_packet()
@@ -813,7 +851,7 @@ class Pubsub(Service, IPubsub):
             await stream.write(encode_varint_prefixed(hello.SerializeToString()))
         except StreamClosed:
             logger.debug("Fail to add new peer %s: stream closed", peer_id)
-            return
+            raise
         try:
             self.router.add_peer(peer_id, negotiated_protocol)
         except Exception as error:
@@ -899,12 +937,110 @@ class Pubsub(Service, IPubsub):
         """
         Safely handle new peer with exception handling.
         This wrapper ensures that any exceptions during peer negotiation
-        don't crash the entire pubsub service.
+        don't crash the entire pubsub service. Kept for backward compatibility
+        and tests; the live peer queue now uses ``_handle_new_peer_with_retry``
+        which retries transient failures.
         """
         try:
             await self._handle_new_peer(peer_id)
         except Exception as error:
             logger.info(f"Protocol negotiation failed for peer {peer_id}: {error}")
+
+    async def _handle_new_peer_with_retry(
+        self, peer_id: ID, timeout: float | None = None
+    ) -> None:
+        """
+        Open a pubsub stream to *peer_id*, retrying while it stays connected.
+
+        The network ``connected`` notifee fires as soon as the transport
+        connection is established, which can be before the muxer handshake
+        completes. A single ``new_stream`` attempt at that point frequently
+        fails; if pubsub never retried, the peer would silently never be
+        registered and messages to it would be dropped forever.
+
+        Retries with capped exponential backoff while the peer remains
+        connected (unbounded by design when *timeout* is ``None``, matching
+        go-libp2p's persistent mesh maintenance). Registration is idempotent
+        (``_handle_new_peer`` is a no-op once the peer is in ``self.peers``),
+        so concurrent retry tasks for the same peer are safe. If the peer
+        disconnects we give up — a fresh ``connected`` notifee will restart the
+        process on the next connection.
+
+        :param peer_id: the peer to register with pubsub
+        :param timeout: optional maximum seconds to keep retrying (``None`` for
+            unbounded retries while the peer stays connected)
+        """
+        delay = _PEER_STREAM_BACKOFF_INITIAL
+        deadline = None if timeout is None else trio.current_time() + timeout
+        while True:
+            try:
+                await self._handle_new_peer(peer_id)
+                return
+            except (SwarmException, StreamClosed) as error:
+                if not self._peer_is_connected(peer_id):
+                    logger.debug(
+                        "peer %s is no longer connected; giving up on pubsub "
+                        "stream registration: %s",
+                        peer_id,
+                        error,
+                    )
+                    return
+                if deadline is not None and trio.current_time() >= deadline:
+                    logger.debug(
+                        "timed out registering pubsub stream with peer %s", peer_id
+                    )
+                    return
+                logger.debug(
+                    "failed to open pubsub stream to peer %s (retrying in %.1fs): %s",
+                    peer_id,
+                    delay,
+                    error,
+                )
+                await trio.sleep(delay)
+                delay = min(delay * 2, _PEER_STREAM_BACKOFF_MAX)
+            except Exception as error:
+                # Non-retryable registration failure; do not spin forever.
+                logger.debug("failed to register pubsub peer %s: %s", peer_id, error)
+                return
+
+    def _peer_is_connected(self, peer_id: ID) -> bool:
+        """
+        Return True if the peer currently has an open (non-closed) connection.
+
+        A connection whose muxer handshake has not completed yet
+        (``muxed_conn`` not set) still counts as connected: the retry loop must
+        keep trying during that window instead of giving up.
+        """
+        try:
+            connections = self.host.get_network().get_connections(peer_id)
+        except Exception:
+            return False
+        for conn in connections:
+            muxed_conn = getattr(conn, "muxed_conn", None)
+            if muxed_conn is None or not getattr(muxed_conn, "is_closed", False):
+                return True
+        return False
+
+    def _schedule_peer_stream_retry(self, peer_id: ID) -> None:
+        """
+        Schedule a background stream-registration retry for *peer_id*.
+
+        Ensures at most one retry task per peer is in flight, so concurrent
+        stream failures (multiple connections churning) do not pile up
+        duplicate tasks.
+        """
+        if not self.manager.is_running:
+            return
+        if peer_id in self._peer_stream_retries_pending:
+            return
+        self._peer_stream_retries_pending.add(peer_id)
+        self.manager.run_task(self._peer_stream_retry_task, peer_id)
+
+    async def _peer_stream_retry_task(self, peer_id: ID) -> None:
+        try:
+            await self._handle_new_peer_with_retry(peer_id)
+        finally:
+            self._peer_stream_retries_pending.discard(peer_id)
 
     def _handle_dead_peer(self, peer_id: ID) -> None:
         # Runs before the `peers` check: subscriptions arrive on the peer's
@@ -913,6 +1049,11 @@ class Pubsub(Service, IPubsub):
         self._forget_all_subscriptions(peer_id)
 
         if peer_id not in self.peers:
+            # A stream failed on a peer that never finished registering. If the
+            # peer is still connected, try again; otherwise there is nothing to
+            # clean up.
+            if self._peer_is_connected(peer_id):
+                self._schedule_peer_stream_retry(peer_id)
             return
         del self.peers[peer_id]
 
@@ -921,6 +1062,21 @@ class Pubsub(Service, IPubsub):
             self.peer_queues.pop(peer_id).close()
 
         self.router.remove_peer(peer_id)
+
+        # The pubsub stream died but the peer is still connected — e.g. the
+        # stream was opened on a connection whose muxer handshake failed while
+        # a healthy connection exists (common when mDNS auto-connect races an
+        # explicit dial, producing multiple simultaneous connections).
+        # Re-establish the stream so messaging with this peer does not silently
+        # die.
+        if self._peer_is_connected(peer_id):
+            logger.debug(
+                "peer %s still connected after stream close; re-establishing "
+                "pubsub stream",
+                peer_id,
+            )
+            self._schedule_peer_stream_retry(peer_id)
+            return
 
         logger.debug("removed dead peer %s", peer_id)
 
@@ -952,8 +1108,9 @@ class Pubsub(Service, IPubsub):
         async with self.peer_receive_channel:
             self.event_handle_peer_queue_started.set()
             async for peer_id in self.peer_receive_channel:
-                # Add Peer - wrap in exception handler to prevent service crash
-                self.manager.run_task(self._handle_new_peer_safe, peer_id)
+                # Add Peer - retry while connected so a registration that races
+                # the muxer handshake is not silently dropped.
+                self.manager.run_task(self._handle_new_peer_with_retry, peer_id)
 
     async def handle_dead_peer_queue(self) -> None:
         """
@@ -969,9 +1126,14 @@ class Pubsub(Service, IPubsub):
                 network = self.host.get_network()
                 remaining_connections = network.get_connections(peer_id)
                 if remaining_connections:
-                    # Filter out closed connections
+                    # Filter out closed connections. A connection whose muxer
+                    # handshake has not completed (``muxed_conn`` not set yet)
+                    # counts as active.
                     active_connections = [
-                        c for c in remaining_connections if not c.muxed_conn.is_closed
+                        c
+                        for c in remaining_connections
+                        if getattr(c, "muxed_conn", None) is None
+                        or not getattr(c.muxed_conn, "is_closed", False)
                     ]
                     if active_connections:
                         logger.debug(

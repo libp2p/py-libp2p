@@ -491,6 +491,10 @@ async def test_swarm_listen_multiple_addresses_connectivity(security_protocol):
                             f"Connection from {full_addr} should be established"
                         )
 
+                        # Clean up connection for next interface test
+                        await swarm2.close_peer(peer_info.peer_id)
+                        await trio.sleep(0.05)
+
                     except Exception as e:
                         pytest.fail(
                             f"Failed to establish libp2p connection to {full_addr}: {e}"
