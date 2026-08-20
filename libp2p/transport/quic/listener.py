@@ -41,9 +41,9 @@ from .utils import (
 if TYPE_CHECKING:
     from .transport import QUICTransport
 
-# Library should not call basicConfig
+# Library should not call basicConfig or force a log level — the application
+# controls verbosity (e.g. via LIBP2P_DEBUG or py-ipfs-lite's --debug flag).
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 
 
 class ServerQuicConnection(QuicConnection):
@@ -350,9 +350,8 @@ class QUICListener(IListener):
 
             if not connection_obj and not pending_quic_conn:
                 if is_initial:
-                    pending_quic_conn = await self._handle_new_connection(
-                        data, addr, packet_info
-                    )
+                    await self._handle_new_connection(data, addr, packet_info)
+                    return
                 else:
                     # Try to find connection by address (fallback routing)
                     # This handles the race condition where packets with new
@@ -711,8 +710,9 @@ class QUICListener(IListener):
         try:
             # Feed data to the connection's QUIC instance
             connection._quic.receive_datagram(data, addr, now=time.time())
-            # NOTE: Established connections process events and transmit in their own
-            # event loop. Avoid double-consuming `next_event()` here.
+            connection._signal_activity()
+            await connection._process_quic_events_batched()
+            await connection._transmit()
 
         except Exception as e:
             logger.error(
@@ -991,6 +991,9 @@ class QUICListener(IListener):
         promotion_start = time.time()
 
         quic_key = id(quic_conn)
+        if quic_key in self._handler_invoked_quic_ids:
+            return
+
         pending_cid = self._pending_cid_by_quic_id.get(
             quic_key, destination_connection_id
         )
@@ -1008,6 +1011,8 @@ class QUICListener(IListener):
             raise
 
         async with per_cid_lock:
+            if quic_key in self._handler_invoked_quic_ids:
+                return
             try:
                 connection = self._conn_by_quic_id.get(quic_key)
                 if connection is None:
@@ -1113,7 +1118,10 @@ class QUICListener(IListener):
                     )
                     if quic_key not in self._handler_invoked_quic_ids:
                         self._handler_invoked_quic_ids.add(quic_key)
-                        await self._handler(connection)
+                        if self._nursery:
+                            self._nursery.start_soon(self._handler, connection)
+                        else:
+                            await self._handler(connection)
 
                 except Exception as e:
                     logger.error(f"Error in user callback: {e}")
@@ -1260,6 +1268,7 @@ class QUICListener(IListener):
                 self._listening = True
 
                 self._nursery.start_soon(self._handle_incoming_packets)
+                self._nursery.start_soon(self._periodic_cleanup_loop)
                 logger.info(
                     f"QUIC listener started on {bound_maddr} with connection ID support"
                 )
@@ -1292,6 +1301,7 @@ class QUICListener(IListener):
                         self._listening = True
 
                         inner_nursery.start_soon(self._handle_incoming_packets)
+                        inner_nursery.start_soon(self._periodic_cleanup_loop)
                         logger.info(
                             f"QUIC listener started on {bound_maddr} "
                             "with connection ID support"
@@ -1352,9 +1362,8 @@ class QUICListener(IListener):
                     # Receive UDP packet
                     data, addr = await self._socket.recvfrom(65536)
 
-                    # Process packet asynchronously
-                    if self._nursery:
-                        self._nursery.start_soon(self._process_packet, data, addr)
+                    # Process packet directly in the event loop
+                    await self._process_packet(data, addr)
 
                 except trio.ClosedResourceError:
                     logger.debug("Socket closed, exiting packet handler")
@@ -1367,6 +1376,35 @@ class QUICListener(IListener):
             raise
         finally:
             logger.debug("Enhanced packet handling loop terminated")
+
+    async def _periodic_cleanup_loop(self) -> None:
+        """Periodically clean up stale pending handshakes and tracking state."""
+        try:
+            while self._listening:
+                await trio.sleep(10.0)
+                stale_cids = await self._registry.cleanup_stale_pending(max_age=15.0)
+                async with self._promotion_lock:
+                    if stale_cids:
+                        stale_set = set(stale_cids)
+                        stale_qids = [
+                            qid
+                            for qid, cid in self._pending_cid_by_quic_id.items()
+                            if cid in stale_set
+                        ]
+                        for qid in stale_qids:
+                            self._pending_cid_by_quic_id.pop(qid, None)
+                            self._handler_invoked_quic_ids.discard(qid)
+
+                    active_keys = set(self._pending_cid_by_quic_id.keys()) | set(
+                        self._conn_by_quic_id.keys()
+                    )
+                    stale_keys = [
+                        k for k in self._promotion_locks if k not in active_keys
+                    ]
+                    for k in stale_keys:
+                        self._promotion_locks.pop(k, None)
+        except trio.Cancelled:
+            pass
 
     async def close(self) -> None:
         """Close the listener and clean up resources."""
@@ -1429,17 +1467,11 @@ class QUICListener(IListener):
                 await self._cleanup_promotion_lock(quic_key)
                 await self._cleanup_quic_tracking(quic_key)
 
-            # Find the connection ID for this object
-            connection_ids = await self._registry.get_all_cids_for_connection(
-                connection_obj
+            # Completely wipe from registry
+            await self._registry.unregister_connection_object(connection_obj)
+            logger.debug(
+                f"Unregistered connection object {id(connection_obj)} from registry"
             )
-            if connection_ids:
-                # Remove using the first Connection ID found
-                connection_connection_id = connection_ids[0]
-                await self._remove_connection(connection_connection_id)
-                logger.debug(f"Removed connection {connection_connection_id.hex()}")
-            else:
-                logger.debug("Connection object not found in tracking")
 
         except Exception as e:
             logger.error(f"Error removing connection by object: {e}")
@@ -1459,7 +1491,8 @@ class QUICListener(IListener):
 
             if self._transport._swarm:
                 logger.debug("Adding QUIC connection directly to swarm")
-                await self._transport._swarm.add_conn(connection)
+                # These are inbound connections accepted by the listener.
+                await self._transport._swarm.add_conn(connection, direction="inbound")
                 logger.debug("Successfully added QUIC connection to swarm")
             else:
                 logger.error("No swarm available for QUIC connection")

@@ -18,6 +18,7 @@ import uuid
 
 import pytest
 import multiaddr
+from multiaddr import Multiaddr
 import trio
 import varint
 
@@ -450,9 +451,15 @@ async def test_provide_and_find_providers(dht_pair: tuple[KadDHT, KadDHT]):
     record_a = envelope_a.record()
     record_b = envelope_b.record()
 
+    # Generate a valid CID from the content for the provide/find_providers API
+    from libp2p.bitswap.cid import compute_cid_v1_obj
+
+    content_cid = compute_cid_v1_obj(content)
+    content_cid_str = str(content_cid)
+
     # Advertise the first node as a provider
     with trio.fail_after(TEST_TIMEOUT):
-        success = await dht_a.provide(content_id)
+        success = await dht_a.provide(content_cid_str)
         assert success, "Failed to advertise as provider"
 
     # These are the records that were sent between the peers during
@@ -481,12 +488,14 @@ async def test_provide_and_find_providers(dht_pair: tuple[KadDHT, KadDHT]):
     with trio.fail_after(TEST_TIMEOUT):
         providers: list[PeerInfo] = []
 
-        async def provider_is_visible() -> bool:
+        async def find_and_verify_providers() -> bool:
             nonlocal providers
-            providers = await dht_b.find_providers(content_id)
-            return any(p.peer_id == dht_a.local_peer_id for p in providers)
+            providers = await dht_b.find_providers(content_cid_str)
+            return bool(providers) and any(
+                p.peer_id == dht_a.local_peer_id for p in providers
+            )
 
-        await wait_until(provider_is_visible)
+        await wait_until(find_and_verify_providers)
         assert providers, "No providers found"
 
     # These are the records in each peer after the find_provider execution
@@ -790,3 +799,66 @@ async def test_find_node_reply_does_not_prepend_unknown_target(
     await stream.close()
 
     assert unknown_key not in [p.id for p in resp.closerPeers]
+
+
+@pytest.mark.trio
+async def test_find_peer_rechecks_peerstore_after_lookup():
+    """
+    Verify that find_peer re-checks the peerstore after network lookup.
+
+    During a network lookup (find_closest_peers_network), the target peer's
+    signed record may be discovered and added to the peerstore. But find_peer
+    only checks closest_peers list after the lookup, not the peerstore.
+
+    In go-libp2p, FindPeer checks the peerstore after the lookup completes.
+    """
+    from unittest.mock import MagicMock
+
+    from libp2p.kad_dht.peer_routing import PeerRouting
+
+    local_id = ID(b"\x00" * 32)
+    target_id = ID(b"\xff" + b"\x00" * 31)
+
+    host = MagicMock()
+    host.get_id = MagicMock(return_value=local_id)
+
+    # Mutable state to simulate peerstore updates during lookup
+    peerstore_has_target = False
+
+    def mock_addrs(peer_id):
+        if peer_id == target_id and peerstore_has_target:
+            return [Multiaddr("/ip4/127.0.0.1/tcp/9090")]
+        return []
+
+    peerstore = MagicMock()
+    peerstore.addrs = MagicMock(side_effect=mock_addrs)
+    peerstore.peer_ids = MagicMock(return_value=[])
+    host.get_peerstore = MagicMock(return_value=peerstore)
+    host.get_connected_peers = MagicMock(return_value=[])
+
+    routing_table = MagicMock()
+    routing_table.find_local_closest_peers = MagicMock(return_value=[])
+    routing_table.get_peer_info = MagicMock(return_value=None)
+
+    peer_routing = PeerRouting(host, routing_table)
+
+    # Mock find_closest_peers_network to simulate:
+    # 1. Target peer discovered during lookup (added to peerstore)
+    # 2. But NOT in the top 20 closest_peers result
+    async def mock_find_closest(target_key: bytes, count: int = 20) -> list[ID]:
+        nonlocal peerstore_has_target
+        # Simulate the target peer being discovered during the lookup
+        peerstore_has_target = True
+        # Return a different peer, NOT the target
+        return [ID(b"\xee" + b"\x00" * 31)]
+
+    peer_routing.find_closest_peers_network = mock_find_closest  # type: ignore[assignment]
+
+    result = await peer_routing.find_peer(target_id)
+
+    assert result is not None, (
+        "find_peer returned None even though target peer's "
+        "addresses were added to peerstore during network lookup. "
+        "Should re-check peerstore after lookup."
+    )
+    assert result.peer_id == target_id

@@ -170,11 +170,15 @@ class SwarmConn(INetConn):
             finally:
                 self._resource_scope = None
 
-        # Close the muxed connection
-        try:
-            await self.muxed_conn.close()
-        except Exception as e:
-            logging.warning(f"Error while closing muxed connection: {e}")
+        # Close the muxed connection — UNLESS this SwarmConn is a duplicate
+        # wrapper that shares its muxed connection with another SwarmConn
+        # (marked by Swarm.add_conn deduplication).  Closing a shared muxed
+        # connection would tear down the live connection we kept (Bug 3).
+        if not getattr(self, "_shared_muxed_conn", False):
+            try:
+                await self.muxed_conn.close()
+            except Exception as e:
+                logging.warning(f"Error while closing muxed connection: {e}")
 
         # Perform proper cleanup of resources
         await self._cleanup()
@@ -184,13 +188,15 @@ class SwarmConn(INetConn):
         logging.debug(f"Removing connection for peer {self.muxed_conn.peer_id}")
         self.swarm.remove_conn(self)
 
-        # Only close the connection if it's not already closed
-        # Be defensive here to avoid exceptions during cleanup
-        try:
-            if not self.muxed_conn.is_closed:
-                await self.muxed_conn.close()
-        except Exception as e:
-            logging.warning(f"Error closing muxed connection: {e}")
+        # Only close the connection if it's not already closed and not shared
+        # with another SwarmConn (dedup duplicate).  Be defensive here to avoid
+        # exceptions during cleanup.
+        if not getattr(self, "_shared_muxed_conn", False):
+            try:
+                if not self.muxed_conn.is_closed:
+                    await self.muxed_conn.close()
+            except Exception as e:
+                logging.warning(f"Error closing muxed connection: {e}")
 
         # This is just for cleaning up state. The connection has already been closed.
         # We *could* optimize this but it really isn't worth it.
@@ -212,7 +218,10 @@ class SwarmConn(INetConn):
     async def _handle_new_streams(self) -> None:
         self.event_started.set()
         async with trio.open_nursery() as nursery:
-            while True:
+            # Also exit the loop once this SwarmConn has been closed — this
+            # lets a duplicate (shared-muxed-conn) wrapper stop promptly
+            # instead of accepting streams into a dead connection.
+            while not self.event_closed.is_set():
                 try:
                     stream = await self.muxed_conn.accept_stream()
                 except MuxedConnUnavailable:
@@ -224,6 +233,10 @@ class SwarmConn(INetConn):
                         f"Connection closed for peer {self.muxed_conn.peer_id}: {e}"
                     )
                     await self.close()
+                    break
+                # The connection may have been closed while we were waiting
+                # for a stream — drop the stream instead of handling it.
+                if self.event_closed.is_set():
                     break
                 # Asynchronously handle the accepted stream, to avoid blocking
                 # the next stream.
