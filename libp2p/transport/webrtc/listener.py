@@ -230,6 +230,7 @@ class WebRTCDirectListener(IListener):
             create_noise_channel,
             create_peer_connection,
             make_noise_channel_callbacks,
+            set_private_attr,
         )
 
         mux, bridge = self._mux, self._bridge
@@ -244,7 +245,9 @@ class WebRTCDirectListener(IListener):
             attach_muxed_connection(pc, mux, conn)
             # Spec step 6.2/7: B cannot know A's DTLS fingerprint, so it must
             # not verify it during DTLS; the Noise handshake authenticates.
-            pc.sctp.transport._validate_peer_identity = lambda _params: None
+            set_private_attr(
+                pc.sctp.transport, "_validate_peer_identity", lambda _params: None
+            )
 
             offer_sdp = build_inferred_offer(
                 client_ufrag=server_ufrag,

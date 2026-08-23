@@ -131,6 +131,7 @@ class WebRTCDirectTransport(ITransport):
             get_remote_fingerprint,
             make_noise_channel_callbacks,
             post_sdp,
+            set_private_attr,
             wait_for_connected,
             wire_pc_to_connection,
         )
@@ -178,8 +179,8 @@ class WebRTCDirectTransport(ITransport):
                 async def _set_local_ice_credentials() -> None:
                     assert pc.sctp is not None  # createDataChannel ran above
                     ice_conn = pc.sctp.transport.transport._connection
-                    ice_conn._local_username = cred
-                    ice_conn._local_password = cred
+                    set_private_attr(ice_conn, "_local_username", cred)
+                    set_private_attr(ice_conn, "_local_password", cred)
 
                 await bridge.run_coro(_set_local_ice_credentials())
                 offer = await bridge.run_coro(pc.createOffer())
