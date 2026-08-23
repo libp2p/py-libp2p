@@ -84,7 +84,7 @@ async def create_peer_connection(
     pc = RTCPeerConnection(configuration=config)
     # Replace aiortc's auto-generated cert.  Must use the mangled name —
     # aiortc reads only `self.__certificates`, which mangles to this.
-    pc._RTCPeerConnection__certificates = [rtc_cert]  # type: ignore[attr-defined]
+    set_private_attr(pc, "_RTCPeerConnection__certificates", [rtc_cert])
     return pc
 
 
@@ -183,6 +183,21 @@ def get_remote_fingerprint(pc: RTCPeerConnection) -> bytes:
     return hashlib.sha256(der).digest()
 
 
+def set_private_attr(obj: Any, name: str, value: Any) -> None:
+    """
+    Overwrite a private (possibly name-mangled) library attribute.
+
+    Writing a wrong — or upgraded-away — name would silently create a new
+    attribute the library never reads; asserting existence first turns that
+    silent no-op into a failure at the line that caused it, and fails loudly
+    on the aiortc/aioice upgrade that renames or drops the slot. It separates
+    "wrote to the wrong name" from "the value never reached the handshake"
+    (which only the downstream invariant tests would catch).
+    """
+    assert hasattr(obj, name), f"{type(obj).__name__} has no attribute {name!r}"
+    setattr(obj, name, value)
+
+
 # ------------------------------------------------------------------
 # Peer-connection shutdown
 # ------------------------------------------------------------------
@@ -266,10 +281,10 @@ def attach_muxed_connection(pc: RTCPeerConnection, mux: UdpMux, conn: Any) -> No
     ice = (
         sctp.transport.transport
     )  # RTCSctpTransport -> RTCDtlsTransport -> RTCIceTransport
-    ice.iceGatherer._connection = conn
-    ice._connection = conn
-    ice._recv = conn.recv
-    ice._send = conn.send
+    set_private_attr(ice.iceGatherer, "_connection", conn)
+    set_private_attr(ice, "_connection", conn)
+    set_private_attr(ice, "_recv", conn.recv)
+    set_private_attr(ice, "_send", conn.send)
 
     ufrag = conn.local_username
 

@@ -278,3 +278,19 @@ class TestGetRemoteFingerprint:
         finally:
             await pc_a.close()
             await pc_b.close()
+
+
+class TestSetPrivateAttr:
+    def test_write_to_missing_name_fails_at_the_write(self) -> None:
+        from libp2p.transport.webrtc._aiortc_helpers import set_private_attr
+
+        class Obj:
+            _slot = 1
+
+        obj = Obj()
+        set_private_attr(obj, "_slot", 2)
+        assert obj._slot == 2
+        # A typo'd / upgraded-away name must not silently create a new
+        # attribute the library never reads.
+        with pytest.raises(AssertionError):
+            set_private_attr(obj, "_slott", 3)

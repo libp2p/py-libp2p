@@ -384,6 +384,16 @@ class UdpMux(asyncio.DatagramProtocol):
         # RTCIceGatherer.gather() issues unconditionally from
         # setLocalDescription — a no-op instead of binding fresh sockets and
         # appending their candidates to ours.
+        # Guard the private-slot writes: a renamed/dropped aioice attribute
+        # would otherwise be a silent no-op (a new attribute aioice never
+        # reads) and only fail far downstream.
+        for attr in (
+            "_protocols",
+            "_local_candidates",
+            "_local_candidates_start",
+            "_local_candidates_end",
+        ):
+            assert hasattr(conn, attr), f"aioice Connection has no {attr!r}"
         conn._protocols.append(protocol)
         conn._local_candidates = [local_candidate]
         conn._local_candidates_start = True
