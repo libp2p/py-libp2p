@@ -505,6 +505,7 @@ class TestAttachMuxedConnection:
         from libp2p.transport.webrtc._aiortc_helpers import (
             _wait_channel_open,
             attach_muxed_connection,
+            close_peer_connection,
             create_noise_channel,
             create_peer_connection,
             wait_for_connected,
@@ -577,8 +578,8 @@ class TestAttachMuxedConnection:
             assert ufrag in mux._by_ufrag
             assert conn._nominated[1].remote_addr in mux._by_addr
 
-            await pc_c.close()
-            await pc_s.close()
+            await close_peer_connection(pc_c)
+            await close_peer_connection(pc_s)
             pc_s = pc_c = None
             # closing the ICE transport unregisters everything for this ufrag
             assert mux._by_ufrag == {}
@@ -590,7 +591,7 @@ class TestAttachMuxedConnection:
             for pc in (pc_s, pc_c):
                 if pc is not None:
                     try:
-                        await asyncio.wait_for(pc.close(), 10)
+                        await close_peer_connection(pc)
                     except Exception:
                         pass
             await asyncio.wait_for(mux.close(), 10)

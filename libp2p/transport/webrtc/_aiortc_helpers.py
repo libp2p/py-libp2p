@@ -184,6 +184,50 @@ def get_remote_fingerprint(pc: RTCPeerConnection) -> bytes:
 
 
 # ------------------------------------------------------------------
+# Peer-connection shutdown
+# ------------------------------------------------------------------
+
+
+def _abort_ice_transports(pc: RTCPeerConnection) -> None:
+    """Force-close the aioice UDP transports of a data-channel-only *pc*."""
+    sctp = getattr(pc, "sctp", None)
+    dtls = getattr(sctp, "transport", None) if sctp is not None else None
+    ice = getattr(dtls, "transport", None) if dtls is not None else None
+    conn = getattr(ice, "_connection", None) if ice is not None else None
+    for proto in list(getattr(conn, "_protocols", [])):
+        abort = getattr(getattr(proto, "transport", None), "abort", None)
+        if abort is not None:
+            abort()
+
+
+async def close_peer_connection(pc: RTCPeerConnection, timeout: float = 5.0) -> None:
+    """
+    Close *pc*, working around a Windows proactor close hang.
+
+    When a datagram send is still in flight as ``transport.close()`` runs
+    (typical: DTLS just queued its close_notify), CPython's
+    ``_ProactorDatagramTransport._loop_writing`` early-returns on
+    ``_conn_lost`` and the deferred ``connection_lost`` is never delivered,
+    so aioice's ``StunProtocol.close()`` awaits its closed-future forever
+    (observed deterministically on Windows CPython 3.12/3.13). On timeout,
+    ``abort()`` the lingering transports — ``_force_close`` delivers
+    ``connection_lost`` unconditionally — and let ``close()`` finish.
+    """
+    task = asyncio.ensure_future(pc.close())
+    try:
+        await asyncio.wait_for(asyncio.shield(task), timeout)
+        return
+    except asyncio.TimeoutError:
+        logger.debug("pc.close() stalled; aborting ICE transports")
+    _abort_ice_transports(pc)
+    try:
+        await asyncio.wait_for(task, timeout)
+    except asyncio.TimeoutError:
+        task.cancel()
+        logger.warning("pc.close() still stalled after transport abort")
+
+
+# ------------------------------------------------------------------
 # UdpMux bridge
 # ------------------------------------------------------------------
 
