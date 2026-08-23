@@ -347,7 +347,7 @@ def wire_pc_to_connection(
         ch.send(data)
 
     async def _close_pc() -> None:
-        await pc.close()
+        await close_peer_connection(pc)
 
     conn._create_channel_cb = _create_channel
     conn._send_on_channel_cb = _send_on_channel

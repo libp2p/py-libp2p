@@ -226,6 +226,7 @@ class WebRTCDirectListener(IListener):
 
         from ._aiortc_helpers import (
             attach_muxed_connection,
+            close_peer_connection,
             create_noise_channel,
             create_peer_connection,
             make_noise_channel_callbacks,
@@ -263,7 +264,7 @@ class WebRTCDirectListener(IListener):
             mux.unregister(server_ufrag)
             if pc is not None:
                 try:
-                    await pc.close()
+                    await close_peer_connection(pc)
                 except Exception:
                     pass
             return
@@ -356,7 +357,11 @@ class WebRTCDirectListener(IListener):
         without blocking the loop.
         """
         try:
-            from ._aiortc_helpers import get_remote_fingerprint, wait_for_connected
+            from ._aiortc_helpers import (
+                close_peer_connection,
+                get_remote_fingerprint,
+                wait_for_connected,
+            )
 
             await wait_for_connected(pc, timeout=self._config.handshake_timeout)
             dialer_fp = get_remote_fingerprint(pc)
@@ -378,7 +383,7 @@ class WebRTCDirectListener(IListener):
             self._in_flight -= 1
             logger.debug("Failed to complete inbound WebRTC connection", exc_info=True)
             try:
-                await pc.close()
+                await close_peer_connection(pc)
             except Exception:
                 pass
 
@@ -398,7 +403,7 @@ class WebRTCDirectListener(IListener):
         """
         from libp2p.crypto.x25519 import create_new_key_pair as create_x25519_keypair
 
-        from ._aiortc_helpers import wire_pc_to_connection
+        from ._aiortc_helpers import close_peer_connection, wire_pc_to_connection
         from .noise_handshake import DataChannelReadWriter, perform_noise_handshake
 
         conn: WebRTCConnection | None = None
@@ -446,7 +451,7 @@ class WebRTCDirectListener(IListener):
                 if conn is not None:
                     await conn.close()
                 else:
-                    await bridge.run_coro(pc.close())
+                    await bridge.run_coro(close_peer_connection(pc))
             except Exception:
                 pass
             return

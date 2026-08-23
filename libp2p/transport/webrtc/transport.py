@@ -125,6 +125,7 @@ class WebRTCDirectTransport(ITransport):
 
         # All aiortc calls go through the bridge (asyncio thread).
         from ._aiortc_helpers import (
+            close_peer_connection,
             create_noise_channel,
             create_peer_connection,
             get_remote_fingerprint,
@@ -280,7 +281,7 @@ class WebRTCDirectTransport(ITransport):
             if pc is not None:
                 with trio.CancelScope(shield=True):
                     try:
-                        await bridge.run_coro(pc.close())
+                        await bridge.run_coro(close_peer_connection(pc))
                     except Exception:
                         pass
             if isinstance(e, WebRTCConnectionError | trio.Cancelled):
