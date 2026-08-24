@@ -1404,6 +1404,28 @@ class IPeerStore(
         """
 
     @abstractmethod
+    def has_peer(self, peer_id: ID) -> bool:
+        """
+        Return True if ``peer_id`` is known to this store.
+
+        This MUST be O(1)-ish (in-memory map / single key lookup) and MUST
+        NOT materialize the full peer list: ``peer_ids()`` on persistent
+        stores reconstructs and hashes every peer, which is far too
+        expensive for hot paths (e.g. per-connection checks).
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer ID to check.
+
+        Returns
+        -------
+        bool
+            True if the peer is known to the store.
+
+        """
+
+    @abstractmethod
     def clear_peerdata(self, peer_id: ID) -> None:
         """clear_peerdata"""
 
@@ -1680,6 +1702,18 @@ class INetwork(ABC):
         ----------
         notifee : INotifee
             An object implementing the INotifee interface.
+
+        """
+
+    @abstractmethod
+    def remove_notifee(self, notifee: "INotifee") -> None:
+        """
+        Unregister a notifee instance so it stops receiving network events.
+
+        Parameters
+        ----------
+        notifee : INotifee
+            The notifee previously passed to ``register_notifee``.
 
         """
 

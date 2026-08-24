@@ -217,6 +217,11 @@ class FunctionTask(BaseTaskWithChildren):
         # Cancel scope for ordered cancellation (created lazily in async context)
         self._cancel_scope: CancelScope | None = None
 
+        # Set when cancel() is called before the task entered its cancel
+        # scope (e.g. while it is still waiting to be scheduled). The cancel
+        # is applied as soon as the scope is created in run().
+        self._pending_cancel: bool = False
+
     # Stats tracking API
     @property
     def count_in_stats(self) -> bool:
@@ -261,6 +266,10 @@ class FunctionTask(BaseTaskWithChildren):
         try:
             with anyio.CancelScope() as cancel_scope:
                 self._cancel_scope = cancel_scope
+                if self._pending_cancel:
+                    # cancel() was called before this task entered its cancel
+                    # scope; apply it now so the task stops immediately.
+                    cancel_scope.cancel()
                 await self._async_fn(*self._async_fn_args)
 
                 if self.daemon:
@@ -289,6 +298,12 @@ class FunctionTask(BaseTaskWithChildren):
         # Then cancel self
         if self._cancel_scope is not None:
             self._cancel_scope.cancel()
+        else:
+            # Task has not entered its cancel scope yet (still being
+            # scheduled). Remember the request; run() applies it as soon as
+            # the scope exists. Without this, wait_done() below would wait
+            # forever because the task can never finish on its own.
+            self._pending_cancel = True
         await self.wait_done()
 
     @property

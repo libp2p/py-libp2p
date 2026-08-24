@@ -4,7 +4,9 @@ Provider record storage for Kademlia DHT.
 This module implements the storage for content provider records in the Kademlia DHT.
 """
 
+import json
 import logging
+from pathlib import Path
 import time
 from typing import (
     Any,
@@ -22,7 +24,10 @@ from libp2p.abc import (
 from libp2p.custom_types import (
     TProtocol,
 )
-from libp2p.kad_dht.utils import maybe_consume_signed_record
+from libp2p.kad_dht.utils import (
+    maybe_consume_signed_record,
+    sort_peer_ids_by_distance,
+)
 from libp2p.peer.id import (
     ID,
 )
@@ -34,6 +39,7 @@ from libp2p.utils.varint import read_varint_prefixed_bytes_limited
 
 from .common import (
     ALPHA,
+    BUCKET_SIZE,
     MAX_DHT_MESSAGE_SIZE,
     PROTOCOL_ID,
     QUERY_TIMEOUT,
@@ -47,7 +53,6 @@ logger = logging.getLogger(__name__)
 # Constants for provider records (based on IPFS standards)
 PROVIDER_RECORD_REPUBLISH_INTERVAL = 22 * 60 * 60  # 22 hours in seconds
 PROVIDER_RECORD_EXPIRATION_INTERVAL = 48 * 60 * 60  # 48 hours in seconds
-PROVIDER_ADDRESS_TTL = 30 * 60  # 30 minutes in seconds
 
 
 class ProviderRecord:
@@ -86,19 +91,6 @@ class ProviderRecord:
         current_time = time.time()
         return (current_time - self.timestamp) >= PROVIDER_RECORD_EXPIRATION_INTERVAL
 
-    def should_republish(self) -> bool:
-        """
-        Check if this provider record should be republished.
-
-        Returns
-        -------
-        bool
-            True if the record should be republished
-
-        """
-        current_time = time.time()
-        return (current_time - self.timestamp) >= PROVIDER_RECORD_REPUBLISH_INTERVAL
-
     @property
     def peer_id(self) -> ID:
         """Get the provider's peer ID."""
@@ -117,12 +109,15 @@ class ProviderStore:
     Maps content keys to provider records, with support for expiration.
     """
 
-    def __init__(self, host: IHost, peer_routing: Any = None) -> None:
+    def __init__(
+        self, host: IHost, peer_routing: Any = None, persist_path: str | None = None
+    ) -> None:
         """
         Initialize a new provider store.
 
         :param host: The libp2p host instance (optional)
         :param peer_routing: The peer routing instance (optional)
+        :param persist_path: Optional file path for JSON persistence
         """
         # Maps content keys to a dict of provider records (peer_id -> record)
         self.providers: dict[bytes, dict[str, ProviderRecord]] = {}
@@ -130,30 +125,84 @@ class ProviderStore:
         self.peer_routing = peer_routing
         self.providing_keys: set[bytes] = set()
         self.local_peer_id = host.get_id()
+        # Track when each key was last republished
+        self._last_republish: dict[bytes, float] = {}
+        self._persist_path = persist_path
+        # Load from disk if persistence is enabled
+        if persist_path:
+            self._load()
+
+    def _save(self) -> None:
+        """Save provider records to disk as JSON."""
+        if not self._persist_path:
+            return
+        data: dict[str, Any] = {}
+        for key, providers_dict in self.providers.items():
+            key_hex = key.hex()
+            data[key_hex] = {}
+            for peer_id_str, record in providers_dict.items():
+                addrs = [str(a) for a in record.addresses]
+                data[key_hex][peer_id_str] = {
+                    "peer_id": record.peer_id.to_base58(),
+                    "addresses": addrs,
+                    "timestamp": record.timestamp,
+                }
+        # Also save providing_keys
+        data["_providing_keys"] = [k.hex() for k in self.providing_keys]
+        try:
+            assert self._persist_path is not None
+            persist_path = Path(self._persist_path)
+            persist_path.parent.mkdir(parents=True, exist_ok=True)
+            with persist_path.open("w") as f:
+                json.dump(data, f)
+            logger.debug(
+                f"Saved {len(self.providers)} provider records to {self._persist_path}"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to save provider records: {e}")
+
+    def _load(self) -> None:
+        """Load provider records from disk."""
+        if not self._persist_path or not Path(self._persist_path).exists():
+            return
+        try:
+            with open(self._persist_path) as f:
+                data = json.load(f)
+            loaded = 0
+            for key_hex, providers_dict in data.items():
+                if key_hex == "_providing_keys":
+                    self.providing_keys = {bytes.fromhex(k) for k in providers_dict}
+                    continue
+                key = bytes.fromhex(key_hex)
+                self.providers[key] = {}
+                for peer_id_str, record_data in providers_dict.items():
+                    peer_id = ID.from_base58(record_data["peer_id"])
+                    addrs = [Multiaddr(a) for a in record_data["addresses"]]
+                    provider_info = PeerInfo(peer_id, addrs)
+                    record = ProviderRecord(provider_info, record_data["timestamp"])
+                    self.providers[key][peer_id_str] = record
+                    loaded += 1
+            logger.debug(f"Loaded {loaded} provider records from {self._persist_path}")
+        except Exception as e:
+            logger.warning(f"Failed to load provider records: {e}")
 
     async def _republish_provider_records(self) -> None:
-        """Republish all provider records for content this node is providing."""
-        # Snapshot the sets/dicts to avoid mutation during iteration
+        """
+        Republish provider records that are due.
+
+        Per spec: provider records should be republished every 22h.
+        """
+        current_time = time.time()
+        # Snapshot to avoid mutation during iteration
         providing_keys_snapshot = list(self.providing_keys)
-        providers_snapshot = {
-            key: dict(providers) for key, providers in self.providers.items()
-        }
 
-        # First, republish keys we're actively providing
+        # Only republish keys that are due (last republish > 22h ago or never)
         for key in providing_keys_snapshot:
-            logger.debug(f"Republishing provider record for key {key.hex()}")
-            await self.provide(key)
-
-        # Also check for any records that should be republished
-        for key, providers in providers_snapshot.items():
-            for peer_id_str, record in providers.items():
-                # Only republish records for our own peer
-                if self.local_peer_id and str(self.local_peer_id) == peer_id_str:
-                    if record.should_republish():
-                        logger.debug(
-                            f"Republishing old provider record for key {key.hex()}"
-                        )
-                        await self.provide(key)
+            last_republished = self._last_republish.get(key, 0)
+            if (current_time - last_republished) >= PROVIDER_RECORD_REPUBLISH_INTERVAL:
+                logger.debug(f"Republishing provider record for key {key.hex()}")
+                await self.provide(key)
+                self._last_republish[key] = current_time
 
     async def provide(self, key: bytes) -> bool:
         """
@@ -178,11 +227,11 @@ class ProviderStore:
         for addr in self.host.get_addrs():
             local_addrs.append(addr)
 
-        local_peer_info = PeerInfo(self.host.get_id(), local_addrs)
-        self.add_provider(key, local_peer_info)
-
         # Track that we're providing this key
         self.providing_keys.add(key)
+
+        local_peer_info = PeerInfo(self.host.get_id(), local_addrs)
+        self.add_provider(key, local_peer_info)
 
         # Find the k closest peers to the key
         closest_peers = await self.peer_routing.find_closest_peers_network(key)
@@ -192,31 +241,34 @@ class ProviderStore:
             key.hex(),
         )
 
-        # Send ADD_PROVIDER messages to these ALPHA peers in parallel.
-        success_count = 0
-        for i in range(0, len(closest_peers), ALPHA):
-            batch = closest_peers[i : i + ALPHA]
-            results: list[bool] = [False] * len(batch)
+        # Send ADD_PROVIDER messages using a semaphore-based sliding window
+        # (up to ALPHA in flight at once) so a slow or unresponsive peer does
+        # not stall the whole batch of announcements.
+        success_count_list: list[int] = [0]
+        sem = trio.Semaphore(ALPHA)
 
-            async def send_one(
-                idx: int, peer_id: ID, results: list[bool] = results
-            ) -> None:
+        async def send_one(peer_id: ID) -> None:
+            try:
                 if peer_id == self.local_peer_id:
                     return
                 try:
                     with trio.move_on_after(QUERY_TIMEOUT):
                         success = await self._send_add_provider(peer_id, key)
-                        results[idx] = success
-                        if not success:
+                        if success:
+                            success_count_list[0] += 1
+                        else:
                             logger.warning(f"Failed to send ADD_PROVIDER to {peer_id}")
                 except Exception as e:
                     logger.warning(f"Error sending ADD_PROVIDER to {peer_id}: {e}")
+            finally:
+                sem.release()
 
-            async with trio.open_nursery() as nursery:
-                for idx, peer_id in enumerate(batch):
-                    nursery.start_soon(send_one, idx, peer_id, results)
-            success_count += sum(results)
+        async with trio.open_nursery() as nursery:
+            for peer_id in closest_peers:
+                await sem.acquire()
+                nursery.start_soon(send_one, peer_id)
 
+        success_count = success_count_list[0]
         logger.info(f"Successfully advertised to {success_count} peers")
         return success_count > 0
 
@@ -224,19 +276,23 @@ class ProviderStore:
         """
         Send ADD_PROVIDER message to a specific peer.
 
+        Per the libp2p DHT spec, the receiver echoes the request to confirm
+        success. However, Kubo and most implementations treat ADD_PROVIDER as
+        fire-and-forget and never send a response, so we send the message and
+        close the stream without waiting for an echo.
+
         :param peer_id: The peer to send the message to
         :param key: The content key being provided
 
         Returns
         -------
         bool
-            True if the message was successfully sent and acknowledged
+            True if the message was successfully sent
 
         """
         stream = None
 
         try:
-            result = False
             # Open a stream to the peer
             stream = await self.host.new_stream(peer_id, [TProtocol(PROTOCOL_ID)])
 
@@ -267,36 +323,36 @@ class ProviderStore:
             await stream.write(varint.encode(len(proto_bytes)))
             await stream.write(proto_bytes)
             logger.debug(f"Sent ADD_PROVIDER to {peer_id} for key {key.hex()}")
-            response_bytes = await read_varint_prefixed_bytes_limited(
-                stream, MAX_DHT_MESSAGE_SIZE
-            )
-
-            # Parse response
-            response = Message()
-            response.ParseFromString(response_bytes)
-
-            if response.type == Message.MessageType.ADD_PROVIDER:
-                # Consume the sender's signed-peer-record if sent
-                if not maybe_consume_signed_record(response, self.host, peer_id):
-                    logger.error(
-                        "Received an invalid-signed-record, ignoring the response"
-                    )
-                    result = False
-                else:
-                    result = True
+            # Fire-and-forget: do not read an echo response. Kubo never
+            # responds to ADD_PROVIDER, so reading here would block for the
+            # full QUERY_TIMEOUT on every provide() call and stall provider
+            # announcement ("DHT provide timed out after 30s").
+            return True
 
         except Exception as e:
             logger.warning(f"Error sending ADD_PROVIDER to {peer_id}: {e}")
+            return False
 
         finally:
             if stream is not None:
                 await stream.close()
-
-        return result
+        # Unreachable at runtime (try/except both return), but pyrefly
+        # requires an explicit return for the declared ``-> bool``.
+        return False
 
     async def find_providers(self, key: bytes, count: int = 20) -> list[PeerInfo]:
         """
-        Find content providers for a given key.
+        Find content providers for a given key using iterative lookup.
+
+        Per spec: "Getting the providers for a given key is done in the same
+        way as getting a value for a given key except that instead of using
+        the GET_VALUE RPC message the GET_PROVIDERS RPC message is used."
+
+        The algorithm:
+        1. Start with ALPHA closest peers to the key
+        2. Query them for providers
+        3. Process closer peers from responses and add to candidate set
+        4. Continue until we have enough providers or no more progress
 
         :param key: The content key to look for
         :param count: Maximum number of providers to return
@@ -318,68 +374,109 @@ class ProviderStore:
                 f"Found {len(local_providers)} providers locally for {key.hex()}"
             )
             return local_providers[:count]
-        logger.debug("local providers are %s", local_providers)
 
-        # Find the closest peers to the key
-        closest_peers = await self.peer_routing.find_closest_peers_network(key)
+        # Get initial closest peers
+        closest_peers = list(await self.peer_routing.find_closest_peers_network(key))
         logger.debug(
             f"Searching {len(closest_peers)} peers for providers of {key.hex()}"
         )
 
-        # Query these peers for providers in batches of ALPHA, in parallel, with timeout
-        all_providers = []
-        for i in range(0, len(closest_peers), ALPHA):
-            batch = closest_peers[i : i + ALPHA]
+        # Iterative provider lookup
+        all_providers: list[PeerInfo] = []
+        queried_peers: set[ID] = set()
+        candidate_peers = list(closest_peers)
+
+        while candidate_peers and len(all_providers) < count:
+            # Take ALPHA peers from candidates
+            batch = candidate_peers[:ALPHA]
+            candidate_peers = candidate_peers[ALPHA:]
+
+            # Query batch in parallel
             batch_results: list[list[PeerInfo]] = [[] for _ in batch]
+            batch_closer: list[list[ID]] = [[] for _ in batch]
 
             async def get_one(
                 idx: int,
                 peer_id: ID,
                 batch_results: list[list[PeerInfo]] = batch_results,
+                batch_closer: list[list[ID]] = batch_closer,
             ) -> None:
-                if peer_id == self.local_peer_id:
+                if peer_id == self.local_peer_id or peer_id in queried_peers:
                     return
+                queried_peers.add(peer_id)
                 try:
                     with trio.move_on_after(QUERY_TIMEOUT):
-                        providers = await self._get_providers_from_peer(peer_id, key)
+                        (
+                            providers,
+                            closer_peers,
+                        ) = await self._get_providers_from_peer_with_closers(
+                            peer_id, key
+                        )
                         if providers:
                             for provider in providers:
                                 self.add_provider(key, provider)
                             batch_results[idx] = providers
-                        else:
-                            logger.debug(f"No providers found at peer {peer_id}")
+                        if closer_peers:
+                            batch_closer[idx] = closer_peers
                 except trio.Cancelled:
-                    # Task was cancelled due to timeout, which is expected
-                    # Don't re-raise Cancelled as it causes ExceptionGroup in nursery
-                    logger.debug(f"Query for providers from {peer_id} timed out")
+                    logger.debug(f"Query for providers from {peer_id} cancelled")
+                    raise
                 except Exception as e:
                     logger.warning(f"Failed to get providers from {peer_id}: {e}")
 
             async with trio.open_nursery() as nursery:
                 for idx, peer_id in enumerate(batch):
-                    nursery.start_soon(get_one, idx, peer_id, batch_results)
+                    nursery.start_soon(get_one, idx, peer_id)
 
+            # Collect results
             for providers in batch_results:
                 all_providers.extend(providers)
-                if len(all_providers) >= count:
-                    return all_providers[:count]
 
+            # Add closer peers to candidates for next iteration
+            for closer in batch_closer:
+                for peer in closer:
+                    if (
+                        peer not in queried_peers
+                        and peer not in candidate_peers
+                        and peer != self.local_peer_id
+                    ):
+                        candidate_peers.append(peer)
+
+            # Sort candidates by distance to key for next iteration
+            if candidate_peers:
+                candidate_peers = sort_peer_ids_by_distance(key, candidate_peers)
+
+            # Check if we have enough providers
+            if len(all_providers) >= count:
+                break
+
+            # If no candidates left, stop
+            if not candidate_peers:
+                break
+
+        logger.debug(f"Found {len(all_providers)} providers for key {key.hex()}")
         return all_providers[:count]
 
-    async def _get_providers_from_peer(self, peer_id: ID, key: bytes) -> list[PeerInfo]:
+    async def _get_providers_from_peer_with_closers(
+        self, peer_id: ID, key: bytes
+    ) -> tuple[list[PeerInfo], list[ID]]:
         """
-        Get content providers from a specific peer.
+        Get content providers and closer peers from a specific peer.
+
+        Per spec, GET_PROVIDERS responses include closerPeers which should
+        be used for iterative lookup (same as value retrieval).
 
         :param peer_id: The peer to query
         :param key: The content key to look for
 
         Returns
         -------
-        List[PeerInfo]
-            List of provider information
+        Tuple[List[PeerInfo], List[ID]]
+            Tuple of (providers, closer_peers)
 
         """
         providers: list[PeerInfo] = []
+        closer_peers: list[ID] = []
         try:
             # Open a stream to the peer
             stream = await self.host.new_stream(peer_id, [TProtocol(PROTOCOL_ID)])
@@ -409,21 +506,19 @@ class ProviderStore:
 
                 # Check response type
                 if response.type != Message.MessageType.GET_PROVIDERS:
-                    return []
+                    return [], []
 
                 # Consume the sender's signed-peer-record if sent
                 if not maybe_consume_signed_record(response, self.host, peer_id):
                     logger.error(
                         "Received an invalid-signed-record, ignoring the response"
                     )
-                    return []
+                    return [], []
 
                 # Extract provider information
-                providers = []
                 for provider_proto in response.providerPeers:
                     try:
-                        # Consume the provider's signed-peer-record if sent, peer-id
-                        # already sent with the provider-proto
+                        # Consume the provider's signed-peer-record
                         if not maybe_consume_signed_record(provider_proto, self.host):
                             logger.warning(
                                 "Received an invalid-signed-record, skipping provider"
@@ -439,7 +534,7 @@ class ProviderStore:
                             try:
                                 addrs.append(Multiaddr(addr_bytes))
                             except Exception:
-                                pass  # Skip invalid addresses
+                                pass
 
                         # Create PeerInfo and add to result
                         providers.append(PeerInfo(provider_id, addrs))
@@ -447,14 +542,23 @@ class ProviderStore:
                     except Exception as e:
                         logger.warning(f"Failed to parse provider info: {e}")
 
+                # Extract closer peers for iterative lookup
+                for peer_proto in response.closerPeers:
+                    try:
+                        closer_id = ID(peer_proto.id)
+                        if closer_id != self.local_peer_id:
+                            closer_peers.append(closer_id)
+                    except Exception:
+                        pass
+
             finally:
                 await stream.close()
 
         except Exception as e:
             logger.warning(f"Error getting providers from {peer_id}: {e}")
-            return []
+            return [], []
 
-        return providers
+        return providers, closer_peers
 
     def add_provider(self, key: bytes, provider: PeerInfo) -> None:
         """
@@ -468,9 +572,24 @@ class ProviderStore:
         None
 
         """
+        if not provider or not provider.peer_id:
+            logger.debug("Skipping add_provider with invalid PeerInfo")
+            return
+
         # Initialize providers for this key if needed
         if key not in self.providers:
             self.providers[key] = {}
+
+        # Per spec: limit providers per key to k (BUCKET_SIZE)
+        if (
+            len(self.providers[key]) >= BUCKET_SIZE
+            and str(provider.peer_id) not in self.providers[key]
+        ):
+            logger.debug(
+                f"Provider limit ({BUCKET_SIZE}) reached for key {key.hex()}, "
+                f"ignoring new provider {provider.peer_id}"
+            )
+            return
 
         # Add or update the provider record
         peer_id_str = str(provider.peer_id)  # Use string representation as dict key
@@ -478,6 +597,7 @@ class ProviderStore:
             provider_info=provider, timestamp=time.time()
         )
         logger.debug(f"Added provider {provider.peer_id} for key {key.hex()}")
+        self._save()
 
     def get_providers(self, key: bytes) -> list[PeerInfo]:
         """
@@ -505,13 +625,10 @@ class ProviderStore:
                 expired_peers.append(peer_id_str)
                 continue
 
-            # Use addresses only if they haven't expired
-            addresses = []
-            if current_time - record.timestamp <= PROVIDER_ADDRESS_TTL:
-                addresses = record.addresses
-
             # Create PeerInfo and add to results
-            result.append(PeerInfo(record.peer_id, addresses))
+            # Per spec: return addresses for valid records (address TTL is
+            # for refresh timing, not for making addresses empty)
+            result.append(PeerInfo(record.peer_id, record.addresses))
 
         # Clean up expired records
         for peer_id in expired_peers:
@@ -527,6 +644,7 @@ class ProviderStore:
         """Remove expired provider records."""
         current_time = time.time()
         expired_keys = []
+        removed_any = False
 
         for key, providers in self.providers.items():
             expired_providers = []
@@ -545,6 +663,9 @@ class ProviderStore:
             for peer_id in expired_providers:
                 del providers[peer_id]
 
+            if expired_providers:
+                removed_any = True
+
             # Track empty keys for removal
             if not providers:
                 expired_keys.append(key)
@@ -553,6 +674,9 @@ class ProviderStore:
         for key in expired_keys:
             del self.providers[key]
             logger.debug(f"Removed key with no providers: {key.hex()}")
+
+        if expired_keys or removed_any:
+            self._save()
 
     def get_provided_keys(self, peer_id: ID) -> list[bytes]:
         """
