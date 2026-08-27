@@ -2,6 +2,10 @@
 Configuration constants matching go-libp2p connection manager defaults.
 
 Reference: https://pkg.go.dev/github.com/libp2p/go-libp2p/p2p/net/connmgr
+
+Optional connection health monitoring fields are a Python-local extension
+(inspired by go-libp2p ConnMgr + peerstore LatencyEWMA + swarm best-conn).
+They are disabled by default and are not a go-libp2p wire-protocol feature.
 """
 
 from dataclasses import (
@@ -62,10 +66,13 @@ class RetryConfig:
 @dataclass
 class ConnectionConfig:
     """
-    Configuration for connection management matching go-libp2p ConnManager.
+    Configuration for connection management matching go-libp2p ConnManager,
+    with optional Python-local connection health monitoring.
 
     This configuration controls connection limits, timeouts, and watermarks
     for libp2p connections using go-libp2p style connection management.
+    Health monitoring fields are opt-in Python extensions (not present in
+    go-libp2p as a proactive health service).
 
     Attributes:
         max_connections: Maximum total connections (inbound + outbound).
@@ -95,7 +102,9 @@ class ConnectionConfig:
         connection_timeout: Legacy timeout - use dial_timeout instead.
                            Default: 30.0 (kept for backward compatibility)
         load_balancing_strategy: Strategy for distributing streams across connections.
-                                Options: "round_robin" (default) or "least_loaded"
+                                Options: "best" (go-libp2p-style default),
+                                "round_robin", "least_loaded",
+                                "health_based", "latency_based"
         auto_connect_interval: Interval between auto-connect attempts when below
                               low_watermark. Default: 30.0 seconds
         grace_period: Time to wait before pruning a new connection.
@@ -104,6 +113,26 @@ class ConnectionConfig:
                    to connect (ConnectionGater allow list).
         deny_list: List of IP addresses/networks (CIDR) that are never allowed
                   to connect (ConnectionGater deny list).
+        enable_health_monitoring: Enable/disable connection health monitoring.
+                                 Default: False (opt-in Python extension)
+        health_check_interval: Interval between health checks in seconds.
+                              Default: 60.0
+        ping_timeout: Timeout for ping operations in seconds. Default: 5.0
+        min_health_threshold: Minimum health score (0.0-1.0) for connections.
+                             Default: 0.3
+        min_connections_per_peer: Minimum connections to maintain per peer.
+                                 Default: 1
+        latency_weight: Weight for latency in health scoring. Default: 0.4
+        success_rate_weight: Weight for success rate in health scoring. Default: 0.4
+        stability_weight: Weight for stability in health scoring. Default: 0.2
+        max_ping_latency: Maximum acceptable ping latency in milliseconds.
+                         Default: 1000.0
+        min_ping_success_rate: Minimum acceptable ping success rate. Default: 0.7
+        max_failed_streams: Maximum failed streams before connection replacement.
+                           Default: 5
+        unhealthy_grace_period: Consecutive unhealthy evaluations before replacement.
+        critical_health_threshold: Score below which a connection may be replaced
+            even at min_connections_per_peer.
 
     """
 
@@ -131,8 +160,8 @@ class ConnectionConfig:
     # Legacy timeout - kept for backward compatibility
     connection_timeout: float = 30.0
 
-    # Load balancing
-    load_balancing_strategy: str = "round_robin"  # or "least_loaded"
+    # Load balancing — "best" matches go-libp2p isBetterConn heuristics
+    load_balancing_strategy: str = "best"
 
     # Auto-connection configuration
     auto_connect_interval: float = AUTO_CONNECT_INTERVAL
@@ -142,14 +171,45 @@ class ConnectionConfig:
     allow_list: list[str] = field(default_factory=list)
     deny_list: list[str] = field(default_factory=list)
 
+    # Health monitoring configuration (Python-local, opt-in)
+    enable_health_monitoring: bool = False
+    # Delay before the first health check runs to avoid interfering with
+    # connection establishment (seconds)
+    health_initial_delay: float = 60.0
+    # Skip health checks for very new connections during this warmup window
+    health_warmup_window: float = 5.0
+    health_check_interval: float = 60.0  # seconds
+    ping_timeout: float = 5.0  # seconds
+    min_health_threshold: float = 0.3  # 0.0 to 1.0
+    min_connections_per_peer: int = 1
+
+    # Health scoring weights
+    latency_weight: float = 0.4
+    success_rate_weight: float = 0.4
+    stability_weight: float = 0.2
+
+    # Connection replacement thresholds
+    max_ping_latency: float = 1000.0  # milliseconds
+    min_ping_success_rate: float = 0.7  # 70%
+    max_failed_streams: int = 5
+    # Require N consecutive unhealthy evaluations before replacement
+    unhealthy_grace_period: int = 3
+    # Health score threshold below which a connection is considered critically
+    # unhealthy and can be replaced even at minimum connections
+    critical_health_threshold: float = 0.1  # 0.0 to 1.0
+
     def __post_init__(self) -> None:
         """Validate configuration after initialization."""
-        if not (
-            self.load_balancing_strategy == "round_robin"
-            or self.load_balancing_strategy == "least_loaded"
-        ):
+        valid_strategies = [
+            "best",
+            "round_robin",
+            "least_loaded",
+            "health_based",
+            "latency_based",
+        ]
+        if self.load_balancing_strategy not in valid_strategies:
             raise ValueError(
-                "Load balancing strategy can only be 'round_robin' or 'least_loaded'"
+                f"Load balancing strategy must be one of: {valid_strategies}"
             )
 
         if self.max_connections_per_peer < 1:
@@ -187,3 +247,32 @@ class ConnectionConfig:
 
         if self.grace_period < 0:
             raise ValueError("Grace period should be non-negative")
+
+        # Health monitoring validation
+        if self.enable_health_monitoring:
+            if self.health_check_interval <= 0:
+                raise ValueError("Health check interval must be positive")
+            if self.ping_timeout <= 0:
+                raise ValueError("Ping timeout must be positive")
+            if not 0.0 <= self.min_health_threshold <= 1.0:
+                raise ValueError("Min health threshold must be between 0.0 and 1.0")
+            if self.min_connections_per_peer < 1:
+                raise ValueError("Min connections per peer must be at least 1")
+            if not 0.0 <= self.latency_weight <= 1.0:
+                raise ValueError("Latency weight must be between 0.0 and 1.0")
+            if not 0.0 <= self.success_rate_weight <= 1.0:
+                raise ValueError("Success rate weight must be between 0.0 and 1.0")
+            if not 0.0 <= self.stability_weight <= 1.0:
+                raise ValueError("Stability weight must be between 0.0 and 1.0")
+            if self.max_ping_latency <= 0:
+                raise ValueError("Max ping latency must be positive")
+            if not 0.0 <= self.min_ping_success_rate <= 1.0:
+                raise ValueError("Min ping success rate must be between 0.0 and 1.0")
+            if self.max_failed_streams < 0:
+                raise ValueError("Max failed streams must be non-negative")
+            if not 0.0 <= self.critical_health_threshold <= 1.0:
+                raise ValueError(
+                    "Critical health threshold must be between 0.0 and 1.0"
+                )
+            if self.unhealthy_grace_period < 0:
+                raise ValueError("unhealthy_grace_period must be non-negative")

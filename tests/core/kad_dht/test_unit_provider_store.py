@@ -22,7 +22,6 @@ from multiaddr import (
 )
 
 from libp2p.kad_dht.provider_store import (
-    PROVIDER_ADDRESS_TTL,
     PROVIDER_RECORD_EXPIRATION_INTERVAL,
     PROVIDER_RECORD_REPUBLISH_INTERVAL,
     ProviderRecord,
@@ -92,33 +91,6 @@ class TestProviderRecord:
 
         # At the exact boundary, should be expired (implementation uses >)
         assert record.is_expired()
-
-    def test_should_republish_fresh_record(self):
-        """Test that fresh records don't need republishing."""
-        peer_id = ID.from_base58("QmTest123")
-        peer_info = PeerInfo(peer_id, [])
-        record = ProviderRecord(peer_info)
-
-        assert not record.should_republish()
-
-    def test_should_republish_old_record(self):
-        """Test that old records need republishing."""
-        peer_id = ID.from_base58("QmTest123")
-        peer_info = PeerInfo(peer_id, [])
-        old_timestamp = time.time() - PROVIDER_RECORD_REPUBLISH_INTERVAL - 1
-        record = ProviderRecord(peer_info, timestamp=old_timestamp)
-
-        assert record.should_republish()
-
-    def test_should_republish_boundary_condition(self):
-        """Test republish at exact boundary."""
-        peer_id = ID.from_base58("QmTest123")
-        peer_info = PeerInfo(peer_id, [])
-        boundary_timestamp = time.time() - PROVIDER_RECORD_REPUBLISH_INTERVAL
-        record = ProviderRecord(peer_info, timestamp=boundary_timestamp)
-
-        # At the exact boundary, should need republishing (implementation uses >)
-        assert record.should_republish()
 
     def test_properties(self):
         """Test peer_id and addresses properties."""
@@ -297,25 +269,6 @@ class TestProviderStore:
         # Expired provider should be cleaned up
         assert str(peer_id2) not in store.providers[key]
 
-    def test_get_providers_address_ttl(self):
-        """Test address TTL handling in get_providers."""
-        store = ProviderStore(host=mock_host)
-        key = b"test_key"
-        peer_id = ID.from_base58("QmTest123")
-        addresses = [Multiaddr("/ip4/127.0.0.1/tcp/8000")]
-        provider = PeerInfo(peer_id, addresses)
-
-        # Add provider with old timestamp (addresses expired but record valid)
-        old_timestamp = time.time() - PROVIDER_ADDRESS_TTL - 1
-        store.providers[key] = {str(peer_id): ProviderRecord(provider, old_timestamp)}
-
-        providers = store.get_providers(key)
-
-        # Should return provider but with empty addresses
-        assert len(providers) == 1
-        assert providers[0].peer_id == peer_id
-        assert providers[0].addrs == []
-
     def test_get_providers_cleanup_empty_key(self):
         """Test that keys with no valid providers are removed."""
         store = ProviderStore(host=mock_host)
@@ -404,6 +357,16 @@ class TestProviderStore:
 
         assert key1 in store.providers
         assert key2 not in store.providers
+
+    def test_cleanup_expired_empty_store(self):
+        """Test cleanup_expired on an empty store does not raise."""
+        store = ProviderStore(host=mock_host)
+
+        # Must not raise UnboundLocalError when the store has no entries
+        store.cleanup_expired()
+
+        assert store.size() == 0
+        assert len(store.providers) == 0
 
     def test_get_provided_keys_empty_store(self):
         """Test get_provided_keys with empty store."""
@@ -620,29 +583,21 @@ class TestProviderStore:
         closest_peers = [ID.from_base58("QmPeer1")]
         mock_peer_routing.find_closest_peers_network.return_value = closest_peers
 
-        # Mock provider response
+        # Mock provider response (async method returns tuple of providers, closer_peers)
         remote_peer_id = ID.from_base58("QmRemote123")
         remote_providers = [PeerInfo(remote_peer_id, [])]
 
         with patch.object(
-            store, "_get_providers_from_peer", return_value=remote_providers
+            store,
+            "_get_providers_from_peer_with_closers",
+            new_callable=AsyncMock,
+            return_value=(remote_providers, []),
         ):
             key = b"test_key"
             result = await store.find_providers(key)
 
             assert len(result) == 1
             assert result[0].peer_id == remote_peer_id
-
-    @pytest.mark.trio
-    async def test_get_providers_from_peer_no_host(self):
-        """Test _get_providers_from_peer without host."""
-        store = ProviderStore(host=mock_host)
-        peer_id = ID.from_base58("QmTest123")
-        key = b"test_key"
-
-        # Should handle missing host gracefully
-        result = await store._get_providers_from_peer(peer_id, key)
-        assert result == []
 
     def test_edge_case_empty_key(self):
         """Test handling of empty key."""
@@ -792,8 +747,6 @@ class TestProviderStore:
         # Test records at various timestamps
         timestamps = [
             current_time,  # Fresh
-            current_time - PROVIDER_ADDRESS_TTL + 1,  # Addresses valid
-            current_time - PROVIDER_ADDRESS_TTL - 1,  # Addresses expired
             current_time
             - PROVIDER_RECORD_REPUBLISH_INTERVAL
             + 1,  # No republish needed

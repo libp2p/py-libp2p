@@ -1404,6 +1404,28 @@ class IPeerStore(
         """
 
     @abstractmethod
+    def has_peer(self, peer_id: ID) -> bool:
+        """
+        Return True if ``peer_id`` is known to this store.
+
+        This MUST be O(1)-ish (in-memory map / single key lookup) and MUST
+        NOT materialize the full peer list: ``peer_ids()`` on persistent
+        stores reconstructs and hashes every peer, which is far too
+        expensive for hot paths (e.g. per-connection checks).
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer ID to check.
+
+        Returns
+        -------
+        bool
+            True if the peer is known to the store.
+
+        """
+
+    @abstractmethod
     def clear_peerdata(self, peer_id: ID) -> None:
         """clear_peerdata"""
 
@@ -1684,6 +1706,18 @@ class INetwork(ABC):
         """
 
     @abstractmethod
+    def remove_notifee(self, notifee: "INotifee") -> None:
+        """
+        Unregister a notifee instance so it stops receiving network events.
+
+        Parameters
+        ----------
+        notifee : INotifee
+            The notifee previously passed to ``register_notifee``.
+
+        """
+
+    @abstractmethod
     async def close(self) -> None:
         """
         Close the network and all associated connections and listeners.
@@ -1700,6 +1734,91 @@ class INetwork(ABC):
             The identifier of the peer whose connection should be closed.
 
         """
+
+    @abstractmethod
+    def get_peer_health_summary(self, peer_id: ID) -> dict[str, Any]:
+        """
+        Get health summary for a specific peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer to get health information for.
+
+        Returns
+        -------
+        dict[str, Any]
+            A dictionary containing health metrics for the peer's connections.
+            Returns empty dict if health monitoring is disabled or peer not found.
+
+        Note
+        ----
+        This method is marked as abstract to ensure all network implementations
+        provide health monitoring support. However, implementations may return
+        empty dictionaries when health monitoring is disabled, effectively
+        providing "optional" health monitoring with a consistent API.
+
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_global_health_summary(self) -> dict[str, Any]:
+        """
+        Get global health summary across all peers.
+
+        Returns:
+            dict[str, Any]
+                A dictionary containing global health metrics across all connections.
+                Returns empty dict if health monitoring is disabled.
+
+        Note:
+            This method is marked as abstract to ensure all network implementations
+            provide health monitoring support. However, implementations may return
+            empty dictionaries when health monitoring is disabled, effectively
+            providing "optional" health monitoring with a consistent API.
+
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def export_health_metrics(self, format: str = "json") -> str:
+        """
+        Export health metrics in specified format.
+
+        Parameters
+        ----------
+        format : str
+            The format to export metrics in. Supported: "json", "prometheus"
+
+        Returns
+        -------
+        str
+            The health metrics in the requested format.
+            Returns empty string or object if health monitoring is disabled.
+
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_health_monitor_status(self) -> dict[str, Any]:
+        """
+        Get status information about the health monitoring service.
+
+        Returns
+        -------
+        dict[str, Any]
+            A dictionary containing health monitor status information including:
+            - enabled: Whether health monitoring is active
+            - monitoring_task_started: Whether the monitoring task is running
+            - check_interval_seconds: Health check interval
+            - total_connections: Total number of connections
+            - monitored_connections: Number of monitored connections
+            - total_peers: Total number of peers
+            - monitored_peers: Number of peers being monitored
+            Returns {"enabled": False} if health monitoring is disabled.
+
+        """
+        raise NotImplementedError
 
 
 @dataclass
@@ -2241,6 +2360,98 @@ class IHost(ABC):
         Close the host and all underlying connections and services.
 
         """
+
+    @abstractmethod
+    def get_connection_health(self, peer_id: ID) -> dict[str, Any]:
+        """
+        Get health summary for peer connections.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer to get health information for.
+
+        Returns
+        -------
+        dict[str, Any]
+            A dictionary containing health metrics for the peer's connections.
+            Returns empty dict if health monitoring is disabled or peer not found.
+
+        Note
+        ----
+        This method is marked as abstract to ensure all host implementations
+        provide health monitoring support. However, implementations may return
+        empty dictionaries when health monitoring is disabled, effectively
+        providing "optional" health monitoring with a consistent API.
+
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_network_health_summary(self) -> dict[str, Any]:
+        """
+        Get overall network health summary.
+
+        Returns:
+            dict[str, Any]
+                A dictionary containing global health metrics across all connections.
+                Returns empty dict if health monitoring is disabled.
+
+        Note:
+            This method is marked as abstract to ensure all host implementations
+            provide health monitoring support. However, implementations may return
+            empty dictionaries when health monitoring is disabled, effectively
+            providing "optional" health monitoring with a consistent API.
+
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def export_health_metrics(self, format: str = "json") -> str:
+        """
+        Export health metrics in specified format.
+
+        Parameters
+        ----------
+        format : str
+            The format to export metrics in. Supported: "json", "prometheus"
+
+        Returns
+        -------
+        str
+            The health metrics in the requested format.
+            Returns empty string or object if health monitoring is disabled.
+
+        Note
+        ----
+        This method is marked as abstract to ensure all host implementations
+        provide health monitoring support. However, implementations may return
+        empty strings when health monitoring is disabled, effectively providing
+        "optional" health monitoring with a consistent API.
+
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_health_monitor_status(self) -> dict[str, Any]:
+        """
+        Get status information about the health monitoring service.
+
+        Returns
+        -------
+        dict[str, Any]
+            A dictionary containing health monitor status information including:
+            - enabled: Whether health monitoring is active
+            - monitoring_task_started: Whether the monitoring task is running
+            - check_interval_seconds: Health check interval
+            - total_connections: Total number of connections
+            - monitored_connections: Number of monitored connections
+            - total_peers: Total number of peers
+            - monitored_peers: Number of peers being monitored
+            Returns {"enabled": False} if health monitoring is disabled.
+
+        """
+        raise NotImplementedError
 
     @abstractmethod
     async def upgrade_outbound_connection(

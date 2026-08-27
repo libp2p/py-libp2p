@@ -110,6 +110,11 @@ def _yamux_batch_threshold_divisor() -> int:
 
 _DEFAULT_DATA_FRAME_READ_TIMEOUT = 60.0
 
+# How often the stale-stream sweeper runs, and how long a fully-closed stream
+# with unread buffered data is kept before its bookkeeping is reclaimed.
+_STALE_STREAM_SWEEP_INTERVAL = 30.0
+_STALE_STREAM_GRACE_SECONDS = 60.0
+
 
 def _yamux_data_read_timeout() -> float:
     """Seconds to wait for an announced DATA frame body before tearing down"""
@@ -164,6 +169,17 @@ class YamuxStream(IMuxedStream):
         self.send_closed = False
         self.recv_closed = False
         self.reset_received = False  # Track if RST was received
+        # True for outbound streams created via ``Yamux.open_stream``, which
+        # consume a slot from the connection's backlog semaphore.
+        self._owns_backlog_slot = False
+        # Guards the single release of the backlog slot (a stream can be
+        # finalized once from ``close``/``reset`` and once from the incoming
+        # frame handler when the peer closes its side).
+        self._backlog_slot_released = False
+        # trio.current_time() when the stream became fully closed while still
+        # holding unread buffered data (used by the stale-stream sweeper to
+        # reclaim the entry after a grace period). 0.0 = not fully closed yet.
+        self._closed_at = 0.0
         self.send_window = DEFAULT_WINDOW_SIZE
         self.recv_window = DEFAULT_WINDOW_SIZE
         self.window_lock = trio.Lock()
@@ -512,21 +528,28 @@ class YamuxStream(IMuxedStream):
                     data += chunk
                     await self._auto_tune_and_send_window_update(bytes_read=len(chunk))
 
+                # Return available data immediately (stream semantics, not EOF-gated).
+                # This matches read_stream() behavior and prevents deadlocks where
+                # the reader blocks waiting for stream close while the writer blocks
+                # waiting for the reader to consume data and respond.
+                if self.closed and not buffer:
+                    # Fully closed and buffer drained — reclaim bookkeeping so
+                    # fully-closed streams with unread data don't leak.
+                    await self.conn._finalize_stream(self, fully_closed=True)
+                if data:
+                    return data
+
+                # No data yet — check for terminal states before waiting.
+
                 # Check for reset
                 if self.reset_received:
                     logger.debug(f"Stream {self.stream_id}: Stream was reset")
-                    # Return any data we managed to read before the reset
-                    if data:
-                        return data
                     raise MuxedStreamReset("Stream was reset")
 
                 # If stream is closed and buffer is empty
-                if self.recv_closed and len(buffer) == 0:
+                if self.recv_closed:
                     logger.debug(f"Stream {self.stream_id}: Closed with empty buffer")
-                    if data:
-                        return data
-                    else:
-                        raise MuxedStreamEOF("Stream is closed for receiving")
+                    raise MuxedStreamEOF("Stream is closed for receiving")
 
                 # Wait for more data or stream closure
                 logger.debug(f"Stream {self.stream_id}: Waiting for data or FIN")
@@ -585,6 +608,13 @@ class YamuxStream(IMuxedStream):
                 # Stream is half-closed but not fully closed
                 self.closed = False
 
+            # Release the backlog slot now that the local side is done with
+            # this stream. If the peer already closed its side as well, drop
+            # the stream bookkeeping entirely.
+            await self.conn._finalize_stream(
+                self, fully_closed=(self.send_closed and self.recv_closed)
+            )
+
     async def reset(self) -> None:
         if not self.closed:
             async with self.close_lock:
@@ -606,6 +636,9 @@ class YamuxStream(IMuxedStream):
                     self.send_closed = True
                     self.recv_closed = True
                     self.reset_received = True  # Mark as reset
+            # A reset kills the stream in both directions immediately, so the
+            # backlog slot can be released and the bookkeeping dropped.
+            await self.conn._finalize_stream(self, fully_closed=True)
 
     def set_deadline(self, ttl: int) -> None:
         """
@@ -688,12 +721,9 @@ class Yamux(IMuxedConn):
             except Exception:
                 # Connection likely closed, exit the loop
                 break
-            if self.event_shutting_down.is_set():
-                break
-            # Sleep between measurements, checking shutdown periodically
+            # Sleep between measurements, waking immediately if connection shuts down
             with trio.move_on_after(RTT_MEASURE_INTERVAL):
-                while not self.event_shutting_down.is_set():
-                    await trio.sleep(1.0)
+                await self.event_shutting_down.wait()
 
     @property
     def is_established(self) -> bool:
@@ -724,6 +754,9 @@ class Yamux(IMuxedConn):
             )
 
             nursery.start_soon(self._measure_rtt_loop)
+            # Reclaim bookkeeping of fully-closed streams that were never
+            # cleaned up (e.g. unread buffered data on a peer that FIN'd).
+            nursery.start_soon(self._stale_stream_sweeper)
             # Use nursery.start() to ensure handle_incoming has started
             # before we set event_started. This prevents race conditions
             # where streams are opened before the muxer is ready.
@@ -852,9 +885,15 @@ class Yamux(IMuxedConn):
             stream_id = self.next_stream_id
             self.next_stream_id += 2
             stream = YamuxStream(stream_id, self, True)
+            stream._owns_backlog_slot = True
             self.streams[stream_id] = stream
             self.stream_buffers[stream_id] = bytearray()
             self.stream_events[stream_id] = trio.Event()
+            logger.debug(
+                f"Yamux: opened stream {stream_id} (peer {self.peer_id}); "
+                f"open streams: {len(self.streams)}, backlog slots free: "
+                f"{self.stream_backlog_semaphore.value}"
+            )
 
         # If stream is rejected or errors, release the semaphore
         try:
@@ -871,6 +910,7 @@ class Yamux(IMuxedConn):
             return stream
         except Exception as e:
             self.stream_backlog_semaphore.release()
+            stream._backlog_slot_released = True
             # Clean up stream if SYN fails
             async with self.streams_lock:
                 if stream_id in self.streams:
@@ -904,6 +944,109 @@ class Yamux(IMuxedConn):
         except trio.EndOfChannel:
             logger.debug("New stream channel closed, connection is shutting down")
             raise MuxedConnUnavailable("Connection closed")
+
+    def _finalize_stream_locked(
+        self, stream: YamuxStream, *, fully_closed: bool
+    ) -> None:
+        """
+        Release a closed stream's backlog slot and optionally drop its bookkeeping.
+
+        The backlog slot is released as soon as the local side is done with the
+        stream (``close``/``reset``), so a connection can open an unbounded
+        number of short-lived streams over its lifetime (e.g. one bitswap
+        wantlist stream per batch) without exhausting the 256-slot semaphore.
+        When ``fully_closed`` (both directions closed on the wire, or a RST
+        received), the stream entry is also removed — but only once its receive
+        buffer is drained, preserving half-close read semantics for any data
+        that was already buffered.
+
+        Caller must hold ``streams_lock``.
+        """
+        if not stream._backlog_slot_released:
+            stream._backlog_slot_released = True
+            if stream._owns_backlog_slot:
+                self.stream_backlog_semaphore.release()
+        if fully_closed:
+            sid = stream.stream_id
+            if not self.stream_buffers.get(sid):
+                self.streams.pop(sid, None)
+                self.stream_buffers.pop(sid, None)
+                self.stream_events.pop(sid, None)
+                logger.debug(
+                    f"Yamux: closed stream {sid} (peer {self.peer_id}); "
+                    f"open streams: {len(self.streams)}, backlog slots free: "
+                    f"{self.stream_backlog_semaphore.value}"
+                )
+            elif stream._closed_at == 0.0:
+                # Fully closed but the peer's data is still buffered (reader
+                # hasn't drained it yet). Stamp the close time so the
+                # stale-stream sweeper can reclaim this entry once the grace
+                # period elapses — otherwise it would leak for the lifetime of
+                # the connection (no more data can arrive after full close).
+                stream._closed_at = trio.current_time()
+
+    async def _finalize_stream(
+        self, stream: YamuxStream, *, fully_closed: bool
+    ) -> None:
+        """Acquire ``streams_lock`` and finalize a closed stream."""
+        async with self.streams_lock:
+            self._finalize_stream_locked(stream, fully_closed=fully_closed)
+
+    def _sweep_stale_streams(self, now: float | None = None) -> int:
+        """
+        Reclaim bookkeeping of fully-closed streams; return count reclaimed.
+
+        A fully-closed stream whose peer data is still buffered keeps its
+        entry so readers can drain it. Once it has been fully closed for
+        longer than ``_STALE_STREAM_GRACE_SECONDS``, the entry is reclaimed:
+        the peer sent FIN/RST, so no more data can arrive, and any data still
+        unread at that point is dropped (readers of fully-closed streams are
+        expected to drain promptly; a 60s grace makes this a non-issue in
+        practice). This prevents unbounded accumulation of dead entries on
+        long-lived connections.
+
+        Caller must hold ``streams_lock``.
+        """
+        if now is None:
+            now = trio.current_time()
+        reclaimed = 0
+        for sid in list(self.streams.keys()):
+            stream = self.streams[sid]
+            if not stream.closed:
+                continue
+            buffer = self.stream_buffers.get(sid)
+            if buffer:
+                # Unread data still buffered: only reclaim after the grace
+                # period, and never age out a stream whose close time was
+                # never stamped (defensive — avoids dropping data on a
+                # fully-closed stream that missed the stamping path).
+                if stream._closed_at == 0.0:
+                    continue
+                if (now - stream._closed_at) < _STALE_STREAM_GRACE_SECONDS:
+                    continue
+            if not stream._backlog_slot_released:
+                stream._backlog_slot_released = True
+                if stream._owns_backlog_slot:
+                    self.stream_backlog_semaphore.release()
+            self.streams.pop(sid, None)
+            self.stream_buffers.pop(sid, None)
+            self.stream_events.pop(sid, None)
+            reclaimed += 1
+            logger.debug(
+                f"Yamux: swept stale closed stream {sid} (peer "
+                f"{self.peer_id}); open streams: {len(self.streams)}, "
+                f"backlog slots free: {self.stream_backlog_semaphore.value}"
+            )
+        return reclaimed
+
+    async def _stale_stream_sweeper(self) -> None:
+        """Periodically reclaim bookkeeping of fully-closed stale streams."""
+        while not self.event_shutting_down.is_set():
+            await trio.sleep(_STALE_STREAM_SWEEP_INTERVAL)
+            if self.event_shutting_down.is_set():
+                break
+            async with self.streams_lock:
+                self._sweep_stale_streams()
 
     async def read_stream(self, stream_id: int, n: int = -1) -> bytes:
         logger.debug(f"Reading from stream {self.peer_id}:{stream_id}, n={n}")
@@ -950,6 +1093,11 @@ class Yamux(IMuxedConn):
                         f"from stream {self.peer_id}:{stream_id}, "
                         f"buffer_len={len(buffer)} (recv_closed)"
                     )
+                    if stream.closed:
+                        # Buffer fully drained on a fully-closed stream —
+                        # reclaim the bookkeeping now instead of waiting for
+                        # the sweeper (we already hold streams_lock).
+                        self._finalize_stream_locked(stream, fully_closed=True)
                     return data
 
                 if stream.reset_received:
@@ -971,6 +1119,10 @@ class Yamux(IMuxedConn):
                         f"from stream {self.peer_id}:{stream_id}, "
                         f"buffer_len={len(buffer)}"
                     )
+                    if stream.closed:
+                        # Buffer fully drained on a fully-closed stream —
+                        # reclaim the bookkeeping now (we hold streams_lock).
+                        self._finalize_stream_locked(stream, fully_closed=True)
                     return data
 
                 # Check if recv_closed and buffer empty
@@ -1181,6 +1333,10 @@ class Yamux(IMuxedConn):
                                 if stream.send_closed:
                                     stream.closed = True
                                 self.stream_events[stream_id].set()
+                                if stream.closed:
+                                    self._finalize_stream_locked(
+                                        stream, fully_closed=True
+                                    )
 
                             if flags & FLAG_RST:
                                 logger.debug(
@@ -1190,6 +1346,7 @@ class Yamux(IMuxedConn):
                                 stream.closed = True
                                 stream.reset_received = True
                                 self.stream_events[stream_id].set()
+                                self._finalize_stream_locked(stream, fully_closed=True)
                                 # Deliver the reset stream to accept_stream() so
                                 # callers can observe the reset state, but do NOT
                                 # send an ACK back — the stream is already dead.
@@ -1415,6 +1572,11 @@ class Yamux(IMuxedConn):
                                     # Wake up reader
                                     self.stream_events[stream_id].set()
 
+                                if self.streams[stream_id].closed:
+                                    self._finalize_stream_locked(
+                                        self.streams[stream_id], fully_closed=True
+                                    )
+
                     except trio.TooSlowError:
                         raise
                     except Exception as e:
@@ -1464,6 +1626,9 @@ class Yamux(IMuxedConn):
                                 stream.reset_received = True
                                 # Wake up reader
                                 self.stream_events[stream_id].set()
+
+                            if stream.closed:
+                                self._finalize_stream_locked(stream, fully_closed=True)
             except trio.TooSlowError:
                 logger.warning(
                     f"Yamux: timed out reading DATA frame body for peer "

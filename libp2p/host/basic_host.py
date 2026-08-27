@@ -16,6 +16,9 @@ from typing import (
 )
 import weakref
 
+if TYPE_CHECKING:
+    from libp2p.network.tag_store import TagStore
+
 from cryptography import x509
 from cryptography.x509.oid import ExtensionOID
 import multiaddr
@@ -367,8 +370,6 @@ class BasicHost(IHost):
             The tag store managing peer priorities and protections.
 
         """
-        from libp2p.network.tag_store import TagStore  # noqa: F401 (type reference)
-
         return self._network.tag_store  # type: ignore[attr-defined]
 
     def _detect_negotiate_timeout_from_transport(self) -> float | None:
@@ -586,8 +587,7 @@ class BasicHost(IHost):
         :return: first supported protocol, or None if not cached
         """
         try:
-            # Check if peer exists in peerstore first (avoid auto-creation)
-            if peer_id not in self.peerstore.peer_ids():
+            if not self.peerstore.has_peer(peer_id):
                 return None
 
             # Only use protocol caching if we have a connection to this peer
@@ -858,6 +858,7 @@ class BasicHost(IHost):
             )
             protocol_choices = [preferred]
 
+        success = False
         try:
             muxed_conn = getattr(net_stream, "muxed_conn", None)
             stream_semaphore = (
@@ -892,6 +893,7 @@ class BasicHost(IHost):
                 communicator,
                 negotiate_timeout,
             )
+            success = True
         except MultiselectClientError as error:
             # Enhanced error logging for debugging
             error_msg = str(error)
@@ -956,9 +958,15 @@ class BasicHost(IHost):
                 f"  Registry Stats: {registry_stats}"
             )
 
-            await net_stream.reset()
             raise StreamFailure(f"failed to open a stream to peer {peer_id}") from error
         finally:
+            if not success:
+                # Shield cleanup from cancellation
+                with trio.CancelScope(shield=True):  # type: ignore[call-arg]
+                    try:
+                        await net_stream.reset()
+                    except Exception as e:
+                        logger.debug(f"Failed to reset stream during cleanup: {e}")
             if semaphore_acquired and semaphore_to_use is not None:
                 semaphore_to_use.release()
 
@@ -982,16 +990,27 @@ class BasicHost(IHost):
         """
         new_stream = await self._network.new_stream(peer_id)
 
+        success = False
         try:
             response = await self.multiselect_client.query_multistream_command(
                 MultiselectCommunicator(new_stream), command, response_timeout
             )
+            success = True
+            return response
         except MultiselectClientError as error:
-            logger.debug("fail to open a stream to peer %s, error=%s", peer_id, error)
-            await new_stream.reset()
-            raise StreamFailure(f"failed to open a stream to peer {peer_id}") from error
-
-        return response
+            raise StreamFailure(
+                f"failed to query command {command} to peer {peer_id}"
+            ) from error
+        finally:
+            with trio.CancelScope(shield=True):  # type: ignore[call-arg]
+                try:
+                    if success:
+                        await new_stream.close()
+                    else:
+                        await new_stream.reset()
+                except Exception as e:
+                    logger.debug(f"Failed to clean up command stream: {e}")
+        raise StreamFailure(f"failed to query command {command} to peer {peer_id}")
 
     async def connect(self, peer_info: PeerInfo) -> None:
         """
@@ -1095,7 +1114,7 @@ class BasicHost(IHost):
             return True
         cacheable = [str(p) for p in _SAFE_CACHED_PROTOCOLS]
         try:
-            if peer_id not in self.peerstore.peer_ids():
+            if not self.peerstore.has_peer(peer_id):
                 return False
             supported = self.peerstore.supports_protocols(peer_id, cacheable)
             return bool(supported)
@@ -1121,10 +1140,9 @@ class BasicHost(IHost):
         swarm_conn = connections[0]
         event_started = getattr(swarm_conn, "event_started", None)
         if event_started is not None and not event_started.is_set():
-            try:
-                with trio.fail_after(5.0):
-                    await event_started.wait()
-            except Exception:
+            with trio.move_on_after(5.0) as _ev_cs:
+                await event_started.wait()
+            if _ev_cs.cancelled_caught:
                 return
 
         try:
@@ -1134,7 +1152,7 @@ class BasicHost(IHost):
             return
 
         try:
-            with trio.fail_after(10.0):
+            with trio.move_on_after(10.0) as _id_cs:
                 try:
                     data = await read_length_prefixed_protobuf(
                         stream, use_varint_format=True
@@ -1142,6 +1160,13 @@ class BasicHost(IHost):
                 except Exception:
                     # Remote may use legacy raw protobuf format
                     data = await stream.read()
+            if _id_cs.cancelled_caught:
+                logger.debug("Identify[%s]: read timed out for %s", reason, peer_id)
+                try:
+                    await stream.reset()
+                except Exception:
+                    pass
+                return
             identify_msg = IdentifyMsg()
             identify_msg.ParseFromString(data)
             await update_peerstore_from_identify(self.peerstore, peer_id, identify_msg)
@@ -1220,10 +1245,9 @@ class BasicHost(IHost):
             return
         event_started = getattr(conn, "event_started", None)
         if event_started is not None and not event_started.is_set():
-            try:
-                with trio.fail_after(5.0):
-                    await event_started.wait()
-            except Exception:
+            with trio.move_on_after(5.0) as _ev_cs2:
+                await event_started.wait()
+            if _ev_cs2.cancelled_caught:
                 return
         self._schedule_identify(peer_id, reason="notifee-connected")
 
@@ -1275,6 +1299,42 @@ class BasicHost(IHost):
         if muxed_conn is None:
             return False
         return not muxed_conn.is_closed
+
+    def get_connection_health(self, peer_id: ID) -> dict[str, Any]:
+        """
+        Get health summary for peer connections.
+        Delegates to the network layer if health monitoring is available.
+        """
+        if hasattr(self._network, "get_peer_health_summary"):
+            return self._network.get_peer_health_summary(peer_id)
+        return {}
+
+    def get_network_health_summary(self) -> dict[str, Any]:
+        """
+        Get overall network health summary.
+        Delegates to the network layer if health monitoring is available.
+        """
+        if hasattr(self._network, "get_global_health_summary"):
+            return self._network.get_global_health_summary()
+        return {}
+
+    def export_health_metrics(self, format: str = "json") -> str:
+        """
+        Export health metrics in specified format.
+        Delegates to the network layer if health monitoring is available.
+        """
+        if hasattr(self._network, "export_health_metrics"):
+            return self._network.export_health_metrics(format)
+        return "{}" if format == "json" else ""
+
+    async def get_health_monitor_status(self) -> dict[str, Any]:
+        """
+        Get status information about the health monitoring service.
+        Delegates to the network layer if health monitoring is available.
+        """
+        if hasattr(self._network, "get_health_monitor_status"):
+            return await self._network.get_health_monitor_status()
+        return {"enabled": False}
 
     # Reference: `BasicHost.newStreamHandler` in Go.
     async def _swarm_stream_handler(self, net_stream: INetStream) -> None:

@@ -10,6 +10,10 @@ from libp2p.exceptions import (
 from libp2p.io.abc import (
     Reader,
 )
+from libp2p.io.exceptions import (
+    IncompleteReadError,
+    MessageTooLarge,
+)
 from libp2p.io.utils import (
     read_exactly,
 )
@@ -118,6 +122,64 @@ async def read_varint_prefixed_bytes(reader: Reader) -> bytes:
     len_msg = await decode_uvarint_from_stream(reader)
     data = await read_exactly(reader, len_msg)
     return data
+
+
+async def read_varint_prefixed_bytes_limited(reader: Reader, max_length: int) -> bytes:
+    """
+    Read a varint-length-prefixed payload with a hard size limit.
+
+    Decodes the length prefix first and rejects values above ``max_length``
+    before reading the body, preventing remote memory exhaustion via
+    untrusted length prefixes.
+
+    Raises:
+        ValueError: If ``max_length`` is not positive.
+        ParseError: If the varint length prefix is invalid.
+        MessageTooLarge: If the claimed length exceeds ``max_length``.
+        IncompleteReadError: If the stream ends before the full payload arrives.
+
+    """
+    if max_length <= 0:
+        raise ValueError("max_length must be greater than 0")
+
+    length_bytes = b""
+    for _ in range(10):  # max 10 bytes for a 64-bit uvarint
+        b = await reader.read(1)
+        if not b:
+            raise IncompleteReadError(
+                "Stream ended while reading varint length prefix",
+                expected_bytes=1,
+                received_bytes=0,
+            )
+        length_bytes += b
+        if b[0] & 0x80 == 0:
+            break
+    else:
+        raise ParseError(
+            "Varint decoding error: integer exceeds maximum size of 64 bits"
+        )
+
+    msg_length = decode_uvarint(length_bytes)
+
+    if msg_length > max_length:
+        raise MessageTooLarge(
+            f"Message length {msg_length} exceeds maximum allowed {max_length}"
+        )
+
+    result = bytearray()
+    remaining = msg_length
+    while remaining > 0:
+        chunk = await reader.read(remaining)
+        if not chunk:
+            raise IncompleteReadError(
+                f"Incomplete message: expected {msg_length}, got {len(result)}",
+                expected_bytes=msg_length,
+                received_bytes=len(result),
+            )
+        result.extend(chunk)
+        remaining -= len(chunk)
+
+    return bytes(result)
 
 
 # Delimited read/write, used by multistream-select.
