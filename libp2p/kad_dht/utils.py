@@ -59,7 +59,7 @@ def maybe_consume_signed_record(
                     msg.senderRecord,
                     "libp2p-peer-record",
                 )
-                if not (isinstance(peer_id, ID) and record.peer_id == peer_id):
+                if peer_id is not None and record.peer_id != peer_id:
                     return False
                 # Use the default  TTL of 2 hours (7200 seconds)
                 if not host.get_peerstore().consume_peer_record(envelope, 7200):

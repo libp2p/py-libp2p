@@ -574,6 +574,15 @@ class TestKBucketSubnetDiversity:
         # Relayed address exposes the relay's IP, not the peer's → exempt
         assert _subnet_key(_peer_with_addrs("/ip4/8.8.8.9/tcp/1/p2p-circuit")) is None
 
+    def test_targeted_bucket_key_generation(self, mock_host):
+        """Test targeted K-bucket refresh keys."""
+        local_id = create_valid_peer_id("local")
+        rt = RoutingTable(local_id, mock_host)
+        keys = rt.get_target_keys_for_refresh()
+        assert len(keys) == len(rt.buckets)
+        for i, bucket in enumerate(rt.buckets):
+            assert bucket.key_in_range(keys[i])
+
 
 class TestConfigurableSubnetLimit:
     """Runtime-configurable per-bucket subnet cap (issue #1422)."""

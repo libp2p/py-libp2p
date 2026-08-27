@@ -1,0 +1,1 @@
+De-flaked identify-aware GossipSub publish tests by waiting for the subscriber payload instead of a fixed ``trio.sleep``, which raced on slow Windows CI.

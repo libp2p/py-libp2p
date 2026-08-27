@@ -13,6 +13,7 @@ from ipaddress import (
     ip_network,
 )
 import logging
+import secrets
 import time
 from typing import TYPE_CHECKING
 
@@ -41,7 +42,6 @@ from .common import (
     BUCKET_SIZE,
     MAX_PEERS_PER_SUBNET,
     MAXIMUM_BUCKETS,
-    PEER_REFRESH_INTERVAL,
     STALE_PEER_THRESHOLD,
     SUBNET_PREFIX_LEN_V4,
     SUBNET_PREFIX_LEN_V6,
@@ -64,6 +64,18 @@ def peer_id_to_key(peer_id: ID) -> bytes:
 def key_to_int(key: bytes) -> int:
     """Convert a 256-bit key to an integer for range calculations."""
     return int.from_bytes(key, byteorder="big")
+
+
+def gen_random_key_in_bucket(bucket: KBucket) -> bytes:
+    """
+    Generate a 32-byte key uniformly at random within the bucket's key range.
+    Matches go-libp2p-kbucket targeted bucket refresh.
+    """
+    if bucket.max_range <= bucket.min_range + 1:
+        val = bucket.min_range
+    else:
+        val = secrets.randbelow(bucket.max_range - bucket.min_range) + bucket.min_range
+    return val.to_bytes(32, byteorder="big")
 
 
 def _subnet_key(peer_info: PeerInfo) -> str | None:
@@ -146,6 +158,7 @@ class KBucket:
         self.max_peers_per_subnet = max_peers_per_subnet
         # Store PeerInfo objects along with last-seen timestamp
         self.peers: OrderedDict[ID, tuple[PeerInfo, float]] = OrderedDict()
+        self._lock: trio.Lock = trio.Lock()
 
     def _subnet_limit(self) -> int:
         """
@@ -181,66 +194,66 @@ class KBucket:
         peer was rejected by IP/subnet diversity (issue #1383:
         ``MAX_PEERS_PER_SUBNET``).
         """
-        current_time = time.time()
-        peer_id = peer_info.peer_id
+        async with self._lock:
+            current_time = time.time()
+            peer_id = peer_info.peer_id
 
-        # If peer is already in the bucket, move it to the end (most recently seen)
-        if peer_id in self.peers:
-            self.refresh_peer_last_seen(peer_id)
-            return True
+            # If peer is already in the bucket, move it to the end (most recently seen)
+            if peer_id in self.peers:
+                self.refresh_peer_last_seen(peer_id)
+                return True
 
-        # Enforce IP/subnet diversity (issue #1383): refuse a new peer whose
-        # globally-routable subnet already holds MAX_PEERS_PER_SUBNET peers in
-        # this bucket. Exempt peers (subnet is None) are never grouped. Disabled
-        # when MAX_PEERS_PER_SUBNET <= 0.
-        limit = self._subnet_limit()
-        if limit > 0:
-            subnet = _subnet_key(peer_info)
-            if subnet is not None and self._peers_in_subnet(subnet) >= limit:
+            # Enforce IP/subnet diversity (issue #1383): refuse a new peer whose
+            # globally-routable subnet already holds the per-bucket cap (issue
+            # #1422). Exempt peers (subnet is None) are never grouped. Disabled
+            # when the cap is <= 0.
+            limit = self._subnet_limit()
+            if limit > 0:
+                subnet = _subnet_key(peer_info)
+                if subnet is not None and self._peers_in_subnet(subnet) >= limit:
+                    logger.debug(
+                        "Subnet %s at capacity (%d), rejecting peer %s",
+                        subnet,
+                        limit,
+                        peer_id,
+                    )
+                    return False
+
+            # If bucket has space, add the peer
+            if len(self.peers) < self.bucket_size:
+                self.peers[peer_id] = (peer_info, current_time)
+                return True
+
+            # If bucket is full, we need to replace the least-recently seen peer
+            # Get the least-recently seen peer
+            oldest_peer_id = self.get_oldest_peer()
+            if oldest_peer_id is None:
+                logger.warning("No oldest peer found when bucket is full")
+                return False
+
+            # Check if the old peer is responsive to ping request
+            # Try to ping the oldest peer, not the new peer
+            response = await self._ping_peer(oldest_peer_id)
+            if response:
+                # If the old peer is still alive, we will not add the new peer
                 logger.debug(
-                    "Subnet %s at capacity (%d), rejecting peer %s",
-                    subnet,
-                    limit,
+                    "Old peer %s is still alive, cannot add new peer %s",
+                    oldest_peer_id,
                     peer_id,
                 )
                 return False
 
-        # If bucket has space, add the peer
-        if len(self.peers) < self.bucket_size:
-            self.peers[peer_id] = (peer_info, current_time)
-            return True
-
-        # If bucket is full, we need to replace the least-recently seen peer
-        # Get the least-recently seen peer
-        oldest_peer_id = self.get_oldest_peer()
-        if oldest_peer_id is None:
-            logger.warning("No oldest peer found when bucket is full")
-            return False
-
-        # Check if the old peer is responsive to ping request
-        # Try to ping the oldest peer, not the new peer
-        response = await self._ping_peer(oldest_peer_id)
-        if response:
-            # If the old peer is still alive, we will not add the new peer
+            # If the old peer is unresponsive, we can replace it with the new peer
             logger.debug(
-                "Old peer %s is still alive, cannot add new peer %s",
+                "Old peer %s is unresponsive, replacing with new peer %s",
                 oldest_peer_id,
                 peer_id,
             )
-            return False
+            if oldest_peer_id in self.peers:
+                del self.peers[oldest_peer_id]
 
-        # If the old peer is unresponsive, we can replace it with the new peer
-        logger.debug(
-            "Old peer %s is unresponsive, replacing with new peer %s",
-            oldest_peer_id,
-            peer_id,
-        )
-        # Remove the specific peer by ID (not popitem) to handle
-        # concurrent mutations
-        if oldest_peer_id in self.peers:
-            del self.peers[oldest_peer_id]
-        self.peers[peer_id] = (peer_info, current_time)
-        return True
+            self.peers[peer_id] = (peer_info, current_time)
+            return True
 
     def _peers_in_subnet(self, subnet: str) -> int:
         """
@@ -296,49 +309,6 @@ class KBucket:
                 stale_peers.append(peer_id)
 
         return stale_peers
-
-    async def _periodic_peer_refresh(self) -> None:
-        """Background task to periodically refresh peers"""
-        try:
-            while True:
-                await trio.sleep(PEER_REFRESH_INTERVAL)  # Check every minute
-
-                # Find stale peers (not pinged in last hour)
-                stale_peers = self.get_stale_peers(
-                    stale_threshold_seconds=STALE_PEER_THRESHOLD
-                )
-                if stale_peers:
-                    logger.debug(f"Found {len(stale_peers)} stale peers to refresh")
-
-                    for peer_id in stale_peers:
-                        try:
-                            # Try to ping the peer
-                            logger.debug("Pinging stale peer %s", peer_id)
-                            response = await self._ping_peer(peer_id)
-                            if response:
-                                # Update the last seen time
-                                self.refresh_peer_last_seen(peer_id)
-                                logger.debug(f"Refreshed peer {peer_id}")
-                            else:
-                                # If ping fails, remove the peer
-                                logger.debug(f"Failed to ping peer {peer_id}")
-                                self.remove_peer(peer_id)
-                                logger.info(f"Removed unresponsive peer {peer_id}")
-
-                            logger.debug(f"Successfully refreshed peer {peer_id}")
-                        except Exception as e:
-                            # If ping fails, remove the peer
-                            logger.debug(
-                                "Failed to ping peer %s: %s",
-                                peer_id,
-                                e,
-                            )
-                            self.remove_peer(peer_id)
-                            logger.info(f"Removed unresponsive peer {peer_id}")
-        except trio.Cancelled:
-            logger.debug("Peer refresh task cancelled")
-        except Exception as e:
-            logger.error(f"Error in peer refresh task: {e}", exc_info=True)
 
     async def _ping_peer(self, peer_id: ID) -> bool:
         """
@@ -809,6 +779,13 @@ class RoutingTable:
         ]
         logger.info("Routing table cleaned up, all data removed.")
 
+    def get_target_keys_for_refresh(self) -> list[bytes]:
+        """
+        Return targeted 32-byte keys for each active bucket in the routing table.
+        Matches go-libp2p rtrefresh strategy.
+        """
+        return [gen_random_key_in_bucket(bucket) for bucket in self.buckets]
+
     def get_diagnostics(self) -> RoutingTableDiagnostics:
         """
         Return a :class:`~libp2p.kad_dht.diagnostics.RoutingTableDiagnostics`
@@ -853,6 +830,7 @@ class RoutingTable:
 
         :param bucket: The bucket to split
         :return: True if the bucket was successfully split
+
         """
         try:
             # Find the bucket index
@@ -885,3 +863,58 @@ class RoutingTable:
         except Exception as e:
             logger.error(f"Error splitting bucket: {e}")
             return False
+
+    async def _periodic_peer_refresh(self) -> None:
+        """
+        Periodically refresh stale peers across all buckets.
+
+        Single table-level background task that runs every 5 minutes.
+        """
+        try:
+            while True:
+                await trio.sleep(300.0)  # Check every 5 minutes
+
+                # Collect stale peers across all buckets
+                stale_peers: list[ID] = []
+                for bucket in self.buckets:
+                    stale = bucket.get_stale_peers(
+                        stale_threshold_seconds=STALE_PEER_THRESHOLD
+                    )
+                    stale_peers.extend(stale)
+
+                if not stale_peers:
+                    continue
+
+                # Rate-limit pings: at most 5 peers per 5-minute cycle
+                logger.debug(
+                    f"Found {len(stale_peers)} stale peers in routing table; "
+                    f"refreshing up to 5"
+                )
+                for peer_id in stale_peers[:5]:
+                    try:
+                        # Find which bucket contains this peer
+                        target_bucket = self.find_bucket(peer_id)
+                        if target_bucket is None:
+                            continue
+
+                        response = await target_bucket._ping_peer(peer_id)
+                        if response:
+                            target_bucket.refresh_peer_last_seen(peer_id)
+                            logger.debug(f"Refreshed stale peer {peer_id}")
+                        else:
+                            target_bucket.remove_peer(peer_id)
+                            logger.info(f"Removed unresponsive stale peer {peer_id}")
+                    except Exception as e:
+                        logger.debug(f"Error checking stale peer {peer_id}: {e}")
+                    # 1s stagger between individual stale pings
+                    await trio.sleep(1.0)
+        except trio.Cancelled:
+            logger.debug("Routing table peer refresh task cancelled")
+        except Exception as e:
+            logger.error(
+                f"Error in routing table peer refresh task: {e}", exc_info=True
+            )
+
+    def start_periodic_refresh(self, nursery: trio.Nursery) -> None:
+        """Start single periodic stale peer refresh task for the routing table."""
+        nursery.start_soon(self._periodic_peer_refresh)
