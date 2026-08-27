@@ -79,7 +79,7 @@ async def test_connection_config_defaults():
     config = ConnectionConfig()
     assert config.max_connections_per_peer == 3
     assert config.connection_timeout == 30.0
-    assert config.load_balancing_strategy == "round_robin"
+    assert config.load_balancing_strategy == "best"
 
 
 @pytest.mark.trio

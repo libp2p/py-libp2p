@@ -27,7 +27,6 @@ from .exceptions import (
 )
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 
 # libp2p TLS Extension OID - Official libp2p specification
 LIBP2P_TLS_EXTENSION_OID = x509.ObjectIdentifier("1.3.6.1.4.1.53594.1.1")

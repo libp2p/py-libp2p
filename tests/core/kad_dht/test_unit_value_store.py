@@ -704,3 +704,42 @@ class TestValueStore:
 
             assert retrieved_value is not None
             assert retrieved_value.value == value
+
+    def test_max_varint_check_in_response_reading(self):
+        """
+        Verify that _get_from_peer and _query_peer_for_closest have max varint
+        byte limits to prevent DoS from malicious peers that send endless
+        continuation bytes in the varint length prefix.
+        """
+        import inspect
+
+        from libp2p.kad_dht.peer_routing import PeerRouting
+
+        # Check _get_from_peer source for max varint check / bounded reader
+        vs_source = inspect.getsource(ValueStore._get_from_peer)
+        has_max_varint = (
+            "max_varint" in vs_source
+            or "max_varint_bytes" in vs_source
+            or "read_varint_prefixed_bytes_limited" in vs_source
+        )
+
+        # Check _query_peer_for_closest source for max varint check / bounded reader
+        pr_source = inspect.getsource(PeerRouting._query_peer_for_closest)
+        has_max_varint_pr = (
+            "max_varint" in pr_source
+            or "max_varint_bytes" in pr_source
+            or "read_varint_prefixed_bytes_limited" in pr_source
+        )
+
+        assert has_max_varint, (
+            "_get_from_peer (value_store.py) has no max varint byte check. "
+            "A malicious peer could send endless continuation bytes "
+            "in the varint length prefix, causing the read loop to consume "
+            "memory/CPU indefinitely."
+        )
+        assert has_max_varint_pr, (
+            "_query_peer_for_closest (peer_routing.py) has no max varint byte check. "
+            "A malicious peer could send endless continuation bytes "
+            "in the varint length prefix, causing the read loop to consume "
+            "memory/CPU indefinitely."
+        )

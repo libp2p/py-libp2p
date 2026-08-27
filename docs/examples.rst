@@ -41,3 +41,5 @@ Examples
    examples.path_handling
    examples.metrics
    examples.multi_transport
+   examples.connection_health_monitoring
+   examples.health_monitoring

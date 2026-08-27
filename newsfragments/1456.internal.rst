@@ -1,0 +1,1 @@
+De-flaked Kademlia DHT tests by waiting until routing tables are linked instead of using fixed sleeps, which raced on slow CI runners, especially on Windows.
