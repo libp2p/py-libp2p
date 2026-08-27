@@ -199,6 +199,22 @@ def set_private_attr(obj: Any, name: str, value: Any) -> None:
     setattr(obj, name, value)
 
 
+def force_listener_dtls_server_role(pc: RTCPeerConnection) -> None:
+    """
+    Make a WebRTC-Direct listener answer as DTLS server (``a=setup:passive``).
+
+    Inferred offers use ``a=setup:actpass`` per spec. aiortc's
+    :meth:`RTCPeerConnection.createAnswer` defaults to DTLS *client* when the
+    transport role is still ``auto`` after an ``actpass`` offer — see
+    ``rtcpeerconnection.createAnswer`` lines that map ``auto`` → ``client``.
+    """
+    sctp = getattr(pc, "sctp", None)
+    dtls = getattr(sctp, "transport", None) if sctp is not None else None
+    if dtls is None:
+        raise ValueError("DTLS transport not available on peer connection")
+    dtls._set_role("server")
+
+
 # ------------------------------------------------------------------
 # Peer-connection shutdown
 # ------------------------------------------------------------------

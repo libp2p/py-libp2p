@@ -82,6 +82,43 @@ async def test_listener_advertises_certhash_in_multiaddr():
 
 
 @pytest.mark.trio
+async def test_listener_on_wildcard_advertises_concrete_interfaces():
+    """Listening on 0.0.0.0 publishes concrete interface IPs, not the wildcard."""
+    from multiaddr import Multiaddr
+
+    from libp2p.utils.address_validation import get_available_interfaces
+
+    key_pair = create_new_key_pair()
+    transport = WebRTCDirectTransport(private_key=key_pair.private_key)
+
+    async def noop_handler(conn: object) -> None:
+        pass
+
+    listener = transport.create_listener(noop_handler)
+    await listener.listen(Multiaddr("/ip4/0.0.0.0/udp/0/webrtc-direct"))
+
+    addrs = listener.get_addrs()
+    assert len(addrs) >= 1
+    for addr in addrs:
+        assert "/ip4/0.0.0.0/" not in str(addr)
+
+    has_non_loopback_iface = any(
+        (m.value_for_protocol("ip4") or "") not in ("", "127.0.0.1")
+        for m in get_available_interfaces(0, "udp")
+        if "/ip4/" in str(m)
+    )
+    if has_non_loopback_iface:
+        assert any(
+            (a.value_for_protocol("ip4") or "") != "127.0.0.1"
+            for a in addrs
+            if "/ip4/" in str(a)
+        )
+
+    await listener.close()
+    await transport.close()
+
+
+@pytest.mark.trio
 async def test_listener_binds_actual_port():
     """When port 0 is requested, the listener binds to a real port > 0."""
     key_pair = create_new_key_pair()

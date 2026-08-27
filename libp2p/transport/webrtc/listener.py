@@ -67,6 +67,49 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _resolve_candidate_host(listen_host: str) -> str:
+    """
+    Host for muxed ICE host candidates when binding a wildcard listen address.
+
+    aioice skips loopback when gathering dial-side candidates; prefer the first
+    non-loopback IPv4 interface when listening on ``0.0.0.0``.
+    """
+    if listen_host not in ("0.0.0.0", "::"):
+        return listen_host
+    from aioice.ice import get_host_addresses
+
+    hosts = get_host_addresses(use_ipv4=True, use_ipv6=False) or []
+    for host in hosts:
+        if host != "127.0.0.1":
+            return host
+    return "127.0.0.1"
+
+
+def _advertised_hosts_for_listen(listen_host: str, bound_port: int) -> list[str]:
+    """Concrete interface IPs to publish when listening on a wildcard address."""
+    if listen_host not in ("0.0.0.0", "::"):
+        return [listen_host]
+    from libp2p.utils.address_validation import get_available_interfaces
+
+    hosts: list[str] = []
+    seen: set[str] = set()
+    for maddr in get_available_interfaces(bound_port, "udp"):
+        ip = (
+            maddr.value_for_protocol("ip4")
+            if "/ip4/" in str(maddr)
+            else maddr.value_for_protocol("ip6")
+            if "/ip6/" in str(maddr)
+            else None
+        )
+        if ip is None or ip in seen:
+            continue
+        if ip in ("0.0.0.0", "::"):
+            continue
+        seen.add(ip)
+        hosts.append(ip)
+    return hosts or ["127.0.0.1"]
+
+
 class _FirstContactLimiter:
     """
     Per-source-IP token bucket for unknown-STUN first contacts.
@@ -180,8 +223,7 @@ class WebRTCDirectListener(IListener):
             ) from e
         self._mux = mux
         await self._start_trio_nursery()
-        advertised_host = host if host != "0.0.0.0" else "127.0.0.1"
-        self._candidate_host = advertised_host
+        self._candidate_host = _resolve_candidate_host(host)
         mux.set_unknown_stun_handler(self._on_unknown_stun)
 
         if self._config.enable_sdp_http_harness:
@@ -197,16 +239,17 @@ class WebRTCDirectListener(IListener):
                 )
             )
 
-        # Build advertised multiaddr with certhash and peer ID.
+        # Build advertised multiaddr(s) with certhash and peer ID.
         certhash_mb = self._certificate.fingerprint_to_multibase()
-        advertised = build_webrtc_direct_multiaddr(
-            host=advertised_host,
-            port=bound_port,
-            certhash_multibase=certhash_mb,
-            peer_id=self._local_peer_id.to_base58(),
-        )
-        self._listening_addrs.append(advertised)
-        logger.info("WebRTC Direct listener on %s", advertised)
+        for advertised_host in _advertised_hosts_for_listen(host, bound_port):
+            advertised = build_webrtc_direct_multiaddr(
+                host=advertised_host,
+                port=bound_port,
+                certhash_multibase=certhash_mb,
+                peer_id=self._local_peer_id.to_base58(),
+            )
+            self._listening_addrs.append(advertised)
+            logger.info("WebRTC Direct listener on %s", advertised)
 
     # ------------------------------------------------------------------
     # Spec path: STUN first contact -> inferred offer -> muxed PC
@@ -273,6 +316,7 @@ class WebRTCDirectListener(IListener):
             close_peer_connection,
             create_noise_channel,
             create_peer_connection,
+            force_listener_dtls_server_role,
             make_noise_channel_callbacks,
             set_private_attr,
         )
@@ -305,6 +349,7 @@ class WebRTCDirectListener(IListener):
             await pc.setRemoteDescription(
                 RTCSessionDescription(sdp=offer_sdp, type="offer")
             )
+            force_listener_dtls_server_role(pc)
             answer = await pc.createAnswer()
             await pc.setLocalDescription(answer)
         except BaseException:

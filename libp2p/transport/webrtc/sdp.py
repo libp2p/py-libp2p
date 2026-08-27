@@ -135,10 +135,10 @@ def build_inferred_offer(
     """
     The dialer's offer as the listener reconstructs it (spec v1 step 6).
 
-    ``a=setup:active`` (spec allows ``actpass`` or ``active``): with
-    ``actpass`` aiortc would answer as DTLS *client*, but the listener must
-    be the DTLS server. The fingerprint is a placeholder — see
-    :data:`_PLACEHOLDER_FINGERPRINT`.
+    Uses ``a=setup:actpass`` as in the spec. The listener must force the DTLS
+    server role before :meth:`createAnswer` — with ``actpass`` alone aiortc
+    answers as DTLS *client* (see :func:`force_listener_dtls_server_role`).
+    The fingerprint is a placeholder — see :data:`_PLACEHOLDER_FINGERPRINT`.
     """
     ip_version = "IP6" if ":" in remote_host else "IP4"
     return _SDP_TEMPLATE.format(
@@ -149,7 +149,7 @@ def build_inferred_offer(
         ice_ufrag=client_ufrag,
         ice_pwd=client_pwd,
         fingerprint=_PLACEHOLDER_FINGERPRINT,
-        setup_role="active",
+        setup_role="actpass",
         max_message_size=max_message_size,
         priority=2130706431,
     )

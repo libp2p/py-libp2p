@@ -5,7 +5,11 @@ Provides two transport variants per the libp2p WebRTC specification:
 
 - **WebRTC Direct** (``/webrtc-direct``): Server-to-browser or server-to-server
   connections where the server publishes its certificate hash in the multiaddr.
-  No relay or signaling server is required.
+  No relay or signaling server is required. The default path uses inbound STUN
+  on a shared UDP port (offer inferred from the first packet) and outbound
+  dials that synthesise an ICE-Lite answer without public STUN servers. An
+  experimental HTTP ``POST /sdp`` harness (``WebRTCTransportConfig(
+  enable_sdp_http_harness=True)``) is available for py↔py debugging only.
 
 - **WebRTC** (``/webrtc``): Private-to-private connections where both peers are
   behind NAT.  Uses Circuit Relay v2 for signaling, then upgrades to a direct

@@ -181,7 +181,9 @@ class TestSpecSdp:
         )
         assert "a=ice-ufrag:cli1\n" in sdp
         assert "a=ice-pwd:libp2p+webrtc+v1/abcdefghijklmnop\n" in sdp
-        assert "a=setup:active" in sdp  # forces aiortc into DTLS server role
+        assert (
+            "a=setup:actpass" in sdp
+        )  # spec literal; listener forces DTLS server role
         assert "c=IN IP4 203.0.113.5" in sdp
         assert "a=candidate:1 1 UDP 2130706431 203.0.113.5 54321 typ host" in sdp
         assert "a=end-of-candidates" in sdp
