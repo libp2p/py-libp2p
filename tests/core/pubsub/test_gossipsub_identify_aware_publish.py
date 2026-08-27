@@ -33,8 +33,34 @@ from tests.utils.factories import (
     IDFactory,
     PubsubFactory,
 )
+from tests.utils.pubsub.wait import (
+    wait_for_pubsub_payload,
+    wait_for_pubsub_payloads,
+)
 
 logger = logging.getLogger(__name__)
+
+# Disable auto-heartbeat so mcache.window() is not shifted during identify.
+# A 1s interval evicts catch-up messages after ~3 beats on slow Windows CI.
+_HEARTBEAT_DISABLED = 100
+
+
+def _identify_aware_publisher_state(publisher: Pubsub, peer_id: ID, topic: str) -> str:
+    """Snapshot publisher identify/queue state for timeout diagnostics."""
+    in_peers = peer_id in publisher.peers
+    in_protocol = False
+    pending_queued = False
+    router = publisher.router
+    if isinstance(router, GossipSub):
+        in_protocol = peer_id in router.peer_protocol
+        pending_queued = bool(router._pending_messages.get(peer_id))
+    subscribed = peer_id in publisher.peer_topics.get(topic, ())
+    return (
+        f"peer_in_peers={in_peers}, "
+        f"peer_in_protocol={in_protocol}, "
+        f"peer_subscribed={subscribed}, "
+        f"pending_queued={pending_queued}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -320,7 +346,7 @@ async def test_publish_before_identify_completes():
     2. Both subscribe to the same topic
     3. Connect them
     4. Immediately publish (no sleep / no waiting for mesh establishment)
-    5. Wait for propagation
+    5. Wait until the subscriber receives the payload
     6. Assert the message is received by the other node
 
     Before the identify-aware fix, step 4 could silently drop the message
@@ -334,7 +360,7 @@ async def test_publish_before_identify_completes():
         degree=1,
         degree_low=1,
         degree_high=2,
-        heartbeat_interval=1,
+        heartbeat_interval=_HEARTBEAT_DISABLED,
     ) as pubsubs:
         await pubsubs[0].subscribe(topic)
         sub_1 = await pubsubs[1].subscribe(topic)
@@ -343,22 +369,14 @@ async def test_publish_before_identify_completes():
         await connect(pubsubs[0].host, pubsubs[1].host)
         await pubsubs[0].publish(topic, data)
 
-        # Give enough time for:
-        #  - protocol negotiation to finish
-        #  - pending message flush
-        #  - message propagation
-        await trio.sleep(3)
-
-        # The message should have arrived at node 1
-        received = False
-        with trio.move_on_after(2):
-            async for msg in sub_1:
-                if msg.data == data:
-                    received = True
-                    break
-        assert received, (
-            "Message published before identify was not delivered to the peer. "
-            "The identify-aware publish queue may not be working."
+        await wait_for_pubsub_payload(
+            sub_1,
+            data,
+            fail_msg=lambda: (
+                "Message published before identify was not delivered to the peer. "
+                "The identify-aware publish queue may not be working. "
+                + _identify_aware_publisher_state(pubsubs[0], pubsubs[1].my_id, topic)
+            ),
         )
 
 
@@ -398,7 +416,7 @@ async def test_publish_before_identify_with_subscription_before_stream(monkeypat
         degree=1,
         degree_low=1,
         degree_high=2,
-        heartbeat_interval=1,
+        heartbeat_interval=_HEARTBEAT_DISABLED,
     ) as pubsubs:
         delays[pubsubs[0]] = publisher_stream_delay
         delays[pubsubs[1]] = subscriber_stream_delay
@@ -415,15 +433,15 @@ async def test_publish_before_identify_with_subscription_before_stream(monkeypat
             pubsubs[1].my_id, timeout=publisher_stream_delay + 3
         )
 
-        received = False
-        with trio.move_on_after(3):
-            async for msg in sub_1:
-                if msg.data == data:
-                    received = True
-                    break
-        assert received, (
-            "Message published before identify was not delivered when the peer's "
-            "subscription arrived before the outbound pubsub stream was ready."
+        await wait_for_pubsub_payload(
+            sub_1,
+            data,
+            fail_msg=lambda: (
+                "Message published before identify was not delivered when the "
+                "peer's subscription arrived before the outbound pubsub stream "
+                "was ready. "
+                + _identify_aware_publisher_state(pubsubs[0], pubsubs[1].my_id, topic)
+            ),
         )
 
 
@@ -441,24 +459,24 @@ async def test_publish_after_identify_still_works():
         degree=1,
         degree_low=1,
         degree_high=2,
-        heartbeat_interval=1,
+        heartbeat_interval=_HEARTBEAT_DISABLED,
     ) as pubsubs:
         await pubsubs[0].subscribe(topic)
         sub_1 = await pubsubs[1].subscribe(topic)
         await connect(pubsubs[0].host, pubsubs[1].host)
 
-        # Wait for identify / mesh to be fully established
-        await trio.sleep(2)
+        await pubsubs[0].wait_for_peer(pubsubs[1].my_id)
+        await pubsubs[1].wait_for_peer(pubsubs[0].my_id)
+        await pubsubs[0].wait_for_subscription(pubsubs[1].my_id, topic)
+        await pubsubs[1].wait_for_subscription(pubsubs[0].my_id, topic)
 
         await pubsubs[0].publish(topic, data)
 
-        received = False
-        with trio.move_on_after(3):
-            async for msg in sub_1:
-                if msg.data == data:
-                    received = True
-                    break
-        assert received, "Normal publish (after identify) was not delivered."
+        await wait_for_pubsub_payload(
+            sub_1,
+            data,
+            fail_msg="Normal publish (after identify) was not delivered.",
+        )
 
 
 @pytest.mark.trio
@@ -475,7 +493,7 @@ async def test_multiple_rapid_publishes_before_identify():
         degree=1,
         degree_low=1,
         degree_high=2,
-        heartbeat_interval=1,
+        heartbeat_interval=_HEARTBEAT_DISABLED,
     ) as pubsubs:
         await pubsubs[0].subscribe(topic)
         sub_1 = await pubsubs[1].subscribe(topic)
@@ -486,19 +504,8 @@ async def test_multiple_rapid_publishes_before_identify():
         for data in messages:
             await pubsubs[0].publish(topic, data)
 
-        await trio.sleep(3)
-
-        received_data: set[bytes] = set()
-        with trio.move_on_after(3):
-            async for msg in sub_1:
-                received_data.add(msg.data)
-                if received_data == set(messages):
-                    break
-
-        assert received_data == set(messages), (
-            f"Expected all {len(messages)} messages, got {len(received_data)}. "
-            f"Missing: {set(messages) - received_data}"
-        )
+        received_data = await wait_for_pubsub_payloads(sub_1, messages)
+        assert received_data == set(messages)
 
 
 @pytest.mark.trio
@@ -515,7 +522,7 @@ async def test_three_nodes_publish_before_full_mesh():
         degree=2,
         degree_low=1,
         degree_high=3,
-        heartbeat_interval=1,
+        heartbeat_interval=_HEARTBEAT_DISABLED,
     ) as pubsubs:
         # Subscribe all nodes and keep the subscription for node C
         await pubsubs[0].subscribe(topic)

@@ -228,10 +228,18 @@ class PingService:
             # stream after sending the last payload."
             if hasattr(stream, "close_write"):
                 await stream.close_write()  # type: ignore[attr-defined]
+            try:
+                await stream.close()
+            except Exception:
+                pass
             async with self._lock:
                 self._outbound_streams.pop(peer_id, None)
             event = PingEvent(peer_id=peer_id, rtts=rtts, failure_error=None)
         except Exception as error:
+            try:
+                await stream.reset()
+            except Exception:
+                pass
             event = PingEvent(peer_id=peer_id, rtts=None, failure_error=error)
             async with self._lock:
                 self._outbound_streams.pop(peer_id, None)

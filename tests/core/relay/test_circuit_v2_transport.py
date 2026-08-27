@@ -1675,8 +1675,8 @@ async def test_dial_peer_info_includes_reservation_proof(protocol):
     dest_peer_id = ID.from_pubkey(dest_key.public_key)
     dest_info = PeerInfo(dest_peer_id, [])
 
-    peerstore.addrs.side_effect = (
-        lambda pid: [] if pid == dest_peer_id else [relay_addr]
+    peerstore.addrs.side_effect = lambda pid: (
+        [] if pid == dest_peer_id else [relay_addr]
     )
     peerstore.peer_info.return_value = relay_info
 

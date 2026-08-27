@@ -169,13 +169,24 @@ async def test_yamux_race_condition_without_locks(yamux_pair):
                 await trio.sleep(0.005)
 
     async def reader(stream, received, name):
-        """Read messages and store them for verification."""
+        """
+        Read messages and store them for verification.
+
+        read() returns available data without waiting for stream close,
+        so we accumulate across multiple reads until EOF.
+        """
         try:
-            data = await stream.read()
+            data = b""
+            while True:
+                chunk = await stream.read()
+                if not chunk:
+                    break
+                data += chunk
             if data:
                 received.append(data)
         except MuxedStreamEOF:
-            pass
+            if data:
+                received.append(data)
 
     # Running all operations concurrently
     async with trio.open_nursery() as nursery:

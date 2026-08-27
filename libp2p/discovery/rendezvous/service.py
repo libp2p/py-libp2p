@@ -8,10 +8,13 @@ import time
 import varint
 
 from libp2p.abc import IHost, INetStream
+from libp2p.io.exceptions import IncompleteReadError, MessageTooLarge
 from libp2p.peer.id import ID as PeerID
+from libp2p.utils.varint import read_varint_prefixed_bytes_limited
 
 from .config import (
     MAX_DISCOVER_LIMIT,
+    MAX_MESSAGE_SIZE,
     MAX_NAMESPACE_LENGTH,
     MAX_PEER_ADDRESS_LENGTH,
     MAX_REGISTRATIONS,
@@ -85,27 +88,22 @@ class RendezvousService:
 
         try:
             while True:
-                # Read message length
-                length_bytes = b""
-                while True:
-                    b = await stream.read(1)
-                    if not b:
+                try:
+                    message_bytes = await read_varint_prefixed_bytes_limited(
+                        stream, MAX_MESSAGE_SIZE
+                    )
+                except MessageTooLarge as e:
+                    logger.warning(
+                        "Rendezvous message too large from %s: %s", peer_id, e
+                    )
+                    return
+                except IncompleteReadError as e:
+                    if e.is_clean_close:
                         return  # Stream closed
-                    length_bytes += b
-                    if b[0] & 0x80 == 0:
-                        break
-
-                message_length = varint.decode_bytes(length_bytes)
-
-                # Read message data
-                message_bytes = b""
-                remaining = message_length
-                while remaining > 0:
-                    chunk = await stream.read(remaining)
-                    if not chunk:
-                        return  # Stream closed
-                    message_bytes += chunk
-                    remaining -= len(chunk)
+                    logger.warning(
+                        "Incomplete rendezvous message from %s: %s", peer_id, e
+                    )
+                    return
 
                 # Parse message
                 request = Message()
