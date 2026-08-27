@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 import logging
+import socket
 import struct
 from typing import Protocol
 
@@ -166,6 +167,18 @@ class UdpMux(asyncio.DatagramProtocol):
         self._transport = transport  # type: ignore[assignment]
         addr = transport.get_extra_info("sockname")
         self._local_addr = (addr[0], addr[1])
+        # Windows reports an ICMP port-unreachable for a datagram we sent (e.g.
+        # a keepalive to a peer that just closed) as WSAECONNRESET on the *next
+        # recv* of this shared socket, and the proactor loop does not re-arm
+        # reading after error_received - the mux would go deaf for every other
+        # peer. SIO_UDP_CONNRESET=False disables that behaviour. No-op elsewhere.
+        sio = getattr(socket, "SIO_UDP_CONNRESET", None)
+        sock = transport.get_extra_info("socket")
+        if sio is not None and sock is not None:
+            try:
+                sock.ioctl(sio, False)
+            except OSError:
+                logger.debug("UdpMux: SIO_UDP_CONNRESET not applied", exc_info=True)
 
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
         norm: tuple[str, int] = (addr[0], addr[1])
