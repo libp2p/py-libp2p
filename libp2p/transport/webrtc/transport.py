@@ -171,7 +171,9 @@ class WebRTCDirectTransport(ITransport):
             await bridge.run_coro(pc.setRemoteDescription(answer))
 
             # 5. Wait for ICE connection
-            await bridge.run_coro(wait_for_connected(pc))
+            await bridge.run_coro(
+                wait_for_connected(pc, timeout=self._config.handshake_timeout)
+            )
 
             # 6. Verify remote DTLS fingerprint
             expected_fp = fingerprint_from_multibase(certhash)

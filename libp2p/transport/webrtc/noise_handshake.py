@@ -3,14 +3,17 @@ Noise XX handshake over WebRTC data channel 0.
 
 Per the libp2p WebRTC spec, after a DTLS connection is established the
 two peers perform a Noise XX handshake over data channel 0 to mutually
-authenticate.  The Noise prologue binds the handshake to the DTLS session
-by incorporating both peers' certificate fingerprints.
+authenticate. Roles are fixed by the spec, not by who dialed: the **server
+(listener) is the Noise initiator** and the **dialer is the responder**.
 
-Prologue format::
+The prologue binds the handshake to the DTLS session with both certificate
+fingerprints in **role order** — dialer first, then server — so both sides
+must pass the same two values in the same order (see
+:func:`build_noise_prologue`)::
 
-    b"libp2p-webrtc-noise:" + encode(local_fp) + encode(remote_fp)
+    b"libp2p-webrtc-noise:" + encode(dialer_fp) + encode(server_fp)
 
-Where ``encode(fp)`` is the multihash-encoded SHA-256 fingerprint of the
+Where ``encode(fp)`` is the multihash-encoded SHA-256 fingerprint of that
 peer's DTLS certificate.
 
 Spec: https://github.com/libp2p/specs/blob/master/webrtc/webrtc.md#noise-handshake
