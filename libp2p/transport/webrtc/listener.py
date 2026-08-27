@@ -34,6 +34,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 from multiaddr import Multiaddr
@@ -47,6 +48,11 @@ from libp2p.peer.id import ID
 from .certificate import WebRTCCertificate
 from .config import WebRTCTransportConfig
 from .connection import WebRTCConnection
+from .constants import (
+    STUN_FIRST_CONTACT_BURST,
+    STUN_FIRST_CONTACT_MAX_SOURCES,
+    STUN_FIRST_CONTACT_RATE,
+)
 from .exceptions import WebRTCConnectionError
 from .multiaddr_utils import (
     build_webrtc_direct_multiaddr,
@@ -59,6 +65,38 @@ if TYPE_CHECKING:
     from ._udp_mux import UdpMux
 
 logger = logging.getLogger(__name__)
+
+
+class _FirstContactLimiter:
+    """
+    Per-source-IP token bucket for unknown-STUN first contacts.
+
+    Runs *before* any parsing or ICE/PC allocation so a malformed or
+    wrong-prefix flood costs one dict lookup per datagram. The table is
+    bounded; the oldest source is evicted when it fills.
+    """
+
+    def __init__(
+        self,
+        burst: int = STUN_FIRST_CONTACT_BURST,
+        rate: float = STUN_FIRST_CONTACT_RATE,
+        max_sources: int = STUN_FIRST_CONTACT_MAX_SOURCES,
+    ) -> None:
+        self._burst = float(burst)
+        self._rate = rate
+        self._max_sources = max_sources
+        self._buckets: dict[str, tuple[float, float]] = {}  # ip -> (tokens, t)
+
+    def allow(self, ip: str, now: float) -> bool:
+        tokens, last = self._buckets.pop(ip, (self._burst, now))
+        tokens = min(self._burst, tokens + (now - last) * self._rate)
+        allowed = tokens >= 1.0
+        if allowed:
+            tokens -= 1.0
+        if len(self._buckets) >= self._max_sources:
+            self._buckets.pop(next(iter(self._buckets)))
+        self._buckets[ip] = (tokens, now)  # re-insert: newest at the end
+        return allowed
 
 
 class WebRTCDirectListener(IListener):
@@ -90,6 +128,7 @@ class WebRTCDirectListener(IListener):
         self._bridge: AsyncioBridge | None = None
         self._mux: UdpMux | None = None
         self._rtc_cert: Any = None
+        self._first_contact_limiter = _FirstContactLimiter()
         # Host used for the muxed connections' single host candidate.
         self._candidate_host = "127.0.0.1"
 
@@ -188,13 +227,16 @@ class WebRTCDirectListener(IListener):
         mux, bridge = self._mux, self._bridge
         if self._closed or mux is None or bridge is None:
             return
-        # ponytail: in-flight cap only; add a per-source-IP token bucket if
-        # STUN floods from one address become a problem (spec: SHOULD rate-limit).
+        # Rate-limit per source IP before spending anything on this datagram
+        # (spec step 6: SHOULD rate-limit first-contact STUN).
+        if not self._first_contact_limiter.allow(addr[0], time.monotonic()):
+            logger.debug("WebRTC Direct: rate-limited first contact from %s", addr)
+            return
         if self._in_flight >= self._config.max_in_flight_connections:
             logger.debug("WebRTC Direct: in-flight cap reached, dropping %s", addr)
             return
         try:
-            version, server_ufrag, _client_ufrag = parse_direct_username(username)
+            version, server_ufrag, client_ufrag = parse_direct_username(username)
             if version != 1:
                 logger.debug(
                     "WebRTC Direct: v%d not supported yet, dropping %s", version, addr
@@ -214,12 +256,14 @@ class WebRTCDirectListener(IListener):
         # protocol (which answers the check and queues it) and teaches the
         # mux the peer's address.
         mux.datagram_received(data, addr)
-        task = asyncio.ensure_future(self._accept_v1(conn, server_ufrag, addr))
+        task = asyncio.ensure_future(
+            self._accept_v1(conn, server_ufrag, client_ufrag, addr)
+        )
         self._accept_tasks.add(task)
         task.add_done_callback(self._accept_tasks.discard)
 
     async def _accept_v1(
-        self, conn: Any, server_ufrag: str, addr: tuple[str, int]
+        self, conn: Any, server_ufrag: str, client_ufrag: str, addr: tuple[str, int]
     ) -> None:
         """Build the muxed PC for a v1 first contact and drive it to connected."""
         from aiortc import RTCSessionDescription
@@ -249,9 +293,11 @@ class WebRTCDirectListener(IListener):
                 pc.sctp.transport, "_validate_peer_identity", lambda _params: None
             )
 
+            # v1: the dialer's own ufrag doubles as its pwd (spec step 6.1);
+            # use the *client* half of USERNAME, as go-libp2p does.
             offer_sdp = build_inferred_offer(
-                client_ufrag=server_ufrag,
-                client_pwd=server_ufrag,
+                client_ufrag=client_ufrag,
+                client_pwd=client_ufrag,
                 remote_host=addr[0],
                 remote_port=addr[1],
                 max_message_size=self._config.max_message_size,

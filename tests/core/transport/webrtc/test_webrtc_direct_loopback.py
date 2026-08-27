@@ -398,3 +398,90 @@ async def test_handler_exception_does_not_crash_listener():
         await listener.close()
         await dialer.close()
         await server.close()
+
+
+@pytest.mark.trio
+async def test_spec_dial_configures_no_ice_servers():
+    """
+    Regression: the spec (STUN) dial must not gather via config.ice_servers —
+    the default is a public Google STUN server, which adds seconds offline and
+    buys nothing (the listener infers the offer from our first packet).
+    Uses *default* configs on purpose so the loopback helper's ice_servers=[]
+    cannot hide it.
+    """
+    from unittest.mock import patch
+
+    from multiaddr import Multiaddr
+
+    import libp2p.transport.webrtc._aiortc_helpers as helpers
+
+    seen: list[list[str] | None] = []
+    real = helpers.create_peer_connection
+
+    async def spy(rtc_cert, ice_servers=None):  # type: ignore[no-untyped-def]
+        seen.append(ice_servers)
+        return await real(rtc_cert, ice_servers=ice_servers)
+
+    server = WebRTCDirectTransport(private_key=create_new_key_pair().private_key)
+    dialer = WebRTCDirectTransport(private_key=create_new_key_pair().private_key)
+    assert dialer._config.ice_servers  # default is non-empty (public STUN)
+
+    async def handler(conn) -> None:  # type: ignore[no-untyped-def]
+        await trio.sleep_forever()
+
+    listener = server.create_listener(handler)
+    await listener.listen(Multiaddr(LISTEN_ADDR))
+    (maddr,) = listener.get_addrs()
+    try:
+        with patch.object(helpers, "create_peer_connection", spy):
+            with trio.fail_after(30):
+                conn = await dialer.dial(maddr)
+                await conn.close()
+        assert seen and all(s == [] for s in seen), seen
+    finally:
+        await listener.close()
+        await dialer.close()
+        await server.close()
+
+
+@pytest.mark.trio
+async def test_first_contact_rate_limit_per_source_ip():
+    """A first-contact flood from one IP is capped at the token-bucket burst."""
+    import asyncio
+
+    from multiaddr import Multiaddr
+
+    from libp2p.transport.webrtc.constants import STUN_FIRST_CONTACT_BURST
+    from tests.core.transport.webrtc.test_udp_mux import _stun_binding_request
+
+    server, _ = _transport()
+    listener = server.create_listener(lambda conn: trio.sleep_forever())
+    await listener.listen(Multiaddr(LISTEN_ADDR))
+    (maddr,) = listener.get_addrs()
+    host, port = _host_port(maddr)
+    bridge = await server._ensure_bridge()
+    n = STUN_FIRST_CONTACT_BURST * 4
+
+    async def _flood() -> None:
+        loop = asyncio.get_running_loop()
+        transport, _ = await loop.create_datagram_endpoint(
+            asyncio.DatagramProtocol, local_addr=("0.0.0.0", 0)
+        )
+        try:
+            for i in range(n):
+                cred = f"libp2p+webrtc+v1/{'a' * 20}{i:03d}"
+                transport.sendto(_stun_binding_request(f"{cred}:{cred}"), (host, port))
+            await asyncio.sleep(0.3)
+        finally:
+            transport.close()
+
+    try:
+        await bridge.run_coro(_flood())
+        # Burst tokens (plus at most a refill's worth over 0.3s) got through;
+        # the rest were dropped before any parse/ICE allocation.
+        accepted = len(listener._mux._by_ufrag)
+        assert 1 <= accepted <= STUN_FIRST_CONTACT_BURST + 2, accepted
+        assert accepted < n
+    finally:
+        await listener.close()
+        await server.close()

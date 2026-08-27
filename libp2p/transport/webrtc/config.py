@@ -60,6 +60,9 @@ class WebRTCTransportConfig:
     # ------------------------------------------------------------------
     # STUN / TURN servers (for ICE candidate gathering)
     # ------------------------------------------------------------------
+    # Only used by the experimental HTTP ``/sdp`` harness. The WebRTC-Direct
+    # spec path never configures STUN/TURN: it dials a known public address
+    # and the listener infers the offer from the first STUN packet.
     ice_servers: list[str] = field(
         default_factory=lambda: ["stun:stun.l.google.com:19302"]
     )

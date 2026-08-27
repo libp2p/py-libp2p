@@ -108,11 +108,8 @@ class TestDirectUsername:
     def test_v1_and_v2_parse(self):
         from libp2p.transport.webrtc.sdp import parse_direct_username
 
-        assert parse_direct_username("libp2p+webrtc+v1/abcdEFGH:cli1") == (
-            1,
-            "libp2p+webrtc+v1/abcdEFGH",
-            "cli1",
-        )
+        v1 = "libp2p+webrtc+v1/abcdEFGH0123456789"  # >= 22 chars: also a pwd
+        assert parse_direct_username(f"{v1}:{v1}") == (1, v1, v1)
         pwd = "p" * 22
         assert parse_direct_username(f"libp2p+webrtc+v2/{pwd}:cli+/9") == (
             2,
@@ -132,6 +129,10 @@ class TestDirectUsername:
             "libp2p+webrtc+v1/abcd:",  # empty client ufrag
             "libp2p+webrtc+v1/abcd\n:cli1",  # trailing newline is not an ice-char
             "libp2p+webrtc+v1/abcd:cli1\n",
+            # v1 strings double as ice-pwd (>= 22): 17-char prefix + 4 = 21
+            "libp2p+webrtc+v1/abcd:libp2p+webrtc+v1/abcd",
+            # valid v1 server half but a client half too short to be a pwd
+            "libp2p+webrtc+v1/abcdEFGH0123456789:cli1",
             "",
         ],
     )
@@ -154,7 +155,7 @@ class TestDirectUsername:
         cred = make_v1_credential()
         assert cred.startswith(WEBRTC_DIRECT_V1_PREFIX)
         assert is_ice_ufrag(cred) and is_ice_pwd(cred)
-        assert parse_direct_username(f"{cred}:abcd")[1] == cred
+        assert parse_direct_username(f"{cred}:{cred}")[1] == cred
 
     def test_generated_credentials_are_ice_chars_only(self):
         import re

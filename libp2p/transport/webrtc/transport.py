@@ -35,7 +35,7 @@ from .multiaddr_utils import (
     is_webrtc_direct_multiaddr,
     parse_webrtc_direct_multiaddr,
 )
-from .sdp import SDPBuilder, build_synthetic_answer, make_v1_credential
+from .sdp import build_synthetic_answer, make_v1_credential
 
 if TYPE_CHECKING:
     pass
@@ -78,7 +78,6 @@ class WebRTCDirectTransport(ITransport):
         self._bridge: AsyncioBridge | None = None
         self._bridge_lock = trio.Lock()
         self._local_peer_id = ID.from_pubkey(private_key.get_public_key())
-        self._sdp_builder = SDPBuilder(certificate=self._certificate)
 
     async def _ensure_bridge(self) -> AsyncioBridge:
         """Start the asyncio bridge on first use (concurrency-safe)."""
@@ -148,8 +147,16 @@ class WebRTCDirectTransport(ITransport):
         pc: Any = None
         try:
             # 1. Create RTCPeerConnection + Noise channel
+            # Spec path: no STUN/TURN. We dial a known public address and the
+            # listener infers our offer from the first BINDING REQUEST, so
+            # server-reflexive candidates buy nothing and a public STUN query
+            # would add seconds on offline/firewalled hosts. config.ice_servers
+            # only applies to the experimental HTTP harness (explicit opt-in).
+            ice_servers = (
+                self._config.ice_servers if self._config.enable_sdp_http_harness else []
+            )
             pc = await bridge.run_coro(
-                create_peer_connection(rtc_cert, ice_servers=self._config.ice_servers)
+                create_peer_connection(rtc_cert, ice_servers=ice_servers)
             )
             noise_ch = await bridge.run_coro(create_noise_channel(pc))
 
