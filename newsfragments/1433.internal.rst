@@ -1,0 +1,1 @@
+De-flake ``test_circuit_v2_transport_message_routing_through_relay`` by replacing fixed ``trio.sleep`` waits with bounded readiness polls on the actual connection and relay-reservation conditions.
