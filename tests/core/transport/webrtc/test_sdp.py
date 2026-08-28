@@ -109,18 +109,16 @@ class TestDirectUsername:
         from libp2p.transport.webrtc.sdp import parse_direct_username
 
         v1 = "libp2p+webrtc+v1/abcdEFGH0123456789"  # >= 22 chars: also a pwd
-        assert parse_direct_username(f"{v1}:{v1}") == (1, v1, v1)
+        # v1: the client ufrag doubles as its pwd.
+        assert parse_direct_username(f"{v1}:{v1}") == (1, v1, v1, v1)
+        # v2: the client's ice-pwd is the server ufrag minus the 17-char prefix.
         pwd = "p" * 22
-        version, server_ufrag, client_ufrag = parse_direct_username(
-            f"libp2p+webrtc+v2/{pwd}:cli+/9"
-        )
-        assert (version, server_ufrag, client_ufrag) == (
+        assert parse_direct_username(f"libp2p+webrtc+v2/{pwd}:cli+/9") == (
             2,
             f"libp2p+webrtc+v2/{pwd}",
             "cli+/9",
+            pwd,
         )
-        # v2: the client's ice-pwd is the server ufrag minus the 17-char prefix.
-        assert server_ufrag[17:] == pwd
 
     @pytest.mark.parametrize(
         "username",
@@ -170,13 +168,16 @@ class TestDirectUsername:
             WEBRTC_DIRECT_V2_PREFIX,
             is_ice_pwd,
             is_ice_ufrag,
+            make_v2_credential,
             parse_direct_username,
         )
 
         # aioice local_password: 22 chars of [A-Za-z0-9].
-        su = WEBRTC_DIRECT_V2_PREFIX + "aB3dEfGh1jKlMnOpQrStU9"
+        pwd = "aB3dEfGh1jKlMnOpQrStU9"
+        su = make_v2_credential(pwd)
+        assert su == WEBRTC_DIRECT_V2_PREFIX + pwd
         assert is_ice_ufrag(su) and is_ice_pwd(su)
-        assert parse_direct_username(f"{su}:abcd") == (2, su, "abcd")
+        assert parse_direct_username(f"{su}:abcd") == (2, su, "abcd", pwd)
 
     def test_generated_credentials_are_ice_chars_only(self):
         import re

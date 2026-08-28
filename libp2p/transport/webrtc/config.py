@@ -84,6 +84,14 @@ class WebRTCTransportConfig:
     # unmerged. The listener accepts both regardless.
     webrtc_direct_dial_version: int = 1
 
+    def __post_init__(self) -> None:
+        """Validate configuration after initialization."""
+        if self.webrtc_direct_dial_version not in (1, 2):
+            raise ValueError(
+                "webrtc_direct_dial_version must be 1 or 2, got "
+                f"{self.webrtc_direct_dial_version!r}"
+            )
+
     def get_or_generate_certificate(self) -> WebRTCCertificate:
         """
         Return the configured certificate or generate a new one.

@@ -86,18 +86,19 @@ def is_ice_pwd(value: str) -> bool:
     )
 
 
-def parse_direct_username(username: str) -> tuple[int, str, str]:
+def parse_direct_username(username: str) -> tuple[int, str, str, str]:
     """
     Split and validate the STUN ``USERNAME`` of a WebRTC-Direct first contact.
 
     The dialer sets ``USERNAME = server_ufrag:client_ufrag`` (RFC 8445 §7.2.2)
     where ``server_ufrag`` carries the version prefix. Both halves must be
-    valid ufrags; for v1 both must also be valid passwords, since the same
-    string is reused as ``ice-pwd``; for v2 the server ufrag minus its prefix
-    is the dialer's ``ice-pwd`` and must be a valid one. An unknown or missing
-    prefix is rejected — the spec says never to guess a version.
+    valid ufrags. The dialer's ``ice-pwd`` is derived per version — v1: the
+    client ufrag (both halves double as passwords); v2: the server ufrag
+    minus its prefix (libp2p/specs#715) — and must be a valid password. An
+    unknown or missing prefix is rejected — the spec says never to guess a
+    version.
 
-    :returns: ``(version, server_ufrag, client_ufrag)``.
+    :returns: ``(version, server_ufrag, client_ufrag, client_pwd)``.
     :raises WebRTCConnectionError: on any malformed / unsupported input.
     """
     server_ufrag, sep, client_ufrag = username.partition(":")
@@ -107,20 +108,14 @@ def parse_direct_username(username: str) -> tuple[int, str, str]:
         raise WebRTCConnectionError("STUN USERNAME halves are not valid ICE ufrags")
     for prefix, version in _VERSION_PREFIXES.items():
         if server_ufrag.startswith(prefix):
-            if version == 1 and not (
-                is_ice_pwd(server_ufrag) and is_ice_pwd(client_ufrag)
+            client_pwd = client_ufrag if version == 1 else server_ufrag[len(prefix) :]
+            # RFC 8839 pwd is 22..256; the 17-char prefix alone leaves room
+            # for a too-short v1 server half or v2 suffix.
+            if not is_ice_pwd(client_pwd) or (
+                version == 1 and not is_ice_pwd(server_ufrag)
             ):
-                # v1 reuses both strings as ice-pwd (RFC 8839: 22..256), and
-                # the 17-char prefix alone leaves room for a too-short suffix.
-                raise WebRTCConnectionError(
-                    "v1 ufrag/pwd credential shorter than an ICE password"
-                )
-            if version == 2 and not is_ice_pwd(server_ufrag[len(prefix) :]):
-                # v2: the suffix *is* the dialer's ice-pwd (specs#715).
-                raise WebRTCConnectionError(
-                    "v2 server ufrag suffix is not a valid ICE password"
-                )
-            return version, server_ufrag, client_ufrag
+                raise WebRTCConnectionError("credential is not a valid ICE password")
+            return version, server_ufrag, client_ufrag, client_pwd
     raise WebRTCConnectionError(
         "unknown WebRTC-Direct version prefix in ufrag (want libp2p+webrtc+v1/ "
         "or libp2p+webrtc+v2/)"
@@ -130,6 +125,11 @@ def parse_direct_username(username: str) -> tuple[int, str, str]:
 def make_v1_credential(random_len: int = 32) -> str:
     """``libp2p+webrtc+v1/<random>`` — used as both ufrag and pwd in v1."""
     return WEBRTC_DIRECT_V1_PREFIX + _generate_ice_credential(random_len)
+
+
+def make_v2_credential(client_pwd: str) -> str:
+    """``libp2p+webrtc+v2/<client_pwd>`` — the server ufrag in v2 (specs#715)."""
+    return WEBRTC_DIRECT_V2_PREFIX + client_pwd
 
 
 def build_inferred_offer(

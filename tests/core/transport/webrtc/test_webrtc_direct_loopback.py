@@ -154,6 +154,13 @@ async def test_certificate_is_aiortc_native():
     await transport.close()
 
 
+def test_config_rejects_unknown_dial_version():
+    from libp2p.transport.webrtc.config import WebRTCTransportConfig
+
+    with pytest.raises(ValueError, match="webrtc_direct_dial_version"):
+        WebRTCTransportConfig(webrtc_direct_dial_version=3)
+
+
 def _transport(**cfg):  # type: ignore[no-untyped-def]
     from libp2p.transport.webrtc.config import WebRTCTransportConfig
 

@@ -60,11 +60,7 @@ from .multiaddr_utils import (
     build_webrtc_direct_multiaddr,
     parse_webrtc_direct_multiaddr,
 )
-from .sdp import (
-    WEBRTC_DIRECT_V2_PREFIX,
-    build_inferred_offer,
-    parse_direct_username,
-)
+from .sdp import build_inferred_offer, parse_direct_username
 
 if TYPE_CHECKING:
     from ._asyncio_bridge import AsyncioBridge
@@ -297,7 +293,7 @@ class WebRTCDirectListener(IListener):
             logger.debug("WebRTC Direct: in-flight cap reached, dropping %s", addr)
             return
         try:
-            version, server_ufrag, client_ufrag = parse_direct_username(username)
+            _, server_ufrag, client_ufrag, client_pwd = parse_direct_username(username)
             # Both versions: the dialer's synthetic answer carries
             # ufrag == pwd == server_ufrag, so that is our local credential.
             conn = mux.add_ice_connection(
@@ -312,14 +308,6 @@ class WebRTCDirectListener(IListener):
         # protocol (which answers the check and queues it) and teaches the
         # mux the peer's address.
         mux.datagram_received(data, addr)
-        # v1: the dialer's ufrag doubles as its pwd (spec step 6.1; the
-        # *client* half of USERNAME, as go-libp2p does). v2: its pwd is the
-        # server ufrag minus the version prefix (specs#715).
-        client_pwd = (
-            client_ufrag
-            if version == 1
-            else server_ufrag[len(WEBRTC_DIRECT_V2_PREFIX) :]
-        )
         task = asyncio.ensure_future(
             self._accept(conn, server_ufrag, client_ufrag, client_pwd, addr)
         )
