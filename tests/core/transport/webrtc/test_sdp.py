@@ -111,11 +111,16 @@ class TestDirectUsername:
         v1 = "libp2p+webrtc+v1/abcdEFGH0123456789"  # >= 22 chars: also a pwd
         assert parse_direct_username(f"{v1}:{v1}") == (1, v1, v1)
         pwd = "p" * 22
-        assert parse_direct_username(f"libp2p+webrtc+v2/{pwd}:cli+/9") == (
+        version, server_ufrag, client_ufrag = parse_direct_username(
+            f"libp2p+webrtc+v2/{pwd}:cli+/9"
+        )
+        assert (version, server_ufrag, client_ufrag) == (
             2,
             f"libp2p+webrtc+v2/{pwd}",
             "cli+/9",
         )
+        # v2: the client's ice-pwd is the server ufrag minus the 17-char prefix.
+        assert server_ufrag[17:] == pwd
 
     @pytest.mark.parametrize(
         "username",
@@ -133,6 +138,9 @@ class TestDirectUsername:
             "libp2p+webrtc+v1/abcd:libp2p+webrtc+v1/abcd",
             # valid v1 server half but a client half too short to be a pwd
             "libp2p+webrtc+v1/abcdEFGH0123456789:cli1",
+            # v2 suffix is the client's ice-pwd: 21 < 22
+            "libp2p+webrtc+v2/" + "p" * 21 + ":cli1",
+            "libp2p+webrtc+v2/" + "p" * 240 + ":cli1",  # server ufrag > 256
             "",
         ],
     )
@@ -156,6 +164,19 @@ class TestDirectUsername:
         assert cred.startswith(WEBRTC_DIRECT_V1_PREFIX)
         assert is_ice_ufrag(cred) and is_ice_pwd(cred)
         assert parse_direct_username(f"{cred}:{cred}")[1] == cred
+
+    def test_v2_server_ufrag_from_aioice_pwd_round_trips(self):
+        from libp2p.transport.webrtc.sdp import (
+            WEBRTC_DIRECT_V2_PREFIX,
+            is_ice_pwd,
+            is_ice_ufrag,
+            parse_direct_username,
+        )
+
+        # aioice local_password: 22 chars of [A-Za-z0-9].
+        su = WEBRTC_DIRECT_V2_PREFIX + "aB3dEfGh1jKlMnOpQrStU9"
+        assert is_ice_ufrag(su) and is_ice_pwd(su)
+        assert parse_direct_username(f"{su}:abcd") == (2, su, "abcd")
 
     def test_generated_credentials_are_ice_chars_only(self):
         import re
@@ -190,6 +211,35 @@ class TestSpecSdp:
         assert "a=max-message-size:16384" in sdp
         assert "a=fingerprint:sha-256 " in sdp
         assert "a=ice-lite" not in sdp
+
+    def test_inferred_offer_v2_credentials_differ(self):
+        from libp2p.transport.webrtc.sdp import build_inferred_offer
+
+        sdp = build_inferred_offer(
+            client_ufrag="abcd",
+            client_pwd="aB3dEfGh1jKlMnOpQrStU9",
+            remote_host="203.0.113.5",
+            remote_port=54321,
+        )
+        assert "a=ice-ufrag:abcd\n" in sdp
+        assert "a=ice-pwd:aB3dEfGh1jKlMnOpQrStU9\n" in sdp
+        assert "a=setup:actpass" in sdp
+
+    def test_synthetic_answer_v2_ufrag_equals_pwd(self):
+        from libp2p.transport.webrtc.certificate import WebRTCCertificate
+        from libp2p.transport.webrtc.sdp import build_synthetic_answer
+
+        cert = WebRTCCertificate.generate()
+        cred = "libp2p+webrtc+v2/aB3dEfGh1jKlMnOpQrStU9"
+        sdp = build_synthetic_answer(
+            host="127.0.0.1",
+            port=4001,
+            certhash_multibase=cert.fingerprint_to_multibase(),
+            ufrag=cred,
+            pwd=cred,
+        )
+        assert f"a=ice-ufrag:{cred}\n" in sdp and f"a=ice-pwd:{cred}\n" in sdp
+        assert "a=ice-lite" in sdp and "a=setup:passive" in sdp
 
     def test_synthetic_answer_shape(self):
         from libp2p.transport.webrtc.certificate import WebRTCCertificate

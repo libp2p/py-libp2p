@@ -166,19 +166,26 @@ def _transport(**cfg):  # type: ignore[no-untyped-def]
 
 
 @pytest.mark.trio
-@pytest.mark.parametrize("harness", [False, True], ids=["stun", "sdp-http-harness"])
-async def test_dial_listen_open_stream_echo(harness):
+@pytest.mark.parametrize(
+    "harness, version",
+    [(False, 1), (False, 2), (True, 1)],
+    ids=["stun-v1", "stun-v2", "sdp-http-harness"],
+)
+async def test_dial_listen_open_stream_echo(harness, version):
     """
     Full transport loopback: dial → ICE/DTLS → Noise (server initiates,
     dialer responds) → handler gets an authenticated connection → stream echo.
-    Runs over the spec STUN path (default) and the experimental HTTP harness.
+    Runs over the spec STUN path (v1 and v2 dialers) and the experimental
+    HTTP harness.
     """
     from multiaddr import Multiaddr
 
     from libp2p.peer.id import ID
 
     server, server_kp = _transport(enable_sdp_http_harness=harness)
-    dialer, dialer_kp = _transport(enable_sdp_http_harness=harness)
+    dialer, dialer_kp = _transport(
+        enable_sdp_http_harness=harness, webrtc_direct_dial_version=version
+    )
     server_id = ID.from_pubkey(server_kp.public_key)
     dialer_id = ID.from_pubkey(dialer_kp.public_key)
 
@@ -261,6 +268,143 @@ async def test_concurrent_dials_share_one_udp_port():
         await listener.close()
         for t, _ in dialers:
             await t.close()
+        await server.close()
+
+
+@pytest.mark.trio
+async def test_mixed_v1_and_v2_dialers_share_one_listener():
+    """One v1 and one v2 dialer concurrently: the listener accepts both."""
+    from multiaddr import Multiaddr
+
+    from libp2p.peer.id import ID
+
+    server, _ = _transport()
+    dialers = [_transport(webrtc_direct_dial_version=v) for v in (1, 2)]
+    dialer_ids = {ID.from_pubkey(kp.public_key) for _, kp in dialers}
+    seen: set[ID] = set()
+    release = trio.Event()
+
+    async def handler(conn) -> None:  # type: ignore[no-untyped-def]
+        seen.add(conn.peer_id)
+        stream = await conn.accept_stream()
+        await stream.write(await stream.read())
+        await release.wait()
+
+    listener = server.create_listener(handler)
+    await listener.listen(Multiaddr(LISTEN_ADDR))
+    (maddr,) = listener.get_addrs()
+    conns = []
+
+    async def _dial(t) -> None:  # type: ignore[no-untyped-def]
+        conn = await t.dial(maddr)
+        stream = await conn.open_stream()
+        payload = f"hello from {id(t)}".encode()
+        await stream.write(payload)
+        assert await stream.read() == payload
+        conns.append(conn)
+
+    try:
+        with trio.fail_after(30):
+            async with trio.open_nursery() as nursery:
+                for t, _ in dialers:
+                    nursery.start_soon(_dial, t)
+            assert seen == dialer_ids
+            ufrags = sorted(listener._mux._by_ufrag)
+            assert len(ufrags) == 2
+            assert ufrags[0].startswith("libp2p+webrtc+v1/")
+            assert ufrags[1].startswith("libp2p+webrtc+v2/")
+            release.set()
+            for c in conns:
+                await c.close()
+    finally:
+        await listener.close()
+        for t, _ in dialers:
+            await t.close()
+        await server.close()
+
+
+@pytest.mark.trio
+async def test_v2_dialer_does_not_munge_local_credentials():
+    """
+    v2 (specs#715): the dialer keeps its aioice ufrag/pwd; only the synthetic
+    answer (hence the listener's registered ufrag) carries the v2 prefix.
+    """
+    from unittest.mock import patch
+
+    from multiaddr import Multiaddr
+
+    import libp2p.transport.webrtc._aiortc_helpers as helpers
+
+    pcs: list[object] = []
+    real = helpers.create_peer_connection
+
+    async def spy(rtc_cert, ice_servers=None):  # type: ignore[no-untyped-def]
+        pc = await real(rtc_cert, ice_servers=ice_servers)
+        pcs.append(pc)
+        return pc
+
+    server, _ = _transport()
+    dialer, _ = _transport(webrtc_direct_dial_version=2)
+
+    async def handler(conn) -> None:  # type: ignore[no-untyped-def]
+        await trio.sleep_forever()
+
+    listener = server.create_listener(handler)
+    await listener.listen(Multiaddr(LISTEN_ADDR))
+    (maddr,) = listener.get_addrs()
+    try:
+        with patch.object(helpers, "create_peer_connection", spy):
+            with trio.fail_after(30):
+                conn = await dialer.dial(maddr)
+        # dial() creates its PC before the listener's first contact does.
+        dialer_pc = pcs[0]
+        ice_conn = dialer_pc.sctp.transport.transport._connection
+        assert len(ice_conn.local_username) == 4
+        assert not ice_conn.local_username.startswith("libp2p+webrtc+")
+        assert not ice_conn.local_password.startswith("libp2p+webrtc+")
+        (server_ufrag,) = listener._mux._by_ufrag
+        assert server_ufrag == "libp2p+webrtc+v2/" + ice_conn.local_password
+        await conn.close()
+    finally:
+        await listener.close()
+        await dialer.close()
+        await server.close()
+
+
+@pytest.mark.trio
+async def test_v2_short_pwd_suffix_is_rejected():
+    """A v2 server ufrag with a suffix shorter than an ICE pwd must not create a PC."""
+    import asyncio
+
+    from multiaddr import Multiaddr
+
+    from tests.core.transport.webrtc.test_udp_mux import _stun_binding_request
+
+    server, _ = _transport()
+    listener = server.create_listener(lambda conn: trio.sleep_forever())
+    await listener.listen(Multiaddr(LISTEN_ADDR))
+    (maddr,) = listener.get_addrs()
+    host, port = _host_port(maddr)
+    bridge = await server._ensure_bridge()
+
+    async def _poke() -> None:
+        loop = asyncio.get_running_loop()
+        transport, _ = await loop.create_datagram_endpoint(
+            asyncio.DatagramProtocol, local_addr=("0.0.0.0", 0)
+        )
+        try:
+            username = "libp2p+webrtc+v2/" + "a" * 21 + ":cli1"
+            transport.sendto(_stun_binding_request(username), (host, port))
+            await asyncio.sleep(0.2)
+        finally:
+            transport.close()
+
+    try:
+        await bridge.run_coro(_poke())
+        assert listener._mux._by_ufrag == {}
+        assert listener._in_flight == 0
+    finally:
+        await listener.close()
         await server.close()
 
 

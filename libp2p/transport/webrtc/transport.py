@@ -35,7 +35,7 @@ from .multiaddr_utils import (
     is_webrtc_direct_multiaddr,
     parse_webrtc_direct_multiaddr,
 )
-from .sdp import build_synthetic_answer, make_v1_credential
+from .sdp import WEBRTC_DIRECT_V2_PREFIX, build_synthetic_answer, make_v1_credential
 
 if TYPE_CHECKING:
     pass
@@ -174,22 +174,36 @@ class WebRTCDirectTransport(ITransport):
                     post_sdp(host, port, pc.localDescription.sdp)
                 )
             else:
-                # Spec v1 (SDP munging): the same "libp2p+webrtc+v1/<random>"
-                # string is our ufrag *and* pwd on both the local offer and the
-                # synthetic remote answer, so the server can reconstruct
-                # everything from our first STUN USERNAME. aiortc regenerates
-                # local ICE credentials from its aioice Connection when
-                # setLocalDescription runs (SDP text edits are ignored), so
-                # "munging" means setting those fields.
-                cred = make_v1_credential()
+                # Spec STUN path: no signaling; the server reconstructs our
+                # offer from the first STUN USERNAME (server_ufrag:client_ufrag)
+                # and we synthesise its answer from the multiaddr. The server
+                # ufrag == pwd on that answer is `cred`:
+                #  v1 (SDP munging): "libp2p+webrtc+v1/<random>" is also our
+                #     own ufrag *and* pwd. aiortc regenerates local ICE
+                #     credentials from its aioice Connection when
+                #     setLocalDescription runs (SDP text edits are ignored),
+                #     so "munging" means setting those fields.
+                #  v2 (libp2p/specs#715, no munging): we keep the aioice
+                #     ufrag/pwd and carry our pwd to the server as
+                #     "libp2p+webrtc+v2/<pwd>".
+                assert pc.sctp is not None  # createDataChannel ran above
+                ice_conn = pc.sctp.transport.transport._connection
+                version = self._config.webrtc_direct_dial_version
+                if version == 1:
+                    cred = make_v1_credential()
 
-                async def _set_local_ice_credentials() -> None:
-                    assert pc.sctp is not None  # createDataChannel ran above
-                    ice_conn = pc.sctp.transport.transport._connection
-                    set_private_attr(ice_conn, "_local_username", cred)
-                    set_private_attr(ice_conn, "_local_password", cred)
+                    async def _set_local_ice_credentials() -> None:
+                        set_private_attr(ice_conn, "_local_username", cred)
+                        set_private_attr(ice_conn, "_local_password", cred)
 
-                await bridge.run_coro(_set_local_ice_credentials())
+                    await bridge.run_coro(_set_local_ice_credentials())
+                elif version == 2:
+                    cred = WEBRTC_DIRECT_V2_PREFIX + ice_conn.local_password
+                else:
+                    raise WebRTCConnectionError(
+                        f"unsupported webrtc_direct_dial_version {version!r} "
+                        "(want 1 or 2)"
+                    )
                 offer = await bridge.run_coro(pc.createOffer())
                 await bridge.run_coro(pc.setLocalDescription(offer))
                 # The listener is ICE-Lite/controlled and the DTLS server; its

@@ -7,7 +7,9 @@ Provides two transport variants per the libp2p WebRTC specification:
   connections where the server publishes its certificate hash in the multiaddr.
   No relay or signaling server is required. The default path uses inbound STUN
   on a shared UDP port (offer inferred from the first packet) and outbound
-  dials that synthesise an ICE-Lite answer without public STUN servers. An
+  dials that synthesise an ICE-Lite answer without public STUN servers. The
+  listener accepts both the v1 (munging) and v2 (libp2p/specs#715) flows; the
+  dialer speaks v1 by default (``webrtc_direct_dial_version=2`` opts in). An
   experimental HTTP ``POST /sdp`` harness (``WebRTCTransportConfig(
   enable_sdp_http_harness=True)``) is available for py↔py debugging only.
 

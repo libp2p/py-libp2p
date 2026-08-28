@@ -78,6 +78,11 @@ class WebRTCTransportConfig:
     # uses it instead of the STUN path. Not interoperable with other
     # implementations.
     enable_sdp_http_harness: bool = False
+    # WebRTC-Direct version our *dialer* speaks: 1 munges the local ICE
+    # credentials (ufrag == pwd); 2 keeps them and encodes our pwd in the
+    # synthetic answer's ufrag (libp2p/specs#715). Default 1 while #715 is
+    # unmerged. The listener accepts both regardless.
+    webrtc_direct_dial_version: int = 1
 
     def get_or_generate_certificate(self) -> WebRTCCertificate:
         """
