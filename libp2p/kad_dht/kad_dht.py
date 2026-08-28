@@ -177,6 +177,14 @@ class KadDHT(Service):
         # DHT with random walk enabled for enhanced peer discovery
         dht = KadDHT(host, DHTMode.SERVER, enable_random_walk=True)
 
+        # DHT with go-libp2p-style subnet diversity limits (issues #1421/#1422)
+        dht = KadDHT(
+            host,
+            DHTMode.SERVER,
+            max_peers_per_subnet=2,
+            max_peers_per_subnet_table=3,
+        )
+
     """
 
     def __init__(
@@ -191,6 +199,8 @@ class KadDHT(Service):
         enable_values: bool = True,
         strict_validation: bool = False,
         persist_dir: str | None = None,
+        max_peers_per_subnet: int | None = None,
+        max_peers_per_subnet_table: int = 0,
     ):
         """
         Initialize a new Kademlia DHT node.
@@ -213,6 +223,12 @@ class KadDHT(Service):
             - All DHT records MUST have a registered validator for their namespace
             - Keys without a matching namespace validator are rejected
             - This enforces permissioned keyspaces for security and correctness
+        :param persist_dir: Directory for persisting value/provider records
+        :param max_peers_per_subnet: Per-bucket subnet-diversity cap forwarded to
+            the routing table (issue #1422). ``None`` uses the module default;
+            <= 0 disables the per-bucket check.
+        :param max_peers_per_subnet_table: Table-wide cap on peers sharing one
+            subnet across all buckets (issue #1421). ``0`` (default) disables it.
 
         Example with strict validation:
             # Create validator with custom namespace
@@ -242,7 +258,12 @@ class KadDHT(Service):
         self.enable_random_walk = enable_random_walk
 
         # Initialize the routing table
-        self.routing_table = RoutingTable(self.local_peer_id, host)
+        self.routing_table = RoutingTable(
+            self.local_peer_id,
+            host,
+            max_peers_per_subnet=max_peers_per_subnet,
+            max_peers_per_subnet_table=max_peers_per_subnet_table,
+        )
 
         self.protocol_prefix = protocol_prefix
         self.enable_providers = enable_providers

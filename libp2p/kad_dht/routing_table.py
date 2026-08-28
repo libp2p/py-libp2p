@@ -456,6 +456,8 @@ class RoutingTable:
             default ``MAX_PEERS_PER_SUBNET``; <= 0 disables the per-bucket check.
         :param max_peers_per_subnet_table: Table-wide cap on peers sharing one
             subnet across all buckets (issue #1421). ``0`` (default) disables it.
+            go-libp2p defaults its equivalent (``maxForTable``) to 3; we default
+            to ``0`` for backward compatibility.
 
         """
         self.local_id = local_id

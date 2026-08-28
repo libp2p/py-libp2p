@@ -24,6 +24,7 @@ import trio
 from libp2p.crypto.secp256k1 import (
     create_new_key_pair,
 )
+from libp2p.kad_dht.kad_dht import DHTMode, KadDHT
 from libp2p.kad_dht.routing_table import (
     BUCKET_SIZE,
     KBucket,
@@ -724,3 +725,59 @@ class TestTableWideSubnetCap:
         for i in range(1, 5):
             assert await rt.add_peer(_peer_with_addrs(f"/ip4/10.0.0.{i}/tcp/1")) is True
         assert rt.size() == 4
+
+    @pytest.mark.trio
+    async def test_both_caps_enabled(self, mock_host):
+        """
+        go-libp2p-style config: per-bucket cap 2 rejects the 3rd same-/24 peer in
+        one bucket; table cap 3 rejects the 4th across buckets.
+        """
+        rt = RoutingTable(
+            create_valid_peer_id("local"),
+            mock_host,
+            max_peers_per_subnet=2,
+            max_peers_per_subnet_table=3,
+        )
+        assert await rt.add_peer(_peer_with_addrs("/ip4/8.8.8.1/tcp/1")) is True
+        assert await rt.add_peer(_peer_with_addrs("/ip4/8.8.8.2/tcp/1")) is True
+        # Single bucket holds 2 from 8.8.8.0/24 → per-bucket cap rejects the 3rd.
+        assert await rt.add_peer(_peer_with_addrs("/ip4/8.8.8.3/tcp/1")) is False
+        # Spread 3 same-/24 peers over two buckets (per-bucket cap satisfied);
+        # the table-wide cap then rejects the 4th.
+        rt.buckets = [
+            KBucket(mock_host, min_range=0, max_range=2**255, max_peers_per_subnet=2),
+            KBucket(
+                mock_host, min_range=2**255, max_range=2**256, max_peers_per_subnet=2
+            ),
+        ]
+        for i, bucket in ((1, 0), (2, 0), (3, 1)):
+            p = _peer_with_addrs(f"/ip4/8.8.8.{i}/tcp/1")
+            rt.buckets[bucket].peers[p.peer_id] = (p, time.time())
+        assert rt._table_peers_in_subnet("8.8.8.0/24") == 3
+        assert await rt.add_peer(_peer_with_addrs("/ip4/8.8.8.4/tcp/1")) is False
+        assert rt.size() == 3
+
+
+class TestKadDHTSubnetConfig:
+    """KadDHT forwards subnet-diversity limits to its RoutingTable (issue #1422)."""
+
+    def test_kad_dht_forwards_limits(self):
+        host = Mock()
+        host.get_id.return_value = create_valid_peer_id("local")
+        host.get_peerstore.return_value = Mock()
+        host.new_stream = AsyncMock()
+        dht = KadDHT(
+            host, DHTMode.SERVER, max_peers_per_subnet=1, max_peers_per_subnet_table=3
+        )
+        assert dht.routing_table.max_peers_per_subnet == 1
+        assert dht.routing_table.max_peers_per_subnet_table == 3
+        assert dht.routing_table.buckets[0].max_peers_per_subnet == 1
+
+    def test_kad_dht_defaults_unchanged(self):
+        host = Mock()
+        host.get_id.return_value = create_valid_peer_id("local")
+        host.get_peerstore.return_value = Mock()
+        host.new_stream = AsyncMock()
+        dht = KadDHT(host, DHTMode.SERVER)
+        assert dht.routing_table.max_peers_per_subnet is None
+        assert dht.routing_table.max_peers_per_subnet_table == 0
