@@ -299,45 +299,63 @@ class WebRTCStream(IMuxedStream):
         remainder for the next message.
 
         May be invoked from the asyncio bridge thread (not a Trio task).
-        To stay safe we route every Trio primitive call (memory channel,
-        :class:`trio.Event`) through :func:`trio.from_thread.run_sync`
-        with a captured :class:`trio.lowlevel.TrioToken`.  When called
-        from within a Trio task (for example in unit tests) we execute
-        the mutations inline.
+        Frames are snapshotted here and every state mutation for the whole
+        SCTP message is applied in one :meth:`_run_on_trio_thread` hop
+        (:func:`trio.from_thread.run_sync` with the captured
+        :class:`trio.lowlevel.TrioToken`; inline when already on a Trio
+        task, e.g. in unit tests).
+
+        A malformed frame desynchronises the byte stream: the frames decoded
+        before it are still delivered, then the stream is reset like
+        :meth:`reset` (RESET sent to the peer, resources released) and any
+        further bytes are ignored.
         """
+        if self._state == StreamState.RESET:
+            return
         self._frame_buf.extend(raw)
+        items: list[tuple[bytes, int | None]] = []
+        malformed = False
         try:
-            msgs = list(_decode_frames(self._frame_buf))
+            for msg in _decode_frames(self._frame_buf):
+                payload = bytes(msg.message) if msg.HasField("message") else b""
+                items.append((payload, msg.flag if msg.HasField("flag") else None))
         except ValueError as e:
-            # Framing is desynchronised; nothing after this is decodable.
             logger.warning(
                 "WebRTCStream channel=%d: malformed frame (%s); resetting stream",
                 self._channel_id,
                 e,
             )
             self._frame_buf.clear()
-            self._run_on_trio_thread(self._reset_locally)
-            return
-        for msg in msgs:
-            self._deliver(msg)
+            malformed = True
+        self._run_on_trio_thread(
+            lambda: self._apply_batch_on_trio_thread(items, reset_after=malformed)
+        )
 
     def _reset_locally(self) -> None:
         self._state = StreamState.RESET
         self._enqueue_eof_sentinel_locked()
 
-    def _deliver(self, msg: Message) -> None:
-        # Snapshot flags/payload first; all subsequent state mutations are
-        # performed under the Trio thread.
-        has_payload = msg.HasField("message") and bool(msg.message)
-        payload = bytes(msg.message) if has_payload else b""
-        has_flag = msg.HasField("flag")
-        flag = msg.flag if has_flag else None
+    def _reset_on_trio_thread(self) -> None:
+        """Synchronous :meth:`reset` for the on_data path (malformed framing)."""
+        if self._state == StreamState.RESET:
+            return
+        self._reset_locally()
+        self._schedule_send(Message(flag=Message.RESET))
+        self._cleanup()
 
-        def _apply_on_trio_thread() -> None:
+    def _apply_batch_on_trio_thread(
+        self, items: list[tuple[bytes, int | None]], reset_after: bool = False
+    ) -> None:
+        """
+        Apply the ``(payload, flag)`` frames of one SCTP message, in order.
+
+        MUST be called from a Trio task — see :meth:`on_data`.
+        """
+        for payload, flag in items:
             # Enqueue payload BEFORE processing flags — the spec allows a
             # message to carry both data and FIN, and the data must be
             # delivered to the reader before the read channel is closed.
-            if has_payload:
+            if payload:
                 try:
                     self._read_send.send_nowait(payload)
                 except trio.WouldBlock:
@@ -348,19 +366,18 @@ class WebRTCStream(IMuxedStream):
                 except trio.ClosedResourceError:
                     pass
 
-            if has_flag:
-                if flag == Message.FIN:
-                    self._read_closed = True
-                    self._enqueue_eof_sentinel_locked()
-                    self._schedule_send(Message(flag=Message.FIN_ACK))
-                elif flag == Message.FIN_ACK:
-                    self._fin_ack_received.set()
-                elif flag == Message.STOP_SENDING:
-                    self._write_closed = True
-                elif flag == Message.RESET:
-                    self._reset_locally()
-
-        self._run_on_trio_thread(_apply_on_trio_thread)
+            if flag == Message.FIN:
+                self._read_closed = True
+                self._enqueue_eof_sentinel_locked()
+                self._schedule_send(Message(flag=Message.FIN_ACK))
+            elif flag == Message.FIN_ACK:
+                self._fin_ack_received.set()
+            elif flag == Message.STOP_SENDING:
+                self._write_closed = True
+            elif flag == Message.RESET:
+                self._reset_locally()
+        if reset_after:
+            self._reset_on_trio_thread()
 
     def _run_on_trio_thread(self, fn: Callable[[], None]) -> None:
         """
@@ -495,6 +512,10 @@ def _frame(msg: Message) -> bytes:
     return encode_uvarint(len(data)) + data
 
 
+# Longest uvarint length prefix a legal frame can carry.
+_MAX_PREFIX = len(encode_uvarint(MAX_MESSAGE_SIZE))
+
+
 def _decode_frames(buf: bytearray) -> Iterator[Message]:
     """
     Pop every complete uvarint-length-prefixed :class:`Message` off the
@@ -508,10 +529,11 @@ def _decode_frames(buf: bytearray) -> Iterator[Message]:
     :raises ValueError: on a malformed length prefix or protobuf body.
     """
     while buf:
-        length, consumed = decode_varint_with_size(bytes(buf[:10]))
-        if buf[consumed - 1] & 0x80:
-            # Varint not terminated yet. 3 bytes already exceed MAX_MESSAGE_SIZE.
-            if consumed >= 3:
+        head = buf[:_MAX_PREFIX]
+        length, consumed = decode_varint_with_size(bytes(head))
+        if head[consumed - 1] & 0x80:
+            # Varint not terminated; a prefix this long can't encode a legal size.
+            if len(head) == _MAX_PREFIX:
                 raise ValueError("length prefix too long")
             return
         if length > MAX_MESSAGE_SIZE:

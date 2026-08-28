@@ -8,6 +8,8 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import trio
+import trio.testing
 
 from libp2p.transport.webrtc.constants import MAX_PAYLOAD_SIZE
 from libp2p.transport.webrtc.pb.webrtc_pb2 import Message
@@ -27,6 +29,11 @@ def _parse_framed(raw: bytes) -> Message:
     msg = Message()
     msg.ParseFromString(raw[consumed : consumed + length])
     return msg
+
+
+def _wire_sends(stream: WebRTCStream) -> list:
+    """Calls made to the connection's asyncio-side send callback (flags)."""
+    return stream.muxed_conn._send_on_channel_cb.call_args_list
 
 
 def _make_stream(channel_id: int = 2) -> WebRTCStream:
@@ -156,6 +163,47 @@ class TestRead:
         assert stream._state == StreamState.RESET
         with pytest.raises(Exception, match="reset"):
             await stream.read()
+
+    @pytest.mark.trio
+    async def test_frames_before_malformed_one_are_delivered_then_reset(self):
+        stream = _make_stream()
+        got = []
+
+        async def reader() -> None:
+            got.append(await stream.read())
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(reader)
+            await trio.testing.wait_all_tasks_blocked()  # reader blocked in read()
+            with patch("libp2p.transport.webrtc.stream.logger.warning"):
+                stream.on_data(_framed(Message(message=b"ab", flag=Message.FIN)))
+                stream.on_data(b"\x02\xff\xff")
+        assert got == [b"ab"]
+        assert stream._read_closed
+        sent = [_parse_framed(c.args[1]) for c in _wire_sends(stream)]
+        assert [m.flag for m in sent] == [Message.FIN_ACK, Message.RESET]
+        assert stream._state == StreamState.RESET
+
+    @pytest.mark.trio
+    async def test_bytes_after_malformed_frame_are_ignored(self):
+        stream = _make_stream()
+        with patch("libp2p.transport.webrtc.stream.logger.warning"):
+            stream.on_data(b"\x02\xff\xff")
+            stream.on_data(_framed(Message(message=b"late")))
+            stream.on_data(b"\x02\xff\xff")
+        assert not stream._frame_buf
+        sent = [_parse_framed(c.args[1]) for c in _wire_sends(stream)]
+        assert [m.flag for m in sent] == [Message.RESET]
+
+    @pytest.mark.trio
+    async def test_one_sctp_message_is_one_trio_hop(self):
+        stream = _make_stream()
+        raw = b"".join(_framed(Message(message=c)) for c in (b"a", b"b", b"c"))
+        with patch.object(stream, "_run_on_trio_thread") as hop:
+            stream.on_data(raw)
+        hop.assert_called_once()
+        hop.call_args.args[0]()  # apply the batch inline (we are on trio)
+        assert [await stream.read() for _ in range(3)] == [b"a", b"b", b"c"]
 
 
 class TestFlags:

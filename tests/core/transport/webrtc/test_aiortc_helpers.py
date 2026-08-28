@@ -301,10 +301,10 @@ class TestDataChannelIdParity:
 
     @pytest.mark.trio
     @pytest.mark.parametrize(
-        "role,expected_id", [("client", 2), ("server", 1), ("auto", None)]
+        "role,expected_seed", [("client", 0), ("server", 1), ("auto", None)]
     )
-    async def test_create_channel_picks_id_from_dtls_role(
-        self, role: str, expected_id: int | None
+    async def test_create_channel_reseeds_allocator_from_dtls_role(
+        self, role: str, expected_seed: int | None
     ) -> None:
         from unittest.mock import MagicMock
 
@@ -312,7 +312,93 @@ class TestDataChannelIdParity:
 
         pc = MagicMock()
         pc.sctp.transport._role = role
+        pc.sctp._data_channel_id = None  # untouched while the role is "auto"
         conn = MagicMock()
         wire_pc_to_connection(pc, conn)
         await conn._create_channel_cb(2, "")
-        pc.createDataChannel.assert_called_once_with("stream-2", id=expected_id)
+        assert pc.sctp._data_channel_id == expected_seed
+        # aiortc allocates (and recycles) the SCTP id; never pass one.
+        pc.createDataChannel.assert_called_once_with("stream-2")
+
+    def test_ids_follow_dtls_role_and_are_recycled(self) -> None:
+        asyncio.run(self._run())
+
+    async def _run(self) -> None:
+        from unittest.mock import MagicMock
+
+        from aiortc import RTCSessionDescription
+
+        from libp2p.transport.webrtc._aiortc_helpers import (
+            _wait_channel_open,
+            create_noise_channel,
+            create_peer_connection,
+            force_listener_dtls_server_role,
+            wait_for_connected,
+            wire_pc_to_connection,
+        )
+        from libp2p.transport.webrtc.certificate import WebRTCCertificate
+
+        pc_a = await create_peer_connection(
+            WebRTCCertificate.from_aiortc()._rtc_certificate, ice_servers=[]
+        )
+        pc_b = await create_peer_connection(
+            WebRTCCertificate.from_aiortc()._rtc_certificate, ice_servers=[]
+        )
+        try:
+            await create_noise_channel(pc_a)
+            await create_noise_channel(pc_b)
+            # Record the stream channels each side creates (noise is id 0).
+            created: dict[int, list] = {}
+            for i, pc in enumerate((pc_a, pc_b)):
+                orig, lst = pc.createDataChannel, created.setdefault(i, [])
+                pc.createDataChannel = (  # type: ignore[method-assign]
+                    lambda *a, _o=orig, _l=lst, **k: _l.append(_o(*a, **k)) or _l[-1]
+                )
+            offer = await pc_a.createOffer()
+            await pc_a.setLocalDescription(offer)
+            await pc_b.setRemoteDescription(
+                RTCSessionDescription(sdp=pc_a.localDescription.sdp, type="offer")
+            )
+            # The WebRTC-Direct listener case: ICE-controlled but DTLS server,
+            # so aiortc's ICE-derived parity is inverted on both sides.
+            force_listener_dtls_server_role(pc_b)
+            answer = await pc_b.createAnswer()
+            await pc_b.setLocalDescription(answer)
+            await pc_a.setRemoteDescription(
+                RTCSessionDescription(sdp=pc_b.localDescription.sdp, type="answer")
+            )
+            await asyncio.gather(
+                wait_for_connected(pc_a, timeout=15.0),
+                wait_for_connected(pc_b, timeout=15.0),
+            )
+            assert pc_a.sctp is not None and pc_b.sctp is not None
+            assert pc_a.sctp.transport._role == "client"
+            assert pc_b.sctp.transport._role == "server"
+
+            conn_a, conn_b = MagicMock(), MagicMock()
+            wire_pc_to_connection(pc_a, conn_a)
+            wire_pc_to_connection(pc_b, conn_b)
+
+            await conn_a._create_channel_cb(2, "")
+            await conn_a._create_channel_cb(4, "")
+            await conn_b._create_channel_cb(2, "")
+            for ch in created[0] + created[1]:
+                await _wait_channel_open(ch, timeout=15.0)
+            assert [ch.id % 2 for ch in created[0]] == [0, 0]  # DTLS client: even
+            assert created[1][0].id % 2 == 1  # DTLS server: odd
+
+            # A closed channel's id is recycled rather than burnt.
+            first = created[0][0]
+            first_id = first.id
+            first.close()
+            for _ in range(300):
+                if first.readyState == "closed":
+                    break
+                await asyncio.sleep(0.05)
+            assert first.readyState == "closed"
+            await conn_a._create_channel_cb(6, "")
+            await _wait_channel_open(created[0][-1], timeout=15.0)
+            assert created[0][-1].id == first_id
+        finally:
+            await pc_a.close()
+            await pc_b.close()

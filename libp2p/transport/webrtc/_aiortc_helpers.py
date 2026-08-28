@@ -341,18 +341,31 @@ def wire_pc_to_connection(
     async def _create_channel(channel_id: int, label: str) -> None:
         # In-band (DCEP) channel; the peer's `datachannel` event fires,
         # which is what makes accept_stream() unblock.  The libp2p
-        # `channel_id` (even, from 2) is a local routing key only.
+        # `channel_id` (even, from 2) is a local routing key only; aiortc
+        # allocates (and recycles) the 16-bit SCTP stream id itself.
         #
-        # RFC 8832: the DTLS client picks even SCTP stream ids, the DTLS
-        # server odd.  aiortc derives the parity from the ICE role instead,
+        # RFC 8832: the DTLS client opens even SCTP stream ids, the DTLS
+        # server odd.  aiortc seeds its allocator from the ICE role instead,
         # which is inverted for a WebRTC-Direct listener (ICE-controlled but
-        # DTLS server) and collided with go-libp2p's even dialer ids.  Pick
-        # the id from the DTLS role ourselves; leave it to aiortc while the
-        # role is still "auto" (offer/answer not done) or no SCTP transport
-        # exists yet (first channel on a bare peer connection).
-        role = pc.sctp.transport._role if pc.sctp is not None else "auto"
-        sctp_id = {"client": channel_id, "server": channel_id - 1}.get(role)
-        ch = pc.createDataChannel(label or f"stream-{channel_id}", id=sctp_id)
+        # DTLS server) and collided with go-libp2p's even dialer ids.
+        # Re-seed the parity from the DTLS role (aiortc bumps by 2 past ids
+        # in use); leave it while the role is still "auto" (offer/answer not
+        # done) or no SCTP transport exists yet (bare peer connection).
+        sctp = pc.sctp
+        role = "auto"
+        if sctp is not None:
+            dtls = sctp.transport
+            assert hasattr(dtls, "_role"), "RTCDtlsTransport has no attribute '_role'"
+            role = dtls._role
+        if role in ("client", "server"):
+            set_private_attr(sctp, "_data_channel_id", 0 if role == "client" else 1)
+        else:
+            logger.debug(
+                "channel %d: DTLS role %r, using aiortc's default stream-id parity",
+                channel_id,
+                role,
+            )
+        ch = pc.createDataChannel(label or f"stream-{channel_id}")
         channels[channel_id] = ch
         _bind_channel_events(ch, channel_id, conn)
 
