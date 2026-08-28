@@ -294,3 +294,25 @@ class TestSetPrivateAttr:
         # attribute the library never reads.
         with pytest.raises(AssertionError):
             set_private_attr(obj, "_slott", 3)
+
+
+class TestDataChannelIdParity:
+    """RFC 8832: DTLS client opens even SCTP stream ids, DTLS server odd."""
+
+    @pytest.mark.trio
+    @pytest.mark.parametrize(
+        "role,expected_id", [("client", 2), ("server", 1), ("auto", None)]
+    )
+    async def test_create_channel_picks_id_from_dtls_role(
+        self, role: str, expected_id: int | None
+    ) -> None:
+        from unittest.mock import MagicMock
+
+        from libp2p.transport.webrtc._aiortc_helpers import wire_pc_to_connection
+
+        pc = MagicMock()
+        pc.sctp.transport._role = role
+        conn = MagicMock()
+        wire_pc_to_connection(pc, conn)
+        await conn._create_channel_cb(2, "")
+        pc.createDataChannel.assert_called_once_with("stream-2", id=expected_id)

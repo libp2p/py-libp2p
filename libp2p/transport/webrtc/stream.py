@@ -11,11 +11,12 @@ Spec: https://github.com/libp2p/specs/blob/master/webrtc/webrtc.md
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
 import enum
 import logging
 from typing import TYPE_CHECKING
 
+from google.protobuf.message import DecodeError
 import trio
 
 from libp2p.abc import IMuxedStream
@@ -73,6 +74,8 @@ class WebRTCStream(IMuxedStream):
         self._read_send, self._read_recv = trio.open_memory_channel[bytes](64)
         self._read_buf = bytearray()
         self._read_closed = False
+        # Raw data-channel bytes not yet forming a complete frame (see on_data)
+        self._frame_buf = bytearray()
 
         # Write side
         self._write_closed = False
@@ -288,10 +291,12 @@ class WebRTCStream(IMuxedStream):
         Called by :class:`WebRTCConnection` when the data channel receives
         an SCTP message.
 
-        Per the libp2p WebRTC spec each SCTP message carries one uvarint
-        length-prefixed protobuf :class:`Message`.  We decode the length
-        prefix, parse the protobuf, process any flag, and enqueue payload
-        bytes for :meth:`read`.
+        The channel carries a byte stream of uvarint length-prefixed protobuf
+        :class:`Message` frames. A frame does not have to line up with an
+        SCTP message: go-libp2p writes the varint prefix and the protobuf
+        body as two separate messages, so we accumulate bytes and decode
+        every complete frame from the front of the buffer, keeping any
+        remainder for the next message.
 
         May be invoked from the asyncio bridge thread (not a Trio task).
         To stay safe we route every Trio primitive call (memory channel,
@@ -300,61 +305,27 @@ class WebRTCStream(IMuxedStream):
         from within a Trio task (for example in unit tests) we execute
         the mutations inline.
         """
+        self._frame_buf.extend(raw)
         try:
-            length, consumed = decode_varint_with_size(raw)
+            msgs = list(_decode_frames(self._frame_buf))
         except ValueError as e:
+            # Framing is desynchronised; nothing after this is decodable.
             logger.warning(
-                "WebRTCStream channel=%d: malformed varint prefix: %s",
+                "WebRTCStream channel=%d: malformed frame (%s); resetting stream",
                 self._channel_id,
                 e,
             )
+            self._frame_buf.clear()
+            self._run_on_trio_thread(self._reset_locally)
             return
-        # decode_varint_with_size does not raise on a truncated/empty prefix
-        # (unlike the old webrtc _varint decoder): it returns bytes_consumed
-        # for what it saw. An empty message (consumed == 0) or a prefix whose
-        # final consumed byte still has the continuation bit set (0x80) means
-        # the varint never terminated — reject it on the malformed-prefix path.
-        if consumed == 0 or raw[consumed - 1] & 0x80:
-            logger.warning(
-                "WebRTCStream channel=%d: malformed varint prefix: "
-                "incomplete/empty length (%d byte(s))",
-                self._channel_id,
-                consumed,
-            )
-            return
-        proto_bytes = raw[consumed : consumed + length]
-        if len(proto_bytes) != length:
-            logger.warning(
-                "WebRTCStream channel=%d: framed length=%d but only %d bytes "
-                "available in SCTP message",
-                self._channel_id,
-                length,
-                len(proto_bytes),
-            )
-            return
-        # The spec requires exactly one framed Message per SCTP datagram.
-        # If a peer (or a buggy intermediary) packs multiple frames into one
-        # SCTP message, we'd otherwise silently drop everything past the
-        # first.  Surface it loudly so the symptom isn't "reader hangs".
-        if consumed + length < len(raw):
-            logger.warning(
-                "WebRTCStream channel=%d: SCTP message has %d trailing bytes "
-                "after framed protobuf — peer may be batching frames "
-                "(spec violation); trailing bytes dropped",
-                self._channel_id,
-                len(raw) - consumed - length,
-            )
-        msg = Message()
-        try:
-            msg.ParseFromString(proto_bytes)
-        except Exception as e:
-            logger.warning(
-                "WebRTCStream channel=%d: malformed protobuf message: %s",
-                self._channel_id,
-                e,
-            )
-            return
+        for msg in msgs:
+            self._deliver(msg)
 
+    def _reset_locally(self) -> None:
+        self._state = StreamState.RESET
+        self._enqueue_eof_sentinel_locked()
+
+    def _deliver(self, msg: Message) -> None:
         # Snapshot flags/payload first; all subsequent state mutations are
         # performed under the Trio thread.
         has_payload = msg.HasField("message") and bool(msg.message)
@@ -387,8 +358,7 @@ class WebRTCStream(IMuxedStream):
                 elif flag == Message.STOP_SENDING:
                     self._write_closed = True
                 elif flag == Message.RESET:
-                    self._state = StreamState.RESET
-                    self._enqueue_eof_sentinel_locked()
+                    self._reset_locally()
 
         self._run_on_trio_thread(_apply_on_trio_thread)
 
@@ -523,6 +493,38 @@ def _frame(msg: Message) -> bytes:
     """Encode *msg* as uvarint-length-prefixed protobuf bytes."""
     data = msg.SerializeToString()
     return encode_uvarint(len(data)) + data
+
+
+def _decode_frames(buf: bytearray) -> Iterator[Message]:
+    """
+    Pop every complete uvarint-length-prefixed :class:`Message` off the
+    front of *buf*, leaving a trailing partial frame in place.
+
+    Frames may be split or batched across data-channel messages, so callers
+    append each message to *buf* and re-run this. The buffer is bounded: a
+    length prefix over :data:`MAX_MESSAGE_SIZE` (or a varint too long to
+    encode one) is rejected.
+
+    :raises ValueError: on a malformed length prefix or protobuf body.
+    """
+    while buf:
+        length, consumed = decode_varint_with_size(bytes(buf[:10]))
+        if buf[consumed - 1] & 0x80:
+            # Varint not terminated yet. 3 bytes already exceed MAX_MESSAGE_SIZE.
+            if consumed >= 3:
+                raise ValueError("length prefix too long")
+            return
+        if length > MAX_MESSAGE_SIZE:
+            raise ValueError(f"frame length {length} > {MAX_MESSAGE_SIZE}")
+        if consumed + length > len(buf):
+            return
+        msg = Message()
+        try:
+            msg.ParseFromString(bytes(buf[consumed : consumed + length]))
+        except DecodeError as e:
+            raise ValueError(f"malformed protobuf: {e}") from e
+        del buf[: consumed + length]
+        yield msg
 
 
 # Type alias for the send callback

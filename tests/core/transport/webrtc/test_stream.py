@@ -116,24 +116,46 @@ class TestRead:
         assert data == b"defgh"
 
     @pytest.mark.trio
+    async def test_frame_split_across_sctp_messages(self):
+        # go-libp2p (go-msgio pbio fallback) writes the varint prefix and the
+        # protobuf body as two separate SCTP messages; a body may also be cut.
+        stream = _make_stream()
+        framed = _framed(Message(message=b"from-go"))
+        stream.on_data(framed[:1])  # varint prefix alone
+        assert not stream._read_buf
+        stream.on_data(framed[1:4])  # partial body
+        stream.on_data(framed[4:])
+        assert await stream.read(7) == b"from-go"
+
+    @pytest.mark.trio
+    async def test_multiple_frames_in_one_sctp_message(self):
+        stream = _make_stream()
+        stream.on_data(
+            _framed(Message(message=b"ab"))
+            + _framed(Message(message=b"cd", flag=Message.FIN))
+        )
+        assert await stream.read() == b"ab"
+        assert await stream.read() == b"cd"
+        assert stream._read_closed
+
+    @pytest.mark.trio
     @pytest.mark.parametrize(
         "raw",
         [
-            b"",  # empty message: no length prefix at all
-            b"\x80",  # single continuation byte, no terminator
-            b"\xff\xff\xff\xff\xff",  # five continuation bytes, no terminator
+            b"\xff\xff\xff\xff\xff",  # unterminated varint, past any legal size
+            b"\x81\x80\x01",  # length 16385 > MAX_MESSAGE_SIZE
+            b"\x02\xff\xff",  # length ok, body is not a protobuf
         ],
     )
-    async def test_malformed_varint_is_logged_not_raised(self, raw):
-        # decode_varint_with_size does not raise on these; on_data must still
-        # reject them on the malformed-varint-prefix path (not the downstream
-        # length-mismatch path) so the classification matches the old decoder.
+    async def test_malformed_frame_resets_stream(self, raw):
         stream = _make_stream()
         with patch("libp2p.transport.webrtc.stream.logger.warning") as warning:
             stream.on_data(raw)
         assert not stream._read_buf
-        assert warning.called
-        assert "malformed varint prefix" in warning.call_args.args[0]
+        assert "malformed frame" in warning.call_args.args[0]
+        assert stream._state == StreamState.RESET
+        with pytest.raises(Exception, match="reset"):
+            await stream.read()
 
 
 class TestFlags:
