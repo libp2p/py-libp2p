@@ -422,7 +422,9 @@ async def test_handler_exception_does_not_crash_listener():
     await listener.listen(Multiaddr(LISTEN_ADDR))
     (maddr,) = listener.get_addrs()
     try:
-        with trio.fail_after(30):
+        # Two full dials plus two bounded closes (each may take ~5 s on Windows
+        # when a datagram write is in flight at close) — give this one room.
+        with trio.fail_after(60):
             conn = await dialer.dial(maddr)  # handshake completes before handler
             while calls == 0:
                 await trio.sleep(0.01)
