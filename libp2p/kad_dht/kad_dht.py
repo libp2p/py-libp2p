@@ -170,7 +170,8 @@ class KadDHT(Service):
     performing periodic random queries to discover new peers and maintain
     routing table health.
 
-    Example:
+    Example::
+
         # Basic DHT without random walk (default)
         dht = KadDHT(host, DHTMode.SERVER)
 
