@@ -60,9 +60,24 @@ class WebRTCTransportConfig:
     # ------------------------------------------------------------------
     # STUN / TURN servers (for ICE candidate gathering)
     # ------------------------------------------------------------------
+    # Only used by the experimental HTTP ``/sdp`` harness. The WebRTC-Direct
+    # spec path never configures STUN/TURN: it dials a known public address
+    # and the listener infers the offer from the first STUN packet.
     ice_servers: list[str] = field(
         default_factory=lambda: ["stun:stun.l.google.com:19302"]
     )
+
+    # ------------------------------------------------------------------
+    # WebRTC-Direct signaling
+    # ------------------------------------------------------------------
+    # The spec path needs no signaling: the listener infers the dialer's
+    # offer from its first STUN packet (one shared UDP port, v1/v2 ufrag
+    # dispatch). The HTTP ``POST /sdp`` harness predates that and is kept
+    # only as an experimental py<->py debugging aid: when enabled the
+    # listener also serves it on TCP (same port number) and our dialer
+    # uses it instead of the STUN path. Not interoperable with other
+    # implementations.
+    enable_sdp_http_harness: bool = False
 
     def get_or_generate_certificate(self) -> WebRTCCertificate:
         """

@@ -38,6 +38,14 @@ ______________________________________________________________________
 | **`libp2p-webrtc-browser-to-server`**  |     🌱     |                                                                                     |
 | **`libp2p-webrtc-private-to-private`** |     🌱     |                                                                                     |
 
+WebRTC-Direct (browser/server) uses the spec STUN path by default: inbound dials
+hit a shared UDP port and the listener infers the offer from the first STUN
+packet; outbound dials synthesise an ICE-Lite answer from the multiaddr with no
+default public STUN servers. An experimental HTTP `POST /sdp` harness for
+py↔py debugging is opt-in via
+`WebRTCTransportConfig(enable_sdp_http_harness=True)` — it is not
+interoperable with other libp2p implementations.
+
 ______________________________________________________________________
 
 ### NAT Traversal
