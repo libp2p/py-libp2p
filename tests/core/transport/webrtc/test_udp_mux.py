@@ -54,6 +54,16 @@ def _dtls_like_bytes() -> bytes:
     return b"\x16\xfe\xff\x00\x01\x00\x00\x00\x00\x00\x00\x00\x05hello"
 
 
+class _RecordingReceiver:
+    """Stand-in for aioice.ice.Connection's data path."""
+
+    def __init__(self) -> None:
+        self.data: list[tuple[bytes, int]] = []
+
+    def data_received(self, data: bytes, component: int) -> None:
+        self.data.append((data, component))
+
+
 class _RecordingProtocol:
     """Stand-in for aioice.ice.StunProtocol — records what it receives."""
 
@@ -109,14 +119,14 @@ class TestStunDispatch:
         mux, _ = await UdpMux.create("127.0.0.1", 0)
         seen: list[tuple[str, bytes, tuple[str, int]]] = []
         mux.set_unknown_stun_handler(
-            lambda ufrag, data, addr: seen.append((ufrag, data, addr))
+            lambda username, data, addr: seen.append((username, data, addr))
         )
         try:
             data = _stun_binding_request("newdialer:remote")
             mux.datagram_received(data, ("10.0.0.9", 5555))
             # First contact for an unregistered ufrag reaches the handler with
-            # the ufrag, raw datagram (for replay), and source address.
-            assert seen == [("newdialer", data, ("10.0.0.9", 5555))]
+            # the full USERNAME, raw datagram (for replay), and source address.
+            assert seen == [("newdialer:remote", data, ("10.0.0.9", 5555))]
         finally:
             await mux.close()
 
@@ -194,6 +204,87 @@ class TestAddrDispatch:
 # ---------------------------------------------------------------------------
 
 
+class TestAddrLearning:
+    def test_stun_for_known_ufrag_learns_remote_addr(self) -> None:
+        asyncio.run(self._learns())
+
+    async def _learns(self) -> None:
+        mux, _ = await UdpMux.create("127.0.0.1", 0)
+        proto = _RecordingProtocol()
+        remote = ("10.0.0.9", 40000)
+        mux.register("abc123", proto)
+        try:
+            req = _stun_binding_request("abc123:peer")  # random txn id per call
+            mux.datagram_received(req, remote)
+            # A DTLS record from the same address now routes without an
+            # explicit register_addr().
+            mux.datagram_received(_dtls_like_bytes(), remote)
+            assert [d for d, _ in proto.received] == [req, _dtls_like_bytes()]
+        finally:
+            await mux.close()
+
+    def test_learned_addrs_are_capped_per_protocol(self) -> None:
+        asyncio.run(self._capped())
+
+    async def _capped(self) -> None:
+        mux, _ = await UdpMux.create("127.0.0.1", 0)
+        proto = _RecordingProtocol()
+        mux.register("abc123", proto)
+        try:
+            cap = UdpMux._MAX_ADDRS_PER_PROTOCOL
+            for port in range(40000, 40000 + cap + 20):
+                mux.datagram_received(
+                    _stun_binding_request("abc123:peer"), ("10.0.0.9", port)
+                )
+            learned = [a for a, p in mux._by_addr.items() if p is proto]
+            assert len(learned) == cap
+            # STUN with the known ufrag still reaches the protocol regardless.
+            assert len(proto.received) == cap + 20
+        finally:
+            await mux.close()
+
+    def test_newer_connection_takes_over_reused_addr(self) -> None:
+        asyncio.run(self._takeover())
+
+    async def _takeover(self) -> None:
+        # A dialer that redials from the same (ip, port) with a new ufrag
+        # while the old connection is still registered must reach the new one.
+        mux, _ = await UdpMux.create("127.0.0.1", 0)
+        old, new = _RecordingProtocol(), _RecordingProtocol()
+        remote = ("10.0.0.9", 40000)
+        mux.register("oldufrag", old)
+        mux.register("newufrag", new)
+        try:
+            mux.datagram_received(_stun_binding_request("oldufrag:x"), remote)
+            mux.datagram_received(_stun_binding_request("newufrag:x"), remote)
+            mux.datagram_received(_dtls_like_bytes(), remote)
+            assert [d for d, _ in new.received][-1] == _dtls_like_bytes()
+            assert all(d != _dtls_like_bytes() for d, _ in old.received)
+            mux.unregister("newufrag")
+            assert remote not in mux._by_addr
+        finally:
+            await mux.close()
+
+    def test_unregister_drops_learned_addrs(self) -> None:
+        asyncio.run(self._unregister_drops())
+
+    async def _unregister_drops(self) -> None:
+        mux, _ = await UdpMux.create("127.0.0.1", 0)
+        proto, other = _RecordingProtocol(), _RecordingProtocol()
+        remote, other_remote = ("10.0.0.9", 40000), ("10.0.0.10", 40001)
+        mux.register("abc123", proto)
+        mux.register_addr(other_remote, other)
+        try:
+            mux.datagram_received(_stun_binding_request("abc123:peer"), remote)
+            mux.unregister("abc123")
+            assert mux._by_ufrag == {}
+            assert mux._by_addr == {other_remote: other}  # unrelated entry kept
+            mux.datagram_received(_dtls_like_bytes(), remote)
+            assert len(proto.received) == 1  # nothing after unregister
+        finally:
+            await mux.close()
+
+
 class TestMalformedStun:
     def test_struct_error_routes_by_addr_not_raise(self) -> None:
         asyncio.run(self._struct_error())
@@ -205,8 +296,12 @@ class TestMalformedStun:
         # usable STUN" and fall through to addr routing instead of letting the
         # exception escape — otherwise a remote peer can crash / log-flood the
         # mux with crafted packets.
+        # aioice's own StunProtocol.datagram_received re-parses and catches
+        # only ValueError, so the bytes must NOT go through it either — they
+        # are handed straight to the connection's data path (``receiver``).
         mux, _ = await UdpMux.create("127.0.0.1", 0)
         proto = _RecordingProtocol()
+        proto.receiver = _RecordingReceiver()  # type: ignore[attr-defined]
         remote = ("10.0.0.2", 54321)
         mux.register_addr(remote, proto)
         try:
@@ -216,7 +311,25 @@ class TestMalformedStun:
             ):
                 # Must not raise.
                 mux.datagram_received(data, remote)
-            assert proto.received == [(data, remote)]
+            assert proto.received == []  # StunProtocol parser bypassed
+            assert proto.receiver.data == [(data, 1)]  # type: ignore[attr-defined]
+        finally:
+            await mux.close()
+
+    def test_struct_error_without_receiver_is_dropped(self) -> None:
+        asyncio.run(self._struct_error_no_receiver())
+
+    async def _struct_error_no_receiver(self) -> None:
+        mux, _ = await UdpMux.create("127.0.0.1", 0)
+        proto = _RecordingProtocol()  # no .receiver attribute
+        remote = ("10.0.0.2", 54321)
+        mux.register_addr(remote, proto)
+        try:
+            with patch.object(
+                _stun, "parse_message", side_effect=struct.error("bad attr")
+            ):
+                mux.datagram_received(b"\x00\x01" + b"\x00" * 26, remote)
+            assert proto.received == []
         finally:
             await mux.close()
 
@@ -369,3 +482,116 @@ class TestAddIceConnection:
             assert len(recorder.received) == 1
         finally:
             await mux.close()
+
+
+# ---------------------------------------------------------------------------
+# attach_muxed_connection: full aiortc PC over the mux
+# ---------------------------------------------------------------------------
+
+
+class TestAttachMuxedConnection:
+    def test_pc_over_mux_connects_and_routes(self) -> None:
+        asyncio.run(asyncio.wait_for(self._pc_over_mux(), timeout=30))
+
+    async def _pc_over_mux(self) -> None:
+        # Bind the mux on all interfaces and advertise a real host address:
+        # the client PC gathers LAN host candidates only (aioice skips
+        # loopback), and on Windows a 127.0.0.1-bound socket cannot send to a
+        # LAN-bound peer socket (WinError 1231) - Linux's weak-host model hid
+        # this. Mirrors a real listener on 0.0.0.0.
+        from aioice.ice import get_host_addresses
+        from aiortc import RTCSessionDescription
+
+        from libp2p.transport.webrtc._aiortc_helpers import (
+            _wait_channel_open,
+            attach_muxed_connection,
+            close_peer_connection,
+            create_noise_channel,
+            create_peer_connection,
+            wait_for_connected,
+        )
+        from libp2p.transport.webrtc.certificate import WebRTCCertificate
+
+        hosts = get_host_addresses(use_ipv4=True, use_ipv6=False) or ["127.0.0.1"]
+        cand_host = hosts[0]
+        mux, port = await UdpMux.create("0.0.0.0", 0)
+        ufrag, pwd = "srvufrag1", "srvpassword1234567890ab"
+        cert_s, cert_c = (
+            WebRTCCertificate.from_aiortc(),
+            WebRTCCertificate.from_aiortc(),
+        )
+        pc_s = pc_c = None
+        try:
+            conn = mux.add_ice_connection(ufrag, pwd, host=cand_host)
+            pc_s = await create_peer_connection(cert_s._rtc_certificate, ice_servers=[])
+            ch_s = await create_noise_channel(pc_s)
+            attach_muxed_connection(pc_s, mux, conn)
+
+            pc_c = await create_peer_connection(cert_c._rtc_certificate, ice_servers=[])
+            ch_c = await create_noise_channel(pc_c)
+
+            offer = await pc_c.createOffer()
+            await pc_c.setLocalDescription(offer)
+            # Force the muxed side to be the DTLS server (WebRTC-Direct
+            # listeners must be): with actpass aiortc answers as DTLS client.
+            offer_sdp = pc_c.localDescription.sdp.replace(
+                "a=setup:actpass", "a=setup:active"
+            )
+            await pc_s.setRemoteDescription(
+                RTCSessionDescription(sdp=offer_sdp, type="offer")
+            )
+            answer = await pc_s.createAnswer()
+            await pc_s.setLocalDescription(answer)
+            answer_sdp = pc_s.localDescription.sdp
+            await pc_c.setRemoteDescription(
+                RTCSessionDescription(sdp=answer_sdp, type="answer")
+            )
+
+            # The answer advertises exactly the shared port and our creds —
+            # aiortc's gather() did not bind/append any extra sockets.
+            cands = [
+                ln for ln in answer_sdp.splitlines() if ln.startswith("a=candidate")
+            ]
+            assert len(cands) == 1 and f" {port} " in cands[0], cands
+            assert f"a=ice-ufrag:{ufrag}" in answer_sdp
+            assert f"a=ice-pwd:{pwd}" in answer_sdp
+            assert "a=setup:passive" in answer_sdp
+            assert len(conn._protocols) == 1
+
+            await asyncio.gather(
+                wait_for_connected(pc_s, timeout=15.0),
+                wait_for_connected(pc_c, timeout=15.0),
+            )
+
+            # Data flows both ways over the shared socket.
+            await asyncio.gather(_wait_channel_open(ch_s), _wait_channel_open(ch_c))
+            got_s: asyncio.Queue[bytes] = asyncio.Queue()
+            got_c: asyncio.Queue[bytes] = asyncio.Queue()
+            ch_s.on("message", lambda m: got_s.put_nowait(m))
+            ch_c.on("message", lambda m: got_c.put_nowait(m))
+            ch_c.send(b"client->server")
+            assert await asyncio.wait_for(got_s.get(), 5) == b"client->server"
+            ch_s.send(b"server->client")
+            assert await asyncio.wait_for(got_c.get(), 5) == b"server->client"
+
+            # Peer address learned/registered for post-ICE routing.
+            assert ufrag in mux._by_ufrag
+            assert conn._nominated[1].remote_addr in mux._by_addr
+
+            await close_peer_connection(pc_c)
+            await close_peer_connection(pc_s)
+            pc_s = pc_c = None
+            # closing the ICE transport unregisters everything for this ufrag
+            assert mux._by_ufrag == {}
+            assert mux._by_addr == {}
+        finally:
+            # Bound cleanup: a hung close() after a primary failure would
+            # otherwise outlive asyncio.wait_for and be killed by pytest-timeout
+            # (reported as an xdist "worker crashed", hiding the real error).
+            for pc in (pc_s, pc_c):
+                if pc is not None:
+                    try:
+                        await close_peer_connection(pc)
+                    except Exception:
+                        pass
+            await asyncio.wait_for(mux.close(), 10)

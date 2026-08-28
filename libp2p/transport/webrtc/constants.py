@@ -61,3 +61,11 @@ ICE_KEEPALIVE_INTERVAL = 15  # seconds
 MAX_IN_FLIGHT_CONNECTIONS = 128
 ACCEPT_QUEUE_SIZE = 256
 MAX_DATA_CHANNELS = 65_535  # Per WebRTC spec
+
+# ---------------------------------------------------------------------------
+# WebRTC-Direct first-contact (unknown STUN) rate limiting, per source IP.
+# Spec step 6: a listener SHOULD rate-limit STUN that allocates state.
+# ---------------------------------------------------------------------------
+STUN_FIRST_CONTACT_BURST = 8  # tokens per source IP
+STUN_FIRST_CONTACT_RATE = 4.0  # tokens refilled per second
+STUN_FIRST_CONTACT_MAX_SOURCES = 4096  # bounded bucket table

@@ -27,6 +27,7 @@ from aiortc.rtcdtlstransport import RTCCertificate
 from .exceptions import WebRTCStreamError
 
 if TYPE_CHECKING:
+    from ._udp_mux import UdpMux
     from .connection import WebRTCConnection
 
 logger = logging.getLogger(__name__)
@@ -37,8 +38,9 @@ _ICE_CONNECT_TIMEOUT = 30.0
 # Timeout for HTTP SDP exchange (seconds).
 _SDP_HTTP_TIMEOUT = 15.0
 
-# Bounds for the HTTP /sdp dev harness — defend against memory-amplification
-# DoS while the harness exists (until the STUN-based listener lands, #1352).
+# Bounds for the experimental HTTP /sdp harness (config.enable_sdp_http_harness,
+# off by default; the spec path is the STUN listener) — defend against
+# memory-amplification DoS whenever it is enabled.
 _MAX_SDP_BODY_SIZE = 32 * 1024  # 32 KiB; SDP offers are typically 1–4 KiB
 _MAX_HEADER_LINES = 64
 _MAX_HEADER_BYTES = 8 * 1024  # 8 KiB total across all header lines
@@ -83,7 +85,7 @@ async def create_peer_connection(
     pc = RTCPeerConnection(configuration=config)
     # Replace aiortc's auto-generated cert.  Must use the mangled name —
     # aiortc reads only `self.__certificates`, which mangles to this.
-    pc._RTCPeerConnection__certificates = [rtc_cert]  # type: ignore[attr-defined]
+    set_private_attr(pc, "_RTCPeerConnection__certificates", [rtc_cert])
     return pc
 
 
@@ -162,10 +164,17 @@ def get_remote_fingerprint(pc: RTCPeerConnection) -> bytes:
     :returns: 32-byte SHA-256 digest.
     :raises ValueError: If the remote certificate is not available.
     """
-    dtls = getattr(pc, "_dtlsTransport", None)
+    # aiortc keeps one DTLS transport per SCTP association; for a
+    # data-channel-only PC that is ``pc.sctp.transport``.  The peer cert
+    # lives on the pyOpenSSL connection once the handshake completed.
+    sctp = getattr(pc, "sctp", None)
+    dtls = getattr(sctp, "transport", None) if sctp is not None else None
     if dtls is None:
         raise ValueError("DTLS transport not available on peer connection")
-    remote_cert = getattr(dtls, "_remote_certificate", None)
+    ssl_conn = getattr(dtls, "_ssl", None)
+    if ssl_conn is None:
+        raise ValueError("DTLS handshake has not started")
+    remote_cert = ssl_conn.get_peer_certificate(as_cryptography=True)
     if remote_cert is None:
         raise ValueError("Remote DTLS certificate not available")
     # remote_cert is a cryptography x509.Certificate
@@ -173,6 +182,138 @@ def get_remote_fingerprint(pc: RTCPeerConnection) -> bytes:
 
     der = remote_cert.public_bytes(Encoding.DER)
     return hashlib.sha256(der).digest()
+
+
+def set_private_attr(obj: Any, name: str, value: Any) -> None:
+    """
+    Overwrite a private (possibly name-mangled) library attribute.
+
+    Writing a wrong — or upgraded-away — name would silently create a new
+    attribute the library never reads; asserting existence first turns that
+    silent no-op into a failure at the line that caused it, and fails loudly
+    on the aiortc/aioice upgrade that renames or drops the slot. It separates
+    "wrote to the wrong name" from "the value never reached the handshake"
+    (which only the downstream invariant tests would catch).
+    """
+    assert hasattr(obj, name), f"{type(obj).__name__} has no attribute {name!r}"
+    setattr(obj, name, value)
+
+
+def force_listener_dtls_server_role(pc: RTCPeerConnection) -> None:
+    """
+    Make a WebRTC-Direct listener answer as DTLS server (``a=setup:passive``).
+
+    Inferred offers use ``a=setup:actpass`` per spec. aiortc's
+    :meth:`RTCPeerConnection.createAnswer` defaults to DTLS *client* when the
+    transport role is still ``auto`` after an ``actpass`` offer — see
+    ``rtcpeerconnection.createAnswer`` lines that map ``auto`` → ``client``.
+    """
+    sctp = getattr(pc, "sctp", None)
+    dtls = getattr(sctp, "transport", None) if sctp is not None else None
+    if dtls is None:
+        raise ValueError("DTLS transport not available on peer connection")
+    dtls._set_role("server")
+
+
+# ------------------------------------------------------------------
+# Peer-connection shutdown
+# ------------------------------------------------------------------
+
+
+def _abort_ice_transports(pc: RTCPeerConnection) -> None:
+    """Force-close the aioice UDP transports of a data-channel-only *pc*."""
+    sctp = getattr(pc, "sctp", None)
+    dtls = getattr(sctp, "transport", None) if sctp is not None else None
+    ice = getattr(dtls, "transport", None) if dtls is not None else None
+    conn = getattr(ice, "_connection", None) if ice is not None else None
+    for proto in list(getattr(conn, "_protocols", [])):
+        abort = getattr(getattr(proto, "transport", None), "abort", None)
+        if abort is not None:
+            abort()
+
+
+async def close_peer_connection(pc: RTCPeerConnection, timeout: float = 5.0) -> None:
+    """
+    Close *pc*, working around a Windows proactor close hang.
+
+    When a datagram send is still in flight as ``transport.close()`` runs
+    (typical: DTLS just queued its close_notify), CPython's
+    ``_ProactorDatagramTransport._loop_writing`` early-returns on
+    ``_conn_lost`` and the deferred ``connection_lost`` is never delivered,
+    so aioice's ``StunProtocol.close()`` awaits its closed-future forever
+    (observed deterministically on Windows CPython 3.12/3.13). On timeout,
+    ``abort()`` the lingering transports — ``_force_close`` delivers
+    ``connection_lost`` unconditionally — and let ``close()`` finish.
+    """
+    task = asyncio.ensure_future(pc.close())
+    try:
+        await asyncio.wait_for(asyncio.shield(task), timeout)
+        return
+    except asyncio.TimeoutError:
+        logger.debug("pc.close() stalled; aborting ICE transports")
+    _abort_ice_transports(pc)
+    try:
+        await asyncio.wait_for(task, timeout)
+    except asyncio.TimeoutError:
+        task.cancel()
+        logger.warning("pc.close() still stalled after transport abort")
+
+
+# ------------------------------------------------------------------
+# UdpMux bridge
+# ------------------------------------------------------------------
+
+
+def attach_muxed_connection(pc: RTCPeerConnection, mux: UdpMux, conn: Any) -> None:
+    """
+    Run *pc*'s ICE over the :class:`UdpMux`-backed ``aioice.Connection`` *conn*.
+
+    aiortc offers no injection point for an external ICE connection: the
+    gatherer builds its own ``aioice.Connection`` when the SCTP/DTLS/ICE
+    stack is created (synchronously, on the first ``createDataChannel``).
+    This swaps that connection for *conn* — created via
+    :meth:`UdpMux.add_ice_connection` — so the peer connection sends and
+    receives on the shared UDP port instead of binding its own.
+
+    Call **after** ``createDataChannel`` and **before** any
+    ``set*Description``. Touches aiortc/aioice privates (validated against
+    aiortc 1.15 / aioice 0.10):
+
+    - ``iceGatherer._connection`` / ``iceTransport._connection`` — what
+      ``getLocalParameters()`` / ``getLocalCandidates()`` / ``start()`` use;
+    - ``iceTransport._recv`` / ``_send`` — bound at construction to the
+      *original* connection's methods and used by ``RTCDtlsTransport``;
+      forgetting these leaves DTLS talking to the orphaned connection.
+
+    The orphaned original connection never bound a socket (gathering is
+    triggered later, and *conn* has it marked done), so it is simply dropped.
+    ``RTCIceTransport.stop()`` closes *conn*, which the mux tolerates. On
+    ICE ``completed`` the nominated remote address is registered on the mux
+    (belt and braces — the mux already learns it from the peer's STUN checks);
+    on ``closed``/``failed`` the connection's ufrag and addresses are dropped.
+    """
+    sctp = pc.sctp
+    if sctp is None:
+        raise ValueError("call pc.createDataChannel() before attach_muxed_connection")
+    ice = (
+        sctp.transport.transport
+    )  # RTCSctpTransport -> RTCDtlsTransport -> RTCIceTransport
+    set_private_attr(ice.iceGatherer, "_connection", conn)
+    set_private_attr(ice, "_connection", conn)
+    set_private_attr(ice, "_recv", conn.recv)
+    set_private_attr(ice, "_send", conn.send)
+
+    ufrag = conn.local_username
+
+    @ice.on("statechange")  # type: ignore[misc,untyped-decorator]
+    def _on_ice_state() -> None:
+        state = ice.state
+        if state == "completed":
+            pair = conn._nominated.get(1)
+            if pair is not None:
+                mux.register_addr(pair.remote_addr, pair.protocol)
+        elif state in ("closed", "failed"):
+            mux.unregister(ufrag)
 
 
 # ------------------------------------------------------------------
@@ -222,7 +363,7 @@ def wire_pc_to_connection(
         ch.send(data)
 
     async def _close_pc() -> None:
-        await pc.close()
+        await close_peer_connection(pc)
 
     conn._create_channel_cb = _create_channel
     conn._send_on_channel_cb = _send_on_channel
@@ -354,6 +495,11 @@ def make_noise_channel_callbacks(
         recv_queue.put_nowait(data)
 
     async def send(data: bytes) -> None:
+        # The negotiated channel exists before SCTP is up; aiortc raises
+        # InvalidStateError on send() until it is "open".  The Noise
+        # initiator (the listener) sends first, right after DTLS connects,
+        # so wait here rather than in every caller.
+        await _wait_channel_open(channel)
         channel.send(data)
 
     async def recv() -> bytes:
