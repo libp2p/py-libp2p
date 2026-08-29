@@ -524,3 +524,39 @@ async def test_first_contact_rate_limit_per_source_ip():
     finally:
         await listener.close()
         await server.close()
+
+
+@pytest.mark.trio
+async def test_harness_retries_when_tcp_port_collides():
+    """
+    Harness mode binds TCP on the UDP port number; if that TCP bind fails
+    (Windows reserves port ranges per protocol) the listener must pick a
+    fresh UDP port and try again rather than fail.
+    """
+    from unittest.mock import patch
+
+    from multiaddr import Multiaddr
+
+    import libp2p.transport.webrtc._aiortc_helpers as helpers
+
+    real = helpers.run_signaling_server
+    calls: list[int] = []
+
+    async def flaky(host, port, on_offer):  # type: ignore[no-untyped-def]
+        calls.append(port)
+        if len(calls) == 1:
+            raise OSError(13, "port reserved")
+        return await real(host, port, on_offer)
+
+    server, _ = _transport(enable_sdp_http_harness=True)
+    listener = server.create_listener(lambda conn: trio.sleep_forever())
+    try:
+        with patch.object(helpers, "run_signaling_server", flaky):
+            await listener.listen(Multiaddr(LISTEN_ADDR))
+        (maddr,) = listener.get_addrs()
+        _, port = _host_port(maddr)
+        assert len(calls) == 2 and calls[1] == port  # second attempt won
+        assert listener._signaling_server is not None
+    finally:
+        await listener.close()
+        await server.close()

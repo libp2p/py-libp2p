@@ -215,29 +215,41 @@ class WebRTCDirectListener(IListener):
 
         # Shared UDP socket + STUN dispatch (runs on the asyncio thread).
         # Bind before spawning anything so a bind failure leaves no orphans.
-        try:
-            mux, bound_port = await bridge.run_coro(UdpMux.create(host, port))
-        except OSError as e:
-            raise WebRTCConnectionError(
-                f"Failed to bind WebRTC Direct listener on {host}:{port}: {e}"
-            ) from e
+        # The experimental harness also binds TCP on the *same* port number
+        # (one multiaddr describes both); with an OS-chosen port that TCP
+        # bind can collide (Windows reserves port ranges per protocol), so
+        # retry with a fresh UDP port a few times.
+        for attempt in range(5):
+            try:
+                mux, bound_port = await bridge.run_coro(UdpMux.create(host, port))
+            except OSError as e:
+                raise WebRTCConnectionError(
+                    f"Failed to bind WebRTC Direct listener on {host}:{port}: {e}"
+                ) from e
+            if not self._config.enable_sdp_http_harness:
+                break
+            from ._aiortc_helpers import run_signaling_server
+
+            try:
+                self._signaling_server = await bridge.run_coro(
+                    run_signaling_server(
+                        host=host,
+                        port=bound_port,
+                        on_offer=self._make_offer_handler(bridge, rtc_cert),
+                    )
+                )
+                break
+            except OSError as e:
+                await bridge.run_coro(mux.close())
+                if port != 0 or attempt == 4:
+                    raise WebRTCConnectionError(
+                        f"Failed to bind /sdp harness on {host}:{bound_port}: {e}"
+                    ) from e
+                logger.debug("harness TCP port %d busy, retrying", bound_port)
         self._mux = mux
         await self._start_trio_nursery()
         self._candidate_host = _resolve_candidate_host(host)
         mux.set_unknown_stun_handler(self._on_unknown_stun)
-
-        if self._config.enable_sdp_http_harness:
-            from ._aiortc_helpers import run_signaling_server
-
-            # Experimental py<->py harness: TCP, same port number as the UDP
-            # socket so one multiaddr describes both.
-            self._signaling_server = await bridge.run_coro(
-                run_signaling_server(
-                    host=host,
-                    port=bound_port,
-                    on_offer=self._make_offer_handler(bridge, rtc_cert),
-                )
-            )
 
         # Build advertised multiaddr(s) with certhash and peer ID.
         certhash_mb = self._certificate.fingerprint_to_multibase()
