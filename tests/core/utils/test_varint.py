@@ -78,10 +78,6 @@ def test_decode_varint_from_bytes_invalid():
     with pytest.raises(ParseError, match="Unexpected end of data"):
         decode_varint_from_bytes(b"")
 
-    # Truncated varint (final byte still has the continuation bit set).
-    with pytest.raises(ParseError):
-        decode_varint_from_bytes(b"\x80")
-
 
 def test_encode_varint_prefixed():
     """Test encoding messages with varint length prefix."""
@@ -247,3 +243,28 @@ async def test_decode_uvarint_from_stream_rejects_over_long():
     assert (
         await decode_uvarint_from_stream(MockReader(encode_uvarint(max_u64))) == max_u64
     )
+
+
+def test_decode_uvarint_rejects_over_long_buffer():
+    """An 11-byte uvarint encoding must be rejected on the buffer path (#1458)."""
+    over_long = b"\x80" * 10 + b"\x01"
+    with pytest.raises(ParseError, match="64 bits"):
+        decode_varint_from_bytes(over_long)
+
+
+def test_decode_uvarint_rejects_terminator_overflow():
+    """
+    A 10-byte encoding whose terminating byte still carries extra payload
+    bits decodes to a value > 2^64-1 and must be rejected (#1458).
+    """
+    overflow = b"\xff" * 9 + b"\x7f"
+    with pytest.raises(ParseError, match="64 bits"):
+        decode_varint_from_bytes(overflow)
+
+
+@pytest.mark.trio
+async def test_decode_uvarint_from_stream_rejects_terminator_overflow():
+    """Stream decoder must reject 10-byte terminator overflow (#1458)."""
+    overflow = b"\xff" * 9 + b"\x7f"
+    with pytest.raises(ParseError, match="64 bits"):
+        await decode_uvarint_from_stream(MockReader(overflow))
