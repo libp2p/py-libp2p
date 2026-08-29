@@ -3,6 +3,7 @@ import pytest
 from libp2p.exceptions import ParseError
 from libp2p.io.abc import Reader
 from libp2p.utils.varint import (
+    decode_uvarint_from_stream,
     decode_varint_from_bytes,
     encode_uvarint,
     encode_varint_prefixed,
@@ -77,8 +78,9 @@ def test_decode_varint_from_bytes_invalid():
     with pytest.raises(ParseError, match="Unexpected end of data"):
         decode_varint_from_bytes(b"")
 
-    # Incomplete varint (should not raise, but should handle gracefully)
-    # This depends on the implementation - some might raise, others might return partial
+    # Truncated varint (final byte still has the continuation bit set).
+    with pytest.raises(ParseError):
+        decode_varint_from_bytes(b"\x80")
 
 
 def test_encode_varint_prefixed():
@@ -213,3 +215,35 @@ def test_varint_edge_cases():
     # Test with minimum 15-bit value
     assert encode_uvarint(16384) == b"\x80\x80\x01"
     assert decode_varint_from_bytes(b"\x80\x80\x01") == 16384
+
+
+def test_decode_varint_rejects_truncated():
+    """
+    A varint whose final byte still has the continuation bit set is
+    truncated and must raise, not silently return a partial value (#1440).
+    """
+    # Single continuation byte with no terminator.
+    with pytest.raises(ParseError):
+        decode_varint_from_bytes(b"\x80")
+    # Several continuation bytes, still no terminator.
+    with pytest.raises(ParseError):
+        decode_varint_from_bytes(b"\xff\xff\xff\xff\xff")
+    # A properly terminated varint still decodes fine.
+    assert decode_varint_from_bytes(b"\x80\x01") == 128
+
+
+@pytest.mark.trio
+async def test_decode_uvarint_from_stream_rejects_over_long():
+    """
+    A uvarint longer than 10 bytes encodes a value > 64 bits and must be
+    rejected; a canonical 64-bit uvarint is at most 10 bytes (#1440).
+    """
+    # 10 continuation bytes + terminator = 11-byte varint (> 64 bits).
+    over_long = b"\x80" * 10 + b"\x01"
+    with pytest.raises(ParseError, match="64 bits"):
+        await decode_uvarint_from_stream(MockReader(over_long))
+    # The maximum 64-bit value (10 bytes) still decodes.
+    max_u64 = 2**64 - 1
+    assert (
+        await decode_uvarint_from_stream(MockReader(encode_uvarint(max_u64))) == max_u64
+    )
