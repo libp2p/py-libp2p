@@ -134,6 +134,7 @@ class KBucket:
         bucket_size: int = BUCKET_SIZE,
         min_range: int = 0,
         max_range: int = 2**256,
+        max_peers_per_subnet: int | None = None,
     ):
         """
         Initialize a new k-bucket.
@@ -142,15 +143,33 @@ class KBucket:
         :param bucket_size: Maximum number of peers to store in the bucket
         :param min_range: Lower boundary of the bucket's key range (inclusive)
         :param max_range: Upper boundary of the bucket's key range (exclusive)
+        :param max_peers_per_subnet: Per-bucket subnet-diversity cap (issue #1422).
+            ``None`` resolves to ``MAX_PEERS_PER_SUBNET`` at call time so tests
+            patching the module constant keep working; <= 0 disables the check.
 
         """
         self.bucket_size = bucket_size
         self.host = host
         self.min_range = min_range
         self.max_range = max_range
+        # Keep None as a sentinel and resolve against MAX_PEERS_PER_SUBNET at
+        # read time (see _subnet_limit) so tests that patch the module constant
+        # after construction still take effect (issue #1422).
+        self.max_peers_per_subnet = max_peers_per_subnet
         # Store PeerInfo objects along with last-seen timestamp
         self.peers: OrderedDict[ID, tuple[PeerInfo, float]] = OrderedDict()
         self._lock: trio.Lock = trio.Lock()
+
+    def _subnet_limit(self) -> int:
+        """
+        Resolve the effective per-bucket subnet cap (issue #1422).
+
+        ``None`` falls back to the module-level ``MAX_PEERS_PER_SUBNET`` (read at
+        call time so tests can patch it); an explicit value overrides it.
+        """
+        if self.max_peers_per_subnet is None:
+            return MAX_PEERS_PER_SUBNET
+        return self.max_peers_per_subnet
 
     def peer_ids(self) -> list[ID]:
         """Get all peer IDs in the bucket."""
@@ -185,19 +204,17 @@ class KBucket:
                 return True
 
             # Enforce IP/subnet diversity (issue #1383): refuse a new peer whose
-            # globally-routable subnet already holds MAX_PEERS_PER_SUBNET peers
-            # in this bucket. Exempt peers (subnet is None) are never grouped.
-            # Disabled when MAX_PEERS_PER_SUBNET <= 0.
-            if MAX_PEERS_PER_SUBNET > 0:
+            # globally-routable subnet already holds the per-bucket cap (issue
+            # #1422). Exempt peers (subnet is None) are never grouped. Disabled
+            # when the cap is <= 0.
+            limit = self._subnet_limit()
+            if limit > 0:
                 subnet = _subnet_key(peer_info)
-                if (
-                    subnet is not None
-                    and self._peers_in_subnet(subnet) >= MAX_PEERS_PER_SUBNET
-                ):
+                if subnet is not None and self._peers_in_subnet(subnet) >= limit:
                     logger.debug(
                         "Subnet %s at capacity (%d), rejecting peer %s",
                         subnet,
-                        MAX_PEERS_PER_SUBNET,
+                        limit,
                         peer_id,
                     )
                     return False
@@ -389,8 +406,20 @@ class KBucket:
 
         """
         midpoint = (self.min_range + self.max_range) // 2
-        lower_bucket = KBucket(self.host, self.bucket_size, self.min_range, midpoint)
-        upper_bucket = KBucket(self.host, self.bucket_size, midpoint, self.max_range)
+        lower_bucket = KBucket(
+            self.host,
+            self.bucket_size,
+            self.min_range,
+            midpoint,
+            self.max_peers_per_subnet,
+        )
+        upper_bucket = KBucket(
+            self.host,
+            self.bucket_size,
+            midpoint,
+            self.max_range,
+            self.max_peers_per_subnet,
+        )
 
         # Redistribute peers
         for peer_id, (peer_info, timestamp) in self.peers.items():
@@ -410,17 +439,34 @@ class RoutingTable:
     given peer ID in the network.
     """
 
-    def __init__(self, local_id: ID, host: IHost) -> None:
+    def __init__(
+        self,
+        local_id: ID,
+        host: IHost,
+        max_peers_per_subnet: int | None = None,
+        max_peers_per_subnet_table: int = 0,
+    ) -> None:
         """
         Initialize the routing table.
 
         :param local_id: The ID of the local node.
         :param host: The host this routing table belongs to.
+        :param max_peers_per_subnet: Per-bucket subnet-diversity cap (issue
+            #1422), propagated to every KBucket. ``None`` tracks the module
+            default ``MAX_PEERS_PER_SUBNET``; <= 0 disables the per-bucket check.
+        :param max_peers_per_subnet_table: Table-wide cap on peers sharing one
+            subnet across all buckets (issue #1421). ``0`` (default) disables it.
+            go-libp2p defaults its equivalent (``maxForTable``) to 3; we default
+            to ``0`` for backward compatibility.
 
         """
         self.local_id = local_id
         self.host = host
-        self.buckets = [KBucket(host, BUCKET_SIZE)]
+        self.max_peers_per_subnet = max_peers_per_subnet
+        self.max_peers_per_subnet_table = max_peers_per_subnet_table
+        self.buckets = [
+            KBucket(host, BUCKET_SIZE, max_peers_per_subnet=self.max_peers_per_subnet)
+        ]
 
     async def add_peer(
         self, peer_obj: PeerInfo | ID, *, skip_server_mode_check: bool = False
@@ -499,6 +545,25 @@ class RoutingTable:
                 except Exception:
                     pass
 
+            # Enforce the table-wide IP-group cap (issue #1421): reject a new
+            # peer whose subnet already holds max_peers_per_subnet_table peers
+            # across ALL buckets. Disabled by default (cap == 0). Exempt peers
+            # (subnet is None) and updates to resident peers are never capped.
+            if self.max_peers_per_subnet_table > 0 and not self.peer_in_table(peer_id):
+                subnet = _subnet_key(peer_info)
+                if (
+                    subnet is not None
+                    and self._table_peers_in_subnet(subnet)
+                    >= self.max_peers_per_subnet_table
+                ):
+                    logger.debug(
+                        "Table subnet %s at capacity (%d), rejecting peer %s",
+                        subnet,
+                        self.max_peers_per_subnet_table,
+                        peer_id,
+                    )
+                    return False
+
             # Find the right bucket for this peer
             bucket = self.find_bucket(peer_id)
 
@@ -524,16 +589,17 @@ class RoutingTable:
                 return True
 
             subnet = _subnet_key(peer_info)
+            bucket_limit = bucket._subnet_limit()
             if (
-                MAX_PEERS_PER_SUBNET > 0
+                bucket_limit > 0
                 and subnet is not None
-                and bucket._peers_in_subnet(subnet) >= MAX_PEERS_PER_SUBNET
+                and bucket._peers_in_subnet(subnet) >= bucket_limit
             ):
                 logger.debug(
                     "Peer %s dropped: subnet %s at capacity (%d)",
                     peer_id,
                     subnet,
-                    MAX_PEERS_PER_SUBNET,
+                    bucket_limit,
                 )
             else:
                 logger.debug(
@@ -662,6 +728,13 @@ class RoutingTable:
             count += bucket.size()
         return count
 
+    def _table_peers_in_subnet(self, subnet: str) -> int:
+        """
+        Count resident peers whose subnet key matches ``subnet`` across all
+        buckets (issue #1421, table-wide IP-group cap).
+        """
+        return sum(bucket._peers_in_subnet(subnet) for bucket in self.buckets)
+
     def get_stale_peers(self, stale_threshold_seconds: int = 3600) -> list[ID]:
         """
         Get all stale peers from all buckets
@@ -699,7 +772,13 @@ class RoutingTable:
         Cleanup the routing table by removing all data.
         This is useful for resetting the routing table during tests or reinitialization.
         """
-        self.buckets = [KBucket(self.host, BUCKET_SIZE)]
+        self.buckets = [
+            KBucket(
+                self.host,
+                BUCKET_SIZE,
+                max_peers_per_subnet=self.max_peers_per_subnet,
+            )
+        ]
         logger.info("Routing table cleaned up, all data removed.")
 
     def get_target_keys_for_refresh(self) -> list[bytes]:
