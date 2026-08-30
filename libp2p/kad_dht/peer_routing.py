@@ -156,28 +156,17 @@ class PeerRouting(IPeerRouting):
 
         """
         try:
-            # Bound the whole per-peer exchange: _query_peer_for_closest reads
-            # the response with stream.read() and no timeout, so a peer that
-            # opens the stream but never replies would otherwise block this
-            # query — and the surrounding lookup nursery — forever. Mirror the
-            # move_on_after(QUERY_TIMEOUT) guard already used in provider_store
-            # and value_store.
-            with trio.move_on_after(QUERY_TIMEOUT) as cancel_scope:
-                result = await self._query_peer_for_closest(peer, target_key)
-                # Add deduplication to prevent duplicate peers
-                for peer_id in result:
-                    if peer_id not in new_peers:
-                        new_peers.append(peer_id)
-                logger.debug(
-                    "Queried peer %s for closest peers, got %d results (%d unique)",
-                    peer,
-                    len(result),
-                    len([p for p in result if p not in new_peers[: -len(result)]]),
-                )
-            if cancel_scope.cancelled_caught:
-                logger.debug(
-                    "Query to peer %s timed out after %ss", peer, QUERY_TIMEOUT
-                )
+            result = await self._query_peer_for_closest(peer, target_key)
+            # Add deduplication to prevent duplicate peers
+            for peer_id in result:
+                if peer_id not in new_peers:
+                    new_peers.append(peer_id)
+            logger.debug(
+                "Queried peer %s for closest peers, got %d results (%d unique)",
+                peer,
+                len(result),
+                len([p for p in result if p not in new_peers[: -len(result)]]),
+            )
         except Exception as e:
             logger.debug(f"Query to peer {peer} failed: {e}")
 

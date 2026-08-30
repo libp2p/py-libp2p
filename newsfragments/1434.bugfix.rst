@@ -1,1 +1,1 @@
-Add a per-query timeout to Kademlia DHT network lookups. A peer that opened the query stream but never responded could previously block ``find_peer``, ``provide``, ``find_providers`` and routing-table refresh indefinitely; each per-peer query is now bounded by ``QUERY_TIMEOUT``.
+Kademlia DHT ``FIND_NODE`` queries to a single peer are bounded by ``QUERY_TIMEOUT``, so a peer that opens the query stream but never replies cannot stall ``find_peer``, ``provide``, ``find_providers`` or routing-table refresh; a regression test now covers the silent-peer case.
