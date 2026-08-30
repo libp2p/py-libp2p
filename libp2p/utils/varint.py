@@ -29,6 +29,14 @@ HIGH_MASK = 2**7
 # The maximum shift width for a 64 bit integer.  We shouldn't have to decode
 # integers larger than this.
 SHIFT_64_BIT_MAX = int(math.ceil(64 / 7)) * 7
+UINT64_MAX = 2**64 - 1
+
+_VARINT_OVERFLOW_MSG = "Varint decoding error: integer exceeds maximum size of 64 bits."
+
+
+def _reject_uvarint_overflow(value: int) -> None:
+    if value > UINT64_MAX:
+        raise ParseError(_VARINT_OVERFLOW_MSG)
 
 
 def encode_uvarint(value: int) -> bytes:
@@ -48,9 +56,9 @@ def decode_uvarint(data: bytes) -> int:
     """
     Decode a varint from bytes.
 
-    Raises ``ParseError`` if ``data`` is empty or ends mid-varint (its final
-    byte still has the continuation bit set), and ``ValueError`` if the value
-    exceeds 64 bits.
+    Raises ``ParseError`` if ``data`` is empty, ends mid-varint (its final
+    byte still has the continuation bit set), or encodes a value larger than
+    64 bits.
     """
     if not data:
         raise ParseError("Unexpected end of data")
@@ -61,10 +69,11 @@ def decode_uvarint(data: bytes) -> int:
     for byte in data:
         result |= (byte & 0x7F) << shift
         if (byte & 0x80) == 0:
+            _reject_uvarint_overflow(result)
             return result
         shift += 7
         if shift >= 64:
-            raise ValueError("Varint too long")
+            raise ParseError(_VARINT_OVERFLOW_MSG)
 
     # The loop consumed every byte without finding a terminator: the final
     # byte still had the continuation bit set, so the varint is truncated.
@@ -77,16 +86,18 @@ def decode_varint_from_bytes(data: bytes) -> int:
 
 
 async def decode_uvarint_from_stream(reader: Reader) -> int:
-    """https://en.wikipedia.org/wiki/LEB128."""
+    """
+    Decode an unsigned varint from a stream.
+
+    A canonical protobuf-style 64-bit uvarint is at most 10 bytes (shifts
+    0..63).  Raises ``ParseError`` if the encoding is over-long or decodes to
+    a value larger than 64 bits.  Raises ``IncompleteReadError`` if the stream
+    ends before the varint is complete.
+    """
     res = 0
     for shift in itertools.count(0, 7):
-        # A canonical 64-bit uvarint is at most 10 bytes (shifts 0..63); a
-        # shift of SHIFT_64_BIT_MAX (70) means an 11th byte, which would encode
-        # a value > 64 bits. Reject it before reading rather than after.
         if shift >= SHIFT_64_BIT_MAX:
-            raise ParseError(
-                "Varint decoding error: integer exceeds maximum size of 64 bits."
-            )
+            raise ParseError(_VARINT_OVERFLOW_MSG)
 
         byte = await read_exactly(reader, 1)
         value = byte[0]
@@ -95,6 +106,7 @@ async def decode_uvarint_from_stream(reader: Reader) -> int:
 
         if not value & HIGH_MASK:
             break
+    _reject_uvarint_overflow(res)
     return res
 
 
@@ -102,6 +114,15 @@ def decode_varint_with_size(data: bytes) -> tuple[int, int]:
     """
     Decode a varint from bytes and return both the value and the number of bytes
     consumed.
+
+    Unlike :func:`decode_uvarint`, this function does **not** raise on a
+    truncated varint: it returns ``(partial_value, bytes_consumed)`` for
+    whatever prefix was consumed.  The final consumed byte may still have the
+    continuation bit (``0x80``) set when the varint never terminated.  Callers
+    such as identify format-detection and WebRTC framing rely on this contract.
+
+    Raises ``ValueError`` only when a continuation would require an 11th byte
+    (``shift >= 64``).
 
     Returns:
         Tuple[int, int]: (value, bytes_consumed)
