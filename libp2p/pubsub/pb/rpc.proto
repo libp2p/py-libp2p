@@ -71,10 +71,12 @@ message ControlExtensions {
 
 message ControlIHave {
 	optional string topicID = 1;
+	// Opaque message IDs (arbitrary bytes; not UTF-8 strings).
 	repeated bytes messageIDs = 2;
 }
 
 message ControlIWant {
+	// Opaque message IDs (arbitrary bytes; not UTF-8 strings).
 	repeated bytes messageIDs = 1;
 }
 

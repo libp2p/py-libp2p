@@ -1149,7 +1149,7 @@ class GossipSub(IPubsubRouter, Service):
         self,
         peers_to_graft: dict[ID, list[str]],
         peers_to_prune: dict[ID, list[str]],
-        peers_to_gossip: dict[ID, dict[str, list[str]]],
+        peers_to_gossip: dict[ID, dict[str, list[bytes]]],
     ) -> None:
         graft_msgs: list[rpc_pb2.ControlGraft] = []
         prune_msgs: list[rpc_pb2.ControlPrune] = []
@@ -1358,7 +1358,7 @@ class GossipSub(IPubsubRouter, Service):
         topic: str,
         current_peers: set[ID],
         is_fanout: bool = False,
-        peers_to_gossip: DefaultDict[ID, dict[str, list[str]]] | None = None,
+        peers_to_gossip: DefaultDict[ID, dict[str, list[bytes]]] | None = None,
     ) -> tuple[set[ID], bool]:
         """
         Helper method to handle heartbeat for a single topic,
@@ -1414,9 +1414,8 @@ class GossipSub(IPubsubRouter, Service):
                 peers_to_emit_ihave_to = self._get_in_topic_gossipsub_peers_from_minus(
                     topic, gossip_count, current_peers, True
                 )
-                msg_id_strs = [msg_id.hex() for msg_id in msg_ids]
                 for peer in peers_to_emit_ihave_to:
-                    peers_to_gossip[peer][topic] = msg_id_strs
+                    peers_to_gossip[peer][topic] = list(msg_ids)
 
         return in_topic_peers, False
 
@@ -1436,8 +1435,8 @@ class GossipSub(IPubsubRouter, Service):
             else:
                 self.fanout[topic] = updated_peers
 
-    def gossip_heartbeat(self) -> DefaultDict[ID, dict[str, list[str]]]:
-        peers_to_gossip: DefaultDict[ID, dict[str, list[str]]] = defaultdict(dict)
+    def gossip_heartbeat(self) -> DefaultDict[ID, dict[str, list[bytes]]]:
+        peers_to_gossip: DefaultDict[ID, dict[str, list[bytes]]] = defaultdict(dict)
 
         # Handle mesh topics
         for topic in self.mesh:
@@ -1668,13 +1667,13 @@ class GossipSub(IPubsubRouter, Service):
             mid_bytes = safe_bytes_from_hex(msg_id)
             if mid_bytes is None:
                 logger.warning(
-                    "Received invalid hex message ID in IHAVE from %s: %r",
+                    "Received invalid message ID in IHAVE from %s: %r",
                     sender_peer_id,
                     msg_id,
                 )
                 continue
             if not pubsub.seen_messages.has(mid_bytes):
-                msg_ids_wanted.append(MessageID(mid_bytes.hex()))
+                msg_ids_wanted.append(MessageID(mid_bytes))
 
         # Request messages with IWANT message
         if msg_ids_wanted:
@@ -1698,13 +1697,13 @@ class GossipSub(IPubsubRouter, Service):
             return
 
         msg_ids: list[bytes] = []
-        for msg_id_str in iwant_msg.messageIDs:
-            mid_bytes = safe_bytes_from_hex(msg_id_str)
+        for msg_id_wire in iwant_msg.messageIDs:
+            mid_bytes = safe_bytes_from_hex(msg_id_wire)
             if mid_bytes is None:
                 logger.warning(
-                    "Received invalid hex message ID in IWANT from %s: %r",
+                    "Received invalid message ID in IWANT from %s: %r",
                     sender_peer_id,
-                    msg_id_str,
+                    msg_id_wire,
                 )
                 continue
             msg_ids.append(mid_bytes)
@@ -1849,7 +1848,9 @@ class GossipSub(IPubsubRouter, Service):
             control_msg.idontwant.extend(idontwant_msgs)
         return control_msg
 
-    async def emit_ihave(self, topic: str, msg_ids: Any, to_peer: ID) -> None:
+    async def emit_ihave(
+        self, topic: str, msg_ids: Sequence[bytes], to_peer: ID
+    ) -> None:
         """Emit ihave message, sent to to_peer, for topic and msg_ids."""
         ihave_msg: rpc_pb2.ControlIHave = rpc_pb2.ControlIHave()
         ihave_msg.messageIDs.extend(msg_ids)
@@ -1860,7 +1861,7 @@ class GossipSub(IPubsubRouter, Service):
 
         await self.emit_control_message(control_msg, to_peer)
 
-    async def emit_iwant(self, msg_ids: Any, to_peer: ID) -> None:
+    async def emit_iwant(self, msg_ids: Sequence[bytes], to_peer: ID) -> None:
         """Emit iwant message, sent to to_peer, for msg_ids."""
         iwant_msg: rpc_pb2.ControlIWant = rpc_pb2.ControlIWant()
         iwant_msg.messageIDs.extend(msg_ids)
@@ -2286,10 +2287,7 @@ class GossipSub(IPubsubRouter, Service):
             return
         pubsub = self.pubsub  # narrow type for pyrefly / mypy
 
-        # Use hex() to match heartbeat path; str(bytes) produces "b'...'" which
-        # fails safe_bytes_from_hex() in handle_ihave().
-        msg_id_str = msg_id.hex()
-
+        # Emit opaque bytes message IDs (aligned with IHAVE/IWANT protobuf schema).
         for topic in topic_ids:
             observers = self.topic_observation.get_observers(topic)
             if not observers:
@@ -2298,12 +2296,12 @@ class GossipSub(IPubsubRouter, Service):
             for observer_peer in observers:
                 if observer_peer not in pubsub.peers:
                     continue
-                await self.emit_ihave(topic, [msg_id_str], observer_peer)
+                await self.emit_ihave(topic, [msg_id], observer_peer)
                 logger.debug(
                     "Topic Observation: sent IHAVE(topic='%s', msg_id=%s) "
                     "to observer %s.",
                     topic,
-                    msg_id_str,
+                    msg_id.hex(),
                     observer_peer,
                 )
 
