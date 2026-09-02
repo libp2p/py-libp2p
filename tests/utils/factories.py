@@ -249,12 +249,15 @@ async def raw_conn_factory(
 
     tcp_transport = TCP()
     listener = tcp_transport.create_listener(tcp_stream_handler)
-    await listener.listen(LISTEN_MADDR, nursery)
-    listening_maddr = listener.get_addrs()[0]
-    conn_0 = await tcp_transport.dial(listening_maddr)
-    await event.wait()
-    assert conn_0 is not None and conn_1 is not None
-    yield conn_0, conn_1
+    try:
+        await listener.listen(LISTEN_MADDR)
+        listening_maddr = listener.get_addrs()[0]
+        conn_0 = await tcp_transport.dial(listening_maddr)
+        await event.wait()
+        assert conn_0 is not None and conn_1 is not None
+        yield conn_0, conn_1
+    finally:
+        await listener.close()
 
 
 @asynccontextmanager
@@ -415,9 +418,7 @@ async def tls_conn_factory(
 ) -> AsyncIterator[tuple[ISecureConn, ISecureConn]]:
     local_transport = client_transport or TLSTransport(create_secp256k1_key_pair())
     remote_transport = server_transport or TLSTransport(create_secp256k1_key_pair())
-    # Trust each other's certs for test handshake
-    local_transport.trust_peer_cert_pem(remote_transport.get_certificate_pem())
-    remote_transport.trust_peer_cert_pem(local_transport.get_certificate_pem())
+    # Interop-style handshakes work without a PKIX trust store (libp2p extension only).
 
     local_secure_conn: ISecureConn | None = None
     remote_secure_conn: ISecureConn | None = None
@@ -462,7 +463,7 @@ class SwarmFactory(factory.Factory):
             o.muxer_opt,
         )
     )
-    transport = factory.LazyFunction(TCP)
+    transports = factory.LazyFunction(lambda: [TCP()])
 
     @classmethod
     @asynccontextmanager

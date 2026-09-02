@@ -7,7 +7,7 @@ This module tests core functionality of the Kademlia DHT including:
 - Content provider advertisement and discovery (provide, find_providers)
 """
 
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 import hashlib
 import logging
 import os
@@ -18,13 +18,17 @@ import uuid
 
 import pytest
 import multiaddr
+from multiaddr import Multiaddr
 import trio
+import varint
 
 from libp2p.crypto.rsa import create_new_key_pair
+from libp2p.kad_dht.common import PROTOCOL_ID
 from libp2p.kad_dht.kad_dht import (
     DHTMode,
     KadDHT,
 )
+from libp2p.kad_dht.pb.kademlia_pb2 import Message
 from libp2p.peer.envelope import Envelope, seal_record
 from libp2p.peer.id import ID
 from libp2p.peer.peer_record import PeerRecord
@@ -38,6 +42,7 @@ from libp2p.records.validator import NamespacedValidator, Validator
 from libp2p.tools.anyio_service import (
     background_trio_service,
 )
+from libp2p.utils.varint import read_varint_prefixed_bytes
 from tests.utils.factories import (
     host_pair_factory,
 )
@@ -118,6 +123,69 @@ async def wait_for_peer_record(
     raise TimeoutError("Unreachable code path")
 
 
+async def wait_until_routing_tables_linked(
+    dht_a: KadDHT,
+    dht_b: KadDHT,
+    timeout: float = TEST_TIMEOUT,
+    delay: float = 0.05,
+) -> None:
+    """
+    Wait until both DHT routing tables contain the other peer.
+
+    Re-attempts linkage with ``skip_server_mode_check=True`` so test setup does
+    not depend on Identify finishing after KAD handler registration.
+    """
+    peer_a_info = PeerInfo(dht_a.host.get_id(), dht_a.host.get_addrs())
+    peer_b_info = PeerInfo(dht_b.host.get_id(), dht_b.host.get_addrs())
+    start_time = trio.current_time()
+
+    while True:
+        if dht_a.routing_table.peer_in_table(peer_b_info.peer_id) and (
+            dht_b.routing_table.peer_in_table(peer_a_info.peer_id)
+        ):
+            return
+
+        await dht_a.routing_table.add_peer(peer_b_info, skip_server_mode_check=True)
+        await dht_b.routing_table.add_peer(peer_a_info, skip_server_mode_check=True)
+
+        if trio.current_time() - start_time > timeout:
+            raise TimeoutError(
+                "Routing tables did not link within "
+                f"{timeout} seconds. "
+                f"Node A peers: {dht_a.routing_table.get_peer_ids()} "
+                f"Node B peers: {dht_b.routing_table.get_peer_ids()}"
+            )
+
+        await trio.sleep(delay)
+
+    raise TimeoutError("Unreachable code path")
+
+
+async def wait_until(
+    predicate: Callable[[], bool | Awaitable[bool]],
+    timeout: float = TEST_TIMEOUT,
+    delay: float = 0.05,
+) -> None:
+    """
+    Poll until a predicate returns a truthy value.
+
+    This keeps DHT tests event-driven instead of relying on propagation sleeps.
+    """
+    start_time = trio.current_time()
+    while True:
+        result = predicate()
+        if isinstance(result, bool):
+            if result:
+                return
+        elif await result:
+            return
+        if trio.current_time() - start_time > timeout:
+            raise TimeoutError(f"Condition not met within {timeout} seconds")
+        await trio.sleep(delay)
+
+    raise TimeoutError("Unreachable code path")
+
+
 class BlankValidator(Validator):
     def validate(self, key: str, value: bytes) -> None:
         return
@@ -154,27 +222,7 @@ async def dht_pair(security_protocol):
 
         # Start both DHT services
         async with background_trio_service(dht_a), background_trio_service(dht_b):
-            # Allow time for bootstrap to complete and connections to establish
-            await trio.sleep(0.1)
-
-            # Force a connection between nodes to ensure routing table is populated
-            # This eliminates the race condition by ensuring both nodes
-            # know about each other
-            try:
-                await dht_a.find_peer(dht_b.host.get_id())
-                await dht_b.find_peer(dht_a.host.get_id())
-            except Exception as e:
-                logger.warning(f"Initial peer discovery failed: {e}")
-                # Continue anyway, the retry mechanism will handle it
-
-            # Verify both nodes know about each other in their routing tables
-            # This ensures the test won't have race conditions
-            assert dht_a.routing_table.peer_in_table(dht_b.host.get_id()), (
-                "Node A should know about Node B"
-            )
-            assert dht_b.routing_table.peer_in_table(dht_a.host.get_id()), (
-                "Node B should know about Node A"
-            )
+            await wait_until_routing_tables_linked(dht_a, dht_b)
 
             logger.debug(
                 "After bootstrap: Node A peers: %s", dht_a.routing_table.get_peer_ids()
@@ -323,8 +371,7 @@ async def test_put_and_get_value(dht_pair: tuple[KadDHT, KadDHT]):
     logger.debug("Put value with key %s...", key[:10])
     logger.debug("Node A value store: %s", dht_a.value_store.store)
 
-    # # Allow more time for the value to propagate
-    await trio.sleep(0.5)
+    await wait_until(lambda: dht_b.value_store.get(key_bytes) is not None)
 
     # # Try direct connection between nodes to ensure they're properly linked
     logger.debug("Node A peers: %s", dht_a.routing_table.get_peer_ids())
@@ -404,9 +451,15 @@ async def test_provide_and_find_providers(dht_pair: tuple[KadDHT, KadDHT]):
     record_a = envelope_a.record()
     record_b = envelope_b.record()
 
+    # Generate a valid CID from the content for the provide/find_providers API
+    from libp2p.bitswap.cid import compute_cid_v1_obj
+
+    content_cid = compute_cid_v1_obj(content)
+    content_cid_str = str(content_cid)
+
     # Advertise the first node as a provider
     with trio.fail_after(TEST_TIMEOUT):
-        success = await dht_a.provide(content_id)
+        success = await dht_a.provide(content_cid_str)
         assert success, "Failed to advertise as provider"
 
     # These are the records that were sent between the peers during
@@ -431,24 +484,19 @@ async def test_provide_and_find_providers(dht_pair: tuple[KadDHT, KadDHT]):
     assert record_a.seq == record_a_add_prov.seq
     assert record_b.seq == record_b_add_prov.seq
 
-    # Allow time for the provider record to propagate
-    await trio.sleep(0.5)
-
-    # Find providers using the second node with retry logic for CI robustness
-    # Retry to handle potential race conditions where provider hasn't propagated yet
+    # Find providers using the second node with a bounded condition wait.
     with trio.fail_after(TEST_TIMEOUT):
+        providers: list[PeerInfo] = []
 
-        async def find_and_verify_providers() -> list[PeerInfo]:
-            providers = await dht_b.find_providers(content_id)
-            # Verify that we found the first node as a provider
-            assert providers, "No providers found"
-            assert any(p.peer_id == dht_a.local_peer_id for p in providers), (
-                "Expected provider not found"
+        async def find_and_verify_providers() -> bool:
+            nonlocal providers
+            providers = await dht_b.find_providers(content_cid_str)
+            return bool(providers) and any(
+                p.peer_id == dht_a.local_peer_id for p in providers
             )
-            return providers
 
-        # Retry with verification to handle race conditions
-        await retry(find_and_verify_providers(), retries=5, delay=0.3)
+        await wait_until(find_and_verify_providers)
+        assert providers, "No providers found"
 
     # These are the records in each peer after the find_provider execution
     envelope_a_find_prov = dht_a.host.get_peerstore().get_peer_record(
@@ -679,3 +727,138 @@ async def test_register_validator(dht_pair: tuple[KadDHT, KadDHT]):
 
         # Reset to default
         dht_a.validator.strict_validation = False
+
+
+@pytest.mark.trio
+async def test_find_node_reply_includes_requester_asking_for_itself(
+    dht_pair: tuple[KadDHT, KadDHT],
+):
+    dht_a, dht_b = dht_pair
+    a_id = dht_a.host.get_id()
+
+    req = Message()
+    req.type = Message.MessageType.FIND_NODE
+    req.key = a_id.to_bytes()
+    raw = req.SerializeToString()
+
+    stream = await dht_a.host.new_stream(dht_b.host.get_id(), [PROTOCOL_ID])
+    await stream.write(varint.encode(len(raw)))
+    await stream.write(raw)
+
+    resp = Message()
+    resp.ParseFromString(await read_varint_prefixed_bytes(stream))
+    await stream.close()
+
+    assert a_id.to_bytes() not in [p.id for p in resp.closerPeers]
+
+
+@pytest.mark.trio
+async def test_find_node_reply_excludes_requester_when_not_target(
+    dht_pair: tuple[KadDHT, KadDHT],
+):
+    dht_a, dht_b = dht_pair
+    a_id = dht_a.host.get_id()
+    b_id = dht_b.host.get_id()
+
+    req = Message()
+    req.type = Message.MessageType.FIND_NODE
+    req.key = b_id.to_bytes()
+    raw = req.SerializeToString()
+
+    stream = await dht_a.host.new_stream(dht_b.host.get_id(), [PROTOCOL_ID])
+    await stream.write(varint.encode(len(raw)))
+    await stream.write(raw)
+
+    resp = Message()
+    resp.ParseFromString(await read_varint_prefixed_bytes(stream))
+    await stream.close()
+
+    closer_ids = [p.id for p in resp.closerPeers]
+    assert a_id.to_bytes() not in closer_ids
+    assert b_id.to_bytes() in closer_ids
+
+
+@pytest.mark.trio
+async def test_find_node_reply_does_not_prepend_unknown_target(
+    dht_pair: tuple[KadDHT, KadDHT],
+):
+    dht_a, dht_b = dht_pair
+    unknown_key = b"content-key-not-in-peerstore-" + os.urandom(16)
+
+    req = Message()
+    req.type = Message.MessageType.FIND_NODE
+    req.key = unknown_key
+    raw = req.SerializeToString()
+
+    stream = await dht_a.host.new_stream(dht_b.host.get_id(), [PROTOCOL_ID])
+    await stream.write(varint.encode(len(raw)))
+    await stream.write(raw)
+
+    resp = Message()
+    resp.ParseFromString(await read_varint_prefixed_bytes(stream))
+    await stream.close()
+
+    assert unknown_key not in [p.id for p in resp.closerPeers]
+
+
+@pytest.mark.trio
+async def test_find_peer_rechecks_peerstore_after_lookup():
+    """
+    Verify that find_peer re-checks the peerstore after network lookup.
+
+    During a network lookup (find_closest_peers_network), the target peer's
+    signed record may be discovered and added to the peerstore. But find_peer
+    only checks closest_peers list after the lookup, not the peerstore.
+
+    In go-libp2p, FindPeer checks the peerstore after the lookup completes.
+    """
+    from unittest.mock import MagicMock
+
+    from libp2p.kad_dht.peer_routing import PeerRouting
+
+    local_id = ID(b"\x00" * 32)
+    target_id = ID(b"\xff" + b"\x00" * 31)
+
+    host = MagicMock()
+    host.get_id = MagicMock(return_value=local_id)
+
+    # Mutable state to simulate peerstore updates during lookup
+    peerstore_has_target = False
+
+    def mock_addrs(peer_id):
+        if peer_id == target_id and peerstore_has_target:
+            return [Multiaddr("/ip4/127.0.0.1/tcp/9090")]
+        return []
+
+    peerstore = MagicMock()
+    peerstore.addrs = MagicMock(side_effect=mock_addrs)
+    peerstore.peer_ids = MagicMock(return_value=[])
+    host.get_peerstore = MagicMock(return_value=peerstore)
+    host.get_connected_peers = MagicMock(return_value=[])
+
+    routing_table = MagicMock()
+    routing_table.find_local_closest_peers = MagicMock(return_value=[])
+    routing_table.get_peer_info = MagicMock(return_value=None)
+
+    peer_routing = PeerRouting(host, routing_table)
+
+    # Mock find_closest_peers_network to simulate:
+    # 1. Target peer discovered during lookup (added to peerstore)
+    # 2. But NOT in the top 20 closest_peers result
+    async def mock_find_closest(target_key: bytes, count: int = 20) -> list[ID]:
+        nonlocal peerstore_has_target
+        # Simulate the target peer being discovered during the lookup
+        peerstore_has_target = True
+        # Return a different peer, NOT the target
+        return [ID(b"\xee" + b"\x00" * 31)]
+
+    peer_routing.find_closest_peers_network = mock_find_closest  # type: ignore[assignment]
+
+    result = await peer_routing.find_peer(target_id)
+
+    assert result is not None, (
+        "find_peer returned None even though target peer's "
+        "addresses were added to peerstore during network lookup. "
+        "Should re-check peerstore after lookup."
+    )
+    assert result.peer_id == target_id

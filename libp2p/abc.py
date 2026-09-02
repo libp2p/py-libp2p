@@ -10,6 +10,7 @@ from collections.abc import (
     Sequence,
 )
 from contextlib import AbstractAsyncContextManager
+from dataclasses import dataclass
 from types import (
     TracebackType,
 )
@@ -53,6 +54,7 @@ from libp2p.peer.peerinfo import (
 )
 
 if TYPE_CHECKING:
+    from libp2p.network.tag_store import TagStore
     from libp2p.peer.envelope import Envelope
     from libp2p.peer.peer_record import PeerRecord
     from libp2p.protocol_muxer.multiselect import Multiselect
@@ -336,6 +338,7 @@ class INetStream(ReadWriteCloser):
     """
 
     muxed_conn: IMuxedConn
+    metric_send_channel: trio.MemorySendChannel[Any] | None
 
     @abstractmethod
     def get_protocol(self) -> TProtocol | None:
@@ -1401,6 +1404,28 @@ class IPeerStore(
         """
 
     @abstractmethod
+    def has_peer(self, peer_id: ID) -> bool:
+        """
+        Return True if ``peer_id`` is known to this store.
+
+        This MUST be O(1)-ish (in-memory map / single key lookup) and MUST
+        NOT materialize the full peer list: ``peer_ids()`` on persistent
+        stores reconstructs and hashes every peer, which is far too
+        expensive for hot paths (e.g. per-connection checks).
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer ID to check.
+
+        Returns
+        -------
+        bool
+            True if the peer is known to the store.
+
+        """
+
+    @abstractmethod
     def clear_peerdata(self, peer_id: ID) -> None:
         """clear_peerdata"""
 
@@ -1421,16 +1446,18 @@ class IListener(ABC):
     """
 
     @abstractmethod
-    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> None:
+    async def listen(self, maddr: Multiaddr) -> None:
         """
         Start listening on the specified multiaddress.
+
+        The listener manages its own background tasks internally and keeps
+        them alive until :meth:`close` is called.  Callers do not need to
+        supply a nursery.
 
         Parameters
         ----------
         maddr : Multiaddr
             The multiaddress on which to listen.
-        nursery : trio.Nursery
-            The nursery for spawning listening tasks.
 
         Raises
         ------
@@ -1679,6 +1706,18 @@ class INetwork(ABC):
         """
 
     @abstractmethod
+    def remove_notifee(self, notifee: "INotifee") -> None:
+        """
+        Unregister a notifee instance so it stops receiving network events.
+
+        Parameters
+        ----------
+        notifee : INotifee
+            The notifee previously passed to ``register_notifee``.
+
+        """
+
+    @abstractmethod
     async def close(self) -> None:
         """
         Close the network and all associated connections and listeners.
@@ -1695,6 +1734,124 @@ class INetwork(ABC):
             The identifier of the peer whose connection should be closed.
 
         """
+
+    @abstractmethod
+    def get_peer_health_summary(self, peer_id: ID) -> dict[str, Any]:
+        """
+        Get health summary for a specific peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer to get health information for.
+
+        Returns
+        -------
+        dict[str, Any]
+            A dictionary containing health metrics for the peer's connections.
+            Returns empty dict if health monitoring is disabled or peer not found.
+
+        Note
+        ----
+        This method is marked as abstract to ensure all network implementations
+        provide health monitoring support. However, implementations may return
+        empty dictionaries when health monitoring is disabled, effectively
+        providing "optional" health monitoring with a consistent API.
+
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_global_health_summary(self) -> dict[str, Any]:
+        """
+        Get global health summary across all peers.
+
+        Returns:
+            dict[str, Any]
+                A dictionary containing global health metrics across all connections.
+                Returns empty dict if health monitoring is disabled.
+
+        Note:
+            This method is marked as abstract to ensure all network implementations
+            provide health monitoring support. However, implementations may return
+            empty dictionaries when health monitoring is disabled, effectively
+            providing "optional" health monitoring with a consistent API.
+
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def export_health_metrics(self, format: str = "json") -> str:
+        """
+        Export health metrics in specified format.
+
+        Parameters
+        ----------
+        format : str
+            The format to export metrics in. Supported: "json", "prometheus"
+
+        Returns
+        -------
+        str
+            The health metrics in the requested format.
+            Returns empty string or object if health monitoring is disabled.
+
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_health_monitor_status(self) -> dict[str, Any]:
+        """
+        Get status information about the health monitoring service.
+
+        Returns
+        -------
+        dict[str, Any]
+            A dictionary containing health monitor status information including:
+            - enabled: Whether health monitoring is active
+            - monitoring_task_started: Whether the monitoring task is running
+            - check_interval_seconds: Health check interval
+            - total_connections: Total number of connections
+            - monitored_connections: Number of monitored connections
+            - total_peers: Total number of peers
+            - monitored_peers: Number of peers being monitored
+            Returns {"enabled": False} if health monitoring is disabled.
+
+        """
+        raise NotImplementedError
+
+
+@dataclass
+class CMInfo:
+    """
+    Unified snapshot of connection manager state.
+
+    Equivalent to go-libp2p's connmgr.CMInfo snapshot returned by
+    BasicConnMgr.GetInfo() — providing a single call-site for all
+    watermark / live-count / grace / last-trim data needed by
+    operators and metrics exporters.
+
+    Attributes
+    ----------
+    low_watermark : int
+        Target connection count after pruning.
+    high_watermark : int
+        Connection count that triggers pruning.
+    connected_count : int
+        Current number of live connections.
+    grace_period : float
+        Seconds a new connection is exempt from pruning.
+    last_trim : float | None
+        Unix timestamp of the most recent prune cycle, or None if
+        the connection count has never exceeded the high watermark.
+
+    """
+
+    low_watermark: int
+    high_watermark: int
+    connected_count: int
+    grace_period: float
+    last_trim: float | None  # None if never trimmed
 
 
 class INetworkService(INetwork, ServiceAPI):
@@ -1826,6 +1983,22 @@ class INetworkService(INetwork, ServiceAPI):
         -------
         bool
             True if the peer is protected.
+
+        """
+
+    @abstractmethod
+    def get_conn_mgr_info(self) -> CMInfo:
+        """
+        Return a unified snapshot of connection manager state.
+
+        Provides a single call-site for watermarks, live connection count,
+        grace period, and the timestamp of the last prune — matching
+        go-libp2p's BasicConnMgr.GetInfo().
+
+        Returns
+        -------
+        CMInfo
+            Snapshot of current connection manager state.
 
         """
 
@@ -2034,6 +2207,23 @@ class IHost(ABC):
         :return: the peerstore of the host
         """
 
+    @property
+    @abstractmethod
+    def conn_manager(self) -> "TagStore":
+        """
+        Return the connection manager (TagStore) for this host.
+
+        Provides access to tag_peer, untag_peer, upsert_tag, protect,
+        unprotect, and is_protected without going through the network layer
+        — matching go-libp2p's h.ConnManager().
+
+        Returns
+        -------
+        TagStore
+            The tag store managing peer priorities and protections.
+
+        """
+
     @abstractmethod
     def get_connected_peers(self) -> list[ID]:
         """
@@ -2097,6 +2287,12 @@ class IHost(ABC):
         protocol_id : TProtocol
             The protocol identifier to remove the handler for.
 
+        """
+
+    @abstractmethod
+    def get_metrics_recv_channel(self) -> trio.MemoryReceiveChannel[Any] | None:
+        """
+        Returns the recving end of the channel, used for metric events
         """
 
     @abstractmethod
@@ -2164,6 +2360,98 @@ class IHost(ABC):
         Close the host and all underlying connections and services.
 
         """
+
+    @abstractmethod
+    def get_connection_health(self, peer_id: ID) -> dict[str, Any]:
+        """
+        Get health summary for peer connections.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer to get health information for.
+
+        Returns
+        -------
+        dict[str, Any]
+            A dictionary containing health metrics for the peer's connections.
+            Returns empty dict if health monitoring is disabled or peer not found.
+
+        Note
+        ----
+        This method is marked as abstract to ensure all host implementations
+        provide health monitoring support. However, implementations may return
+        empty dictionaries when health monitoring is disabled, effectively
+        providing "optional" health monitoring with a consistent API.
+
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_network_health_summary(self) -> dict[str, Any]:
+        """
+        Get overall network health summary.
+
+        Returns:
+            dict[str, Any]
+                A dictionary containing global health metrics across all connections.
+                Returns empty dict if health monitoring is disabled.
+
+        Note:
+            This method is marked as abstract to ensure all host implementations
+            provide health monitoring support. However, implementations may return
+            empty dictionaries when health monitoring is disabled, effectively
+            providing "optional" health monitoring with a consistent API.
+
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def export_health_metrics(self, format: str = "json") -> str:
+        """
+        Export health metrics in specified format.
+
+        Parameters
+        ----------
+        format : str
+            The format to export metrics in. Supported: "json", "prometheus"
+
+        Returns
+        -------
+        str
+            The health metrics in the requested format.
+            Returns empty string or object if health monitoring is disabled.
+
+        Note
+        ----
+        This method is marked as abstract to ensure all host implementations
+        provide health monitoring support. However, implementations may return
+        empty strings when health monitoring is disabled, effectively providing
+        "optional" health monitoring with a consistent API.
+
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_health_monitor_status(self) -> dict[str, Any]:
+        """
+        Get status information about the health monitoring service.
+
+        Returns
+        -------
+        dict[str, Any]
+            A dictionary containing health monitor status information including:
+            - enabled: Whether health monitoring is active
+            - monitoring_task_started: Whether the monitoring task is running
+            - check_interval_seconds: Health check interval
+            - total_connections: Total number of connections
+            - monitored_connections: Number of monitored connections
+            - total_peers: Total number of peers
+            - monitored_peers: Number of peers being monitored
+            Returns {"enabled": False} if health monitoring is disabled.
+
+        """
+        raise NotImplementedError
 
     @abstractmethod
     async def upgrade_outbound_connection(
@@ -3000,6 +3288,11 @@ class ITransport(ABC):
 
     """
 
+    # Transports that provide their own stream multiplexing (QUIC, WebRTC)
+    # override this to True.  The swarm skips the TransportUpgrader for
+    # these transports and passes the connection directly to add_conn().
+    provides_native_muxing: bool = False
+
     @abstractmethod
     async def dial(self, maddr: Multiaddr) -> IRawConnection:
         """
@@ -3033,6 +3326,70 @@ class ITransport(ABC):
         -------
         IListener
             A listener instance.
+
+        """
+
+    @abstractmethod
+    def can_dial(self, maddr: Multiaddr) -> bool:
+        """
+        Return True if this transport can dial the given multiaddr.
+
+        The TransportManager calls this method before attempting a dial
+        to route the connection to the correct transport.
+
+        Parameters
+        ----------
+        maddr : Multiaddr
+            The multiaddress to check.
+
+        Returns
+        -------
+        bool
+            True if this transport can dial maddr, False otherwise.
+
+        Examples
+        --------
+        - TCP returns True for ``/ip4/127.0.0.1/tcp/4001``
+        - WebSocket returns True for ``/ip4/127.0.0.1/tcp/8080/ws``
+        - QUIC returns True for ``/ip4/127.0.0.1/udp/4001/quic-v1``
+
+        """
+
+    @abstractmethod
+    def can_listen(self, maddr: Multiaddr) -> bool:
+        """
+        Return True if this transport can listen on the given multiaddr.
+
+        Often identical to :meth:`can_dial` but may differ — e.g. a
+        relay transport can dial outbound but cannot accept inbound
+        connections.
+
+        Parameters
+        ----------
+        maddr : Multiaddr
+            The multiaddress to check.
+
+        Returns
+        -------
+        bool
+            True if this transport can listen on maddr, False otherwise.
+
+        """
+
+    @abstractmethod
+    def protocols(self) -> list[str]:
+        """
+        Return the list of multiaddr protocol names this transport handles.
+
+        Used by :class:`~libp2p.transport.manager.TransportManager` as a
+        fast pre-filter: if the multiaddr contains none of the listed
+        protocol names, ``can_dial`` / ``can_listen`` are not called.
+
+        Returns
+        -------
+        list[str]
+            Protocol name strings, e.g. ``["tcp"]``, ``["ws", "wss"]``,
+            or ``["quic", "quic-v1"]``.
 
         """
 
@@ -3185,6 +3542,37 @@ class IPubsubRouter(ABC):
         ----------
         topic : str
             The topic to leave.
+
+        """
+
+    async def flush_pending_messages(self, peer_id: ID) -> None:
+        """
+        Send messages the router queued while the peer was still connecting.
+
+        Optional hook, invoked once the outbound stream for the peer is
+        registered and again when the peer announces a new subscription.
+        Routers that do not queue during connection setup keep the no-op.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer whose queued messages should be sent.
+
+        """
+
+    async def send_recent_messages(self, peer_id: ID, topic: str) -> None:
+        """
+        Replay recently seen messages for a topic to a peer.
+
+        Optional hook, invoked when a peer that is subscribed to the topic
+        becomes writable. Routers without a message cache keep the no-op.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to replay messages to.
+        topic : str
+            The topic to replay messages for.
 
         """
 

@@ -58,34 +58,43 @@ class RandomWalk:
         # Convert to hex string for query
         return random_bytes.hex()
 
-    async def perform_random_walk(self) -> list[PeerInfo]:
+    async def perform_random_walk(
+        self, target_key: bytes | None = None
+    ) -> list[PeerInfo]:
         """
         Perform a single random walk operation.
+
+        Args:
+            target_key: Optional 32-byte target key to query for. If None,
+                a random 32-byte key is generated.
 
         Returns:
             List of validated peers discovered during the walk
 
         """
         try:
-            # Generate random peer ID
-            random_peer_id = self.generate_random_peer_id()
-            logger.info(f"Starting random walk for peer ID: {random_peer_id}")
+            if target_key is None:
+                random_peer_id = self.generate_random_peer_id()
+                target_key = bytes.fromhex(random_peer_id)
+                key_desc = f"{random_peer_id[:8]}..."
+            else:
+                key_desc = f"{target_key.hex()[:8]}..."
+
+            logger.info(f"Starting random walk for target key: {key_desc}")
 
             # Perform FIND_NODE query
             discovered_peer_ids: list[ID] = []
 
             with trio.move_on_after(REFRESH_QUERY_TIMEOUT):
-                # Call the query function with target key bytes
-                target_key = bytes.fromhex(random_peer_id)
                 discovered_peer_ids = await self.query_function(target_key) or []
 
             if not discovered_peer_ids:
-                logger.debug(f"No peers discovered in random walk for {random_peer_id}")
+                logger.debug(f"No peers discovered in random walk for {key_desc}")
                 return []
 
             logger.info(
                 f"Discovered {len(discovered_peer_ids)} peers in random walk "
-                f"for {random_peer_id[:8]}..."  # Show only first 8 chars for brevity
+                f"for {key_desc}"
             )
 
             # Convert peer IDs to PeerInfo objects and validate
@@ -109,7 +118,10 @@ class RandomWalk:
             raise RandomWalkError(f"Random walk operation failed: {e}") from e
 
     async def run_concurrent_random_walks(
-        self, count: int = RANDOM_WALK_CONCURRENCY, current_routing_table_size: int = 0
+        self,
+        count: int = RANDOM_WALK_CONCURRENCY,
+        current_routing_table_size: int = 0,
+        target_keys: list[bytes] | None = None,
     ) -> list[PeerInfo]:
         """
         Run multiple random walks concurrently.
@@ -117,13 +129,20 @@ class RandomWalk:
         Args:
             count: Number of concurrent random walks to perform
             current_routing_table_size: Current size of routing table (for optimization)
+            target_keys: Optional list of targeted 32-byte keys (e.g. from K-buckets)
 
         Returns:
             Combined list of all validated peers discovered
 
         """
         all_validated_peers: list[PeerInfo] = []
-        logger.info(f"Starting {count} concurrent random walks")
+        keys_to_query: list[bytes | None] = (
+            [k for k in target_keys] if target_keys else [None for _ in range(count)]
+        )
+
+        logger.info(
+            f"Starting {len(keys_to_query)} random walks (concurrency cap={count})"
+        )
 
         # First, try to add peers from peerstore if routing table is small
         if current_routing_table_size < RANDOM_WALK_RT_THRESHOLD:
@@ -138,18 +157,22 @@ class RandomWalk:
             except Exception as e:
                 logger.warning(f"Error processing peerstore peers: {e}")
 
-        async def single_walk() -> None:
-            try:
-                peers = await self.perform_random_walk()
-                all_validated_peers.extend(peers)
-            except Exception as e:
-                logger.warning(f"Concurrent random walk failed: {e}")
-            return
+        sem = trio.Semaphore(count)
 
-        # Run concurrent random walks
-        async with trio.open_nursery() as nursery:
-            for _ in range(count):
-                nursery.start_soon(single_walk)
+        async def single_walk(key: bytes | None) -> None:
+            async with sem:
+                try:
+                    peers = await self.perform_random_walk(target_key=key)
+                    all_validated_peers.extend(peers)
+                except Exception as e:
+                    logger.warning(f"Concurrent random walk failed: {e}")
+
+        try:
+            async with trio.open_nursery() as nursery:
+                for key in keys_to_query:
+                    nursery.start_soon(single_walk, key)
+        except Exception as e:
+            logger.debug(f"Random walk batch scope ended: {e}")
 
         # Remove duplicates based on peer ID
         unique_peers = {}
@@ -158,7 +181,8 @@ class RandomWalk:
 
         result = list(unique_peers.values())
         logger.info(
-            f"Concurrent random walks completed: {len(result)} unique peers discovered"
+            f"Concurrent random walks completed: found {len(all_validated_peers)} total peers, "  # noqa: E501
+            f"{len(result)} unique peers discovered"
         )
         return result
 
@@ -183,7 +207,6 @@ class RandomWalk:
 
                     peer_info = peerstore.peer_info(peer_id)
                     if peer_info and peer_info.addrs:
-                        # Filter for compatible addresses (TCP + IPv4)
                         if self._has_compatible_addresses(peer_info):
                             peer_infos.append(peer_info)
                 except Exception as e:
@@ -197,7 +220,7 @@ class RandomWalk:
 
     def _has_compatible_addresses(self, peer_info: PeerInfo) -> bool:
         """
-        Check if a peer has TCP+IPv4 compatible addresses.
+        Check if a peer has compatible multiaddrs (TCP, QUIC, etc.).
 
         Args:
             peer_info: PeerInfo to check
@@ -211,8 +234,10 @@ class RandomWalk:
 
         for addr in peer_info.addrs:
             addr_str = str(addr)
-            # Check for TCP and IPv4 compatibility, avoid QUIC
-            if "/tcp/" in addr_str and "/ip4/" in addr_str and "/quic" not in addr_str:
+            # Accept any routable IP multiaddr with TCP or QUIC
+            if ("/ip4/" in addr_str or "/ip6/" in addr_str or "/dns" in addr_str) and (
+                "/tcp/" in addr_str or "/quic" in addr_str or "/udp/" in addr_str
+            ):
                 return True
 
         return False

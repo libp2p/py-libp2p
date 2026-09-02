@@ -21,7 +21,11 @@ from libp2p.peer.envelope import Envelope
 from libp2p.peer.id import ID
 from libp2p.peer.peerdata import PeerData, PeerDataError
 from libp2p.peer.peerinfo import PeerInfo
-from libp2p.peer.peerstore import PeerRecordState, PeerStoreError
+from libp2p.peer.peerstore import (
+    PeerRecordState,
+    PeerStoreError,
+    _peer_record_signer_matches,
+)
 
 from ..datastore.base_sync import IDatastoreSync
 from ..serialization import (
@@ -404,6 +408,21 @@ class SyncPersistentPeerStore(IPeerStore):
 
         return list(peer_ids)
 
+    def has_peer(self, peer_id: ID) -> bool:
+        """
+        Return True if the peer is known to this store (memory or datastore).
+
+        O(1) in-memory lookup, falling back to a single datastore key check —
+        never a full ``peer_ids()`` scan (which reconstructs and hashes every
+        peer and was saturating CPU on hot paths with large peerstores).
+        """
+        if peer_id in self.peer_data_map:
+            return True
+        try:
+            return bool(self.datastore.get(self._get_addr_key(peer_id)))
+        except Exception:
+            return False
+
     def clear_peerdata(self, peer_id: ID) -> None:
         """Clears all data associated with the given peer_id."""
         with self._lock:
@@ -573,6 +592,9 @@ class SyncPersistentPeerStore(IPeerStore):
         Accept and store a signed PeerRecord, unless it's older than
         the one already stored.
         """
+        if not _peer_record_signer_matches(envelope):
+            return False
+
         record = envelope.record()
         peer_id = record.peer_id
 

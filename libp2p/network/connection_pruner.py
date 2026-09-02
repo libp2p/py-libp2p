@@ -7,6 +7,7 @@ to close when connection limits are exceeded, matching go-libp2p behavior.
 Reference: https://github.com/libp2p/go-libp2p/blob/master/p2p/net/connmgr/connmgr.go
 """
 
+import ipaddress
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -113,8 +114,10 @@ def is_connection_in_allow_list(connection: INetConn, swarm: "Swarm") -> bool:
     """
     Check if connection is in the allow list.
 
-    Uses ConnectionGate to check if connection's IP is in allow list.
-    ConnectionGate is a required attribute of Swarm.
+    Uses ConnectionGate to check if the connection's actual remote IP is in
+    the allow list.  Previously this consulted the peer's peerstore addresses,
+    which could exempt a connection made over a non-allow-listed IP simply
+    because the peer had *some* allow-listed address on record (Bug 14).
 
     Parameters
     ----------
@@ -130,20 +133,29 @@ def is_connection_in_allow_list(connection: INetConn, swarm: "Swarm") -> bool:
 
     """
     try:
-        # muxed_conn is a required attribute of INetConn interface
-        peer_id = connection.muxed_conn.peer_id
-        # Get peer addresses from peerstore
-        peer_addrs = swarm.peerstore.addrs(peer_id)
-        # Check if any peer address is in allow list
-        # connection_gate is a required attribute of Swarm
-        for addr in peer_addrs:
-            if swarm.connection_gate.is_in_allow_list(addr):
-                return True
+        remote = None
+        get_remote = getattr(connection, "get_remote_address", None)
+        if callable(get_remote):
+            remote = get_remote()
+        if remote is None:
+            # Fall back to the underlying muxed connection's remote address.
+            muxed_conn = getattr(connection, "muxed_conn", None)
+            get_remote = getattr(muxed_conn, "get_remote_address", None)
+            if callable(get_remote):
+                remote = get_remote()
+        if not isinstance(remote, (tuple, list)) or len(remote) != 2:
+            return False
+        host, port = remote
+        try:
+            ip = ipaddress.ip_address(host)
+        except ValueError:
+            return False
+        proto = "ip6" if isinstance(ip, ipaddress.IPv6Address) else "ip4"
+        remote_maddr = Multiaddr(f"/{proto}/{host}/tcp/{port}")
+        return swarm.connection_gate.is_in_allow_list(remote_maddr)
     except Exception as e:
         logger.debug("Error checking allow list for connection: %s", e)
         return False
-
-    return False
 
 
 class ConnectionPruner:
@@ -177,6 +189,9 @@ class ConnectionPruner:
         else:
             self.allow_list = allow_list
         self._started = False
+        # Unix timestamp of the last successful prune; None if never trimmed.
+        # Read by Swarm.get_conn_mgr_info() to build CMInfo.last_trim.
+        self._last_trim_time: float | None = None
 
     async def start(self) -> None:
         """Start the connection pruner."""
@@ -204,6 +219,11 @@ class ConnectionPruner:
     async def _maybe_prune_connections(self) -> None:
         """Internal method to prune connections if needed."""
         connections = self.swarm.get_connections()
+
+        # Reap temp TagStore entries that never got a real connection.
+        # Must run before the sort so is_temp keys are fresh.
+        self._reap_stale_temp_entries()
+
         num_connections = len(connections)
         high_watermark = self.swarm.connection_config.high_watermark
         low_watermark = self.swarm.connection_config.low_watermark
@@ -240,9 +260,11 @@ class ConnectionPruner:
         # Sort connections for pruning
         sorted_connections = self.sort_connections(connections, peer_values)
 
-        # Prune down to low_watermark (not high_watermark)
-        # This avoids thrashing between high and low watermark
-        to_prune = max(num_connections - low_watermark, 0)
+        # Prune down towards low_watermark in bounded batches (max 20 per cycle)
+        # to prevent sudden connection cliffs and network degradation.
+        raw_to_prune = max(num_connections - low_watermark, 0)
+        max_prune_batch = 20
+        to_prune = min(raw_to_prune, max_prune_batch)
         to_close: list[INetConn] = []
 
         for connection in sorted_connections:
@@ -265,6 +287,29 @@ class ConnectionPruner:
                 logger.debug(
                     "Skipping connection to %s - within grace period",
                     conn_peer_id,
+                )
+                continue
+
+            # 1. Skip connections that currently have active multiplexed streams
+            # (never interrupt live traffic)
+            try:
+                streams = connection.get_streams()
+                if streams and len(streams) > 0:
+                    logger.debug(
+                        "Skipping connection to %s - has %d active streams",
+                        conn_peer_id,
+                        len(streams),
+                    )
+                    continue
+            except Exception:
+                pass
+
+            # 2. Skip peers with positive tag score (preserve valued peers)
+            if conn_peer_id is not None and peer_values.get(conn_peer_id, 0) > 0:
+                logger.debug(
+                    "Skipping connection to %s - positive tag score (%d)",
+                    conn_peer_id,
+                    peer_values[conn_peer_id],
                 )
                 continue
 
@@ -292,6 +337,8 @@ class ConnectionPruner:
                     await connection.close()
                 except Exception as e:
                     logger.warning("Error closing connection during pruning: %s", e)
+            # Record the trim timestamp after the prune cycle completes.
+            self._last_trim_time = time.time()
 
     def _is_connection_within_grace_period(
         self, connection: INetConn, grace_period: float
@@ -313,6 +360,31 @@ class ConnectionPruner:
             return age < grace_period
         except (TypeError, ValueError):
             return True
+
+    def _reap_stale_temp_entries(self) -> None:
+        """
+        Delete temp TagStore entries that never received a real connection.
+
+        Temp entries are created when tag_peer/upsert_tag is called before
+        a dial completes. If the dial never happens (e.g. speculative DHT tagging),
+        the entry would accumulate forever. This reaper removes them after
+        grace_period has elapsed without any connection arriving.
+        """
+        tag_store = getattr(self.swarm, "tag_store", None)
+        if tag_store is None:
+            return
+        grace = self.swarm.connection_config.grace_period
+        now = time.time()
+        for peer_id in tag_store.get_all_peers():
+            info = tag_store.get_tag_info(peer_id)
+            if (
+                info
+                and info.temp
+                and not info.conns
+                and (now - info.first_seen) > grace
+            ):
+                tag_store.clear_peer(peer_id)
+                logger.debug("Reaped stale temp entry for peer %s", peer_id)
 
     def sort_connections(
         self, connections: list[INetConn], peer_values: dict[ID, int]
@@ -390,6 +462,16 @@ class ConnectionPruner:
             dir_value = direction.value if direction != Direction.UNKNOWN else 0
             direction_sort_value = dir_value
 
+            # Temp flag: connections where the peer has no confirmed real connection
+            # are pruned first (temp=True → is_temp=0 sorts before real connections).
+            # This matches go-libp2p's trim heuristic: temp entries go first.
+            tag_store = getattr(self.swarm, "tag_store", None)
+            is_temp = 1  # default: treat as real
+            if tag_store is not None and peer_id is not None:
+                info = tag_store.get_tag_info(peer_id)
+                if info is not None and info.temp:
+                    is_temp = 0
+
             connection_data.append(
                 {
                     "conn": conn,
@@ -397,6 +479,7 @@ class ConnectionPruner:
                     "stream_count": stream_count,
                     "direction": direction_sort_value,
                     "age": connection_age,
+                    "is_temp": is_temp,
                 }
             )
 
@@ -462,6 +545,17 @@ class ConnectionPruner:
             return 0
 
         connection_data.sort(key=get_sort_peer_value)
+
+        # 5. Sort by temp flag — temp peers go first (is_temp=0 < is_temp=1).
+        # This is the highest-priority sort (applied last in stable sort).
+        # Matches go-libp2p's trim heuristic: temp entries are always pruned first.
+        def get_sort_is_temp(x: dict[str, Any]) -> int:
+            val = x.get("is_temp", 1)
+            if isinstance(val, (int, float)):
+                return int(val)
+            return 1
+
+        connection_data.sort(key=get_sort_is_temp)
 
         # Extract connections - we know they're INetConn from construction
         return [item["conn"] for item in connection_data]  # type: ignore[misc]

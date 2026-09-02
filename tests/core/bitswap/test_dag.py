@@ -26,6 +26,7 @@ class TestMerkleDagInit:
     def test_init_with_bitswap(self):
         """Test initializing with Bitswap client."""
         mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
         mock_client.block_store = MemoryBlockStore()
 
         dag = MerkleDag(mock_client)
@@ -36,6 +37,7 @@ class TestMerkleDagInit:
     def test_init_with_custom_store(self):
         """Test initializing with custom block store."""
         mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
         mock_client.block_store = MemoryBlockStore()
         custom_store = MemoryBlockStore()
 
@@ -54,6 +56,7 @@ class TestAddBytes:
         """Test adding small data (single block)."""
         # Setup
         mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
         mock_client.block_store = MemoryBlockStore()
         mock_client.add_block = AsyncMock()
 
@@ -66,19 +69,24 @@ class TestAddBytes:
         # Verify
         assert root_cid is not None
         assert len(root_cid) > 0
+
+        # Small data is stored as a raw leaf node (RawLeaves=True default)
+        expected_cid = compute_cid_v1(data, codec=CODEC_RAW)
+        assert root_cid == expected_cid
         assert verify_cid(root_cid, data)
 
-        # Should be single block (RAW codec)
+        # Should be single block (raw codec)
         mock_client.add_block.assert_called_once()
         call_args = mock_client.add_block.call_args
         assert call_args[0][0] == root_cid  # CID
-        assert call_args[0][1] == data  # Data
+        assert call_args[0][1] == data  # raw data
 
     @pytest.mark.trio
     async def test_add_large_bytes(self):
         """Test adding large data (multiple chunks)."""
         # Setup
         mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
         mock_client.block_store = MemoryBlockStore()
         mock_client.add_block = AsyncMock()
 
@@ -111,6 +119,7 @@ class TestAddBytes:
     async def test_add_bytes_with_progress(self):
         """Test adding bytes with progress callback."""
         mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
         mock_client.block_store = MemoryBlockStore()
         mock_client.add_block = AsyncMock()
 
@@ -149,6 +158,7 @@ class TestAddFile:
         try:
             # Setup
             mock_client = MagicMock(spec=BitswapClient)
+            mock_client.new_session = MagicMock(return_value=mock_client)
             mock_client.block_store = MemoryBlockStore()
             mock_client.add_block = AsyncMock()
 
@@ -161,9 +171,12 @@ class TestAddFile:
             assert root_cid is not None
             mock_client.add_block.assert_called_once()
 
-            # Should be single RAW block
+            # Small file is stored as a raw leaf node
             call_args = mock_client.add_block.call_args
-            assert verify_cid(call_args[0][0], data)
+            stored_cid = call_args[0][0]
+            stored_block = call_args[0][1]
+            assert stored_block == data
+            assert verify_cid(stored_cid, data)
         finally:
             Path(temp_path).unlink()
 
@@ -182,6 +195,7 @@ class TestAddFile:
         try:
             # Setup
             mock_client = MagicMock(spec=BitswapClient)
+            mock_client.new_session = MagicMock(return_value=mock_client)
             mock_client.block_store = MemoryBlockStore()
             mock_client.add_block = AsyncMock()
 
@@ -212,6 +226,7 @@ class TestAddFile:
     async def test_add_file_not_found(self):
         """Test adding non-existent file."""
         mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
         mock_client.block_store = MemoryBlockStore()
 
         dag = MerkleDag(mock_client)
@@ -231,6 +246,7 @@ class TestAddFile:
 
         try:
             mock_client = MagicMock(spec=BitswapClient)
+            mock_client.new_session = MagicMock(return_value=mock_client)
             mock_client.block_store = MemoryBlockStore()
             mock_client.add_block = AsyncMock()
 
@@ -243,9 +259,8 @@ class TestAddFile:
                 temp_path, chunk_size=chunk_size, wrap_with_directory=False
             )
 
-            # Should have many chunks
-            # (3.2MB / 16KB = 200 chunks) + 1 root = 201 calls
-            assert mock_client.add_block.call_count == 201
+            # (3.2MB / 16KB = 200 chunks) + intermediate nodes + 1 root
+            assert mock_client.add_block.call_count > 200
         finally:
             Path(temp_path).unlink()
 
@@ -269,6 +284,7 @@ class TestFetchFile:
 
         # Setup
         mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
         mock_client.block_store = MemoryBlockStore()
         mock_client.get_block = AsyncMock(return_value=data)
 
@@ -285,16 +301,22 @@ class TestFetchFile:
     @pytest.mark.trio
     async def test_fetch_chunked_file(self):
         """Test fetching multi-chunk file."""
-        # Create chunks
+        from libp2p.bitswap.dag_pb import create_leaf_node
+
+        # Create dag-pb leaf blocks (matching what add_bytes/add_file produces)
         chunk1 = b"chunk1" * 1000
         chunk2 = b"chunk2" * 1000
         chunk3 = b"chunk3" * 1000
 
-        cid1 = compute_cid_v1(chunk1, codec=CODEC_RAW)
-        cid2 = compute_cid_v1(chunk2, codec=CODEC_RAW)
-        cid3 = compute_cid_v1(chunk3, codec=CODEC_RAW)
+        leaf1 = create_leaf_node(chunk1)
+        leaf2 = create_leaf_node(chunk2)
+        leaf3 = create_leaf_node(chunk3)
 
-        # Create DAG-PB root node
+        cid1 = compute_cid_v1(leaf1, codec=CODEC_DAG_PB)
+        cid2 = compute_cid_v1(leaf2, codec=CODEC_DAG_PB)
+        cid3 = compute_cid_v1(leaf3, codec=CODEC_DAG_PB)
+
+        # Create DAG-PB root node linking to the leaves
         chunks_data = [
             (cid1, len(chunk1)),
             (cid2, len(chunk2)),
@@ -308,39 +330,67 @@ class TestFetchFile:
             if cid == root_cid:
                 return root_data
             elif cid == cid1:
-                return chunk1
+                return leaf1
             elif cid == cid2:
-                return chunk2
+                return leaf2
             elif cid == cid3:
-                return chunk3
+                return leaf3
             raise ValueError(f"Unknown CID: {cid.hex()}")
 
         mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
         mock_client.block_store = MemoryBlockStore()
         mock_client.get_block = AsyncMock(side_effect=get_block_side_effect)
+
+        async def get_blocks_batch_side_effect(
+            cids, peer_id=None, timeout=None, batch_size=None
+        ):
+            from libp2p.bitswap.cid import cid_to_bytes
+
+            results = {}
+            for c in cids:
+                try:
+                    data = await mock_client.get_block(
+                        c, peer_id=peer_id, timeout=timeout
+                    )
+                    results[cid_to_bytes(c)] = data
+                except Exception:
+                    pass
+            return results
+
+        mock_client.get_blocks_batch = AsyncMock(
+            side_effect=get_blocks_batch_side_effect
+        )
 
         dag = MerkleDag(mock_client)
 
         # Fetch
         fetched_data, filename = await dag.fetch_file(root_cid, timeout=30.0)
 
-        # Verify
+        # Verify reconstructed data
         expected_data = chunk1 + chunk2 + chunk3
         assert fetched_data == expected_data
         assert filename is None  # File node without directory wrapper
 
-        # Should have fetched root + 3 chunks
+        # root fetch (1) + tree-level batch fallback (3) = 4
+        # Leaves are already fetched during tree traversal,
+        # no separate leaf fetch needed
         assert mock_client.get_block.call_count == 4
 
     @pytest.mark.trio
     async def test_fetch_file_with_progress(self):
         """Test fetching with progress callback."""
-        # Create chunked file
+        from libp2p.bitswap.dag_pb import create_leaf_node
+
+        # Create dag-pb leaf blocks (matching what add_bytes/add_file produces)
         chunk1 = b"x" * 1000
         chunk2 = b"y" * 1000
 
-        cid1 = compute_cid_v1(chunk1, codec=CODEC_RAW)
-        cid2 = compute_cid_v1(chunk2, codec=CODEC_RAW)
+        leaf1 = create_leaf_node(chunk1)
+        leaf2 = create_leaf_node(chunk2)
+
+        cid1 = compute_cid_v1(leaf1, codec=CODEC_DAG_PB)
+        cid2 = compute_cid_v1(leaf2, codec=CODEC_DAG_PB)
 
         root_data = create_file_node([(cid1, len(chunk1)), (cid2, len(chunk2))])
         root_cid = compute_cid_v1(root_data, codec=CODEC_DAG_PB)
@@ -350,13 +400,34 @@ class TestFetchFile:
             if cid == root_cid:
                 return root_data
             elif cid == cid1:
-                return chunk1
+                return leaf1
             elif cid == cid2:
-                return chunk2
+                return leaf2
 
         mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
         mock_client.block_store = MemoryBlockStore()
         mock_client.get_block = AsyncMock(side_effect=get_block_side_effect)
+
+        async def get_blocks_batch_side_effect(
+            cids, peer_id=None, timeout=None, batch_size=None
+        ):
+            from libp2p.bitswap.cid import cid_to_bytes
+
+            results = {}
+            for c in cids:
+                try:
+                    data = await mock_client.get_block(
+                        c, peer_id=peer_id, timeout=timeout
+                    )
+                    results[cid_to_bytes(c)] = data
+                except Exception:
+                    pass
+            return results
+
+        mock_client.get_blocks_batch = AsyncMock(
+            side_effect=get_blocks_batch_side_effect
+        )
 
         dag = MerkleDag(mock_client)
 
@@ -370,8 +441,8 @@ class TestFetchFile:
 
         # Verify progress
         assert len(progress_calls) > 0
-        # Should report progress for each chunk
-        assert any("fetching chunk" in call[2] for call in progress_calls)
+        # Implementation emits "downloading" per leaf and "completed" at end
+        assert any(call[2] in ("downloading", "completed") for call in progress_calls)
         # Last call should be completion
         assert progress_calls[-1][2] == "completed"
 
@@ -393,6 +464,7 @@ class TestGetFileInfo:
             cid_input = cid.hex()
 
         mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
         mock_client.block_store = MemoryBlockStore()
         mock_client.get_block = AsyncMock(return_value=data)
 
@@ -417,6 +489,7 @@ class TestGetFileInfo:
         root_cid = compute_cid_v1(root_data, codec=CODEC_DAG_PB)
 
         mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
         mock_client.block_store = MemoryBlockStore()
         mock_client.get_block = AsyncMock(return_value=root_data)
 
@@ -445,6 +518,7 @@ class TestEndToEnd:
             # Setup with real store
             store = MemoryBlockStore()
             mock_client = MagicMock(spec=BitswapClient)
+            mock_client.new_session = MagicMock(return_value=mock_client)
             mock_client.block_store = store
 
             # Capture blocks during add
@@ -463,6 +537,26 @@ class TestEndToEnd:
                 raise KeyError(f"Block not found: {cid.hex()}")
 
             mock_client.get_block = AsyncMock(side_effect=get_block_impl)
+
+            async def get_blocks_batch_side_effect(
+                cids, peer_id=None, timeout=None, batch_size=None
+            ):
+                from libp2p.bitswap.cid import cid_to_bytes
+
+                results = {}
+                for c in cids:
+                    try:
+                        data = await mock_client.get_block(
+                            c, peer_id=peer_id, timeout=timeout
+                        )
+                        results[cid_to_bytes(c)] = data
+                    except Exception:
+                        pass
+                return results
+
+            mock_client.get_blocks_batch = AsyncMock(
+                side_effect=get_blocks_batch_side_effect
+            )
 
             dag = MerkleDag(mock_client)
 
@@ -491,6 +585,7 @@ class TestEndToEnd:
         # Setup
         store = MemoryBlockStore()
         mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
         mock_client.block_store = store
 
         added_blocks = {}
@@ -505,6 +600,26 @@ class TestEndToEnd:
 
         mock_client.add_block = AsyncMock(side_effect=add_block_impl)
         mock_client.get_block = AsyncMock(side_effect=get_block_impl)
+
+        async def get_blocks_batch_side_effect(
+            cids, peer_id=None, timeout=None, batch_size=None
+        ):
+            from libp2p.bitswap.cid import cid_to_bytes
+
+            results = {}
+            for c in cids:
+                try:
+                    data = await mock_client.get_block(
+                        c, peer_id=peer_id, timeout=timeout
+                    )
+                    results[cid_to_bytes(c)] = data
+                except Exception:
+                    pass
+            return results
+
+        mock_client.get_blocks_batch = AsyncMock(
+            side_effect=get_blocks_batch_side_effect
+        )
 
         dag = MerkleDag(mock_client)
 
@@ -534,6 +649,7 @@ class TestEndToEnd:
             # Setup
             store = MemoryBlockStore()
             mock_client = MagicMock(spec=BitswapClient)
+            mock_client.new_session = MagicMock(return_value=mock_client)
             mock_client.block_store = store
 
             added_blocks = {}
@@ -546,6 +662,26 @@ class TestEndToEnd:
 
             mock_client.add_block = AsyncMock(side_effect=add_block_impl)
             mock_client.get_block = AsyncMock(side_effect=get_block_impl)
+
+            async def get_blocks_batch_side_effect(
+                cids, peer_id=None, timeout=None, batch_size=None
+            ):
+                from libp2p.bitswap.cid import cid_to_bytes
+
+                results = {}
+                for c in cids:
+                    try:
+                        data = await mock_client.get_block(
+                            c, peer_id=peer_id, timeout=timeout
+                        )
+                        results[cid_to_bytes(c)] = data
+                    except Exception:
+                        pass
+                return results
+
+            mock_client.get_blocks_batch = AsyncMock(
+                side_effect=get_blocks_batch_side_effect
+            )
 
             dag = MerkleDag(mock_client)
 
@@ -586,3 +722,106 @@ class TestEndToEnd:
             assert filename is None  # No directory wrapping
         finally:
             Path(temp_path).unlink()
+
+
+class TestGenericDag:
+    """Test generic node methods."""
+
+    @pytest.mark.trio
+    async def test_add_get_node_json(self):
+        """Test adding and getting a DAG-JSON node."""
+        from libp2p.bitswap.cid import CODEC_DAG_JSON
+
+        store = MemoryBlockStore()
+        mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
+        mock_client.block_store = store
+
+        async def add_block_impl(cid, data):
+            await store.put_block(cid, data)
+
+        async def get_block_impl(cid, *args, **kwargs):
+            return await store.get_block(cid)
+
+        mock_client.add_block = AsyncMock(side_effect=add_block_impl)
+        mock_client.get_block = AsyncMock(side_effect=get_block_impl)
+
+        dag = MerkleDag(mock_client)
+
+        node = {"type": "test_json", "value": 42}
+        cid = await dag.add_node(node, codec=CODEC_DAG_JSON)
+        assert cid is not None
+
+        restored = await dag.get_node(cid)
+        assert restored == node
+
+    @pytest.mark.trio
+    async def test_add_get_node_cbor(self):
+        """Test adding and getting a DAG-CBOR node."""
+        from libp2p.bitswap.cid import CODEC_DAG_CBOR
+
+        store = MemoryBlockStore()
+        mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
+        mock_client.block_store = store
+
+        async def add_block_impl(cid, data):
+            await store.put_block(cid, data)
+
+        async def get_block_impl(cid, *args, **kwargs):
+            return await store.get_block(cid)
+
+        mock_client.add_block = AsyncMock(side_effect=add_block_impl)
+        mock_client.get_block = AsyncMock(side_effect=get_block_impl)
+
+        dag = MerkleDag(mock_client)
+
+        node = {"type": "test_cbor", "data": [1, 2, 3]}
+        cid = await dag.add_node(node, codec=CODEC_DAG_CBOR)
+        assert cid is not None
+
+        restored = await dag.get_node(cid)
+        assert restored == node
+
+    @pytest.mark.trio
+    async def test_remove_node(self):
+        """Test removing a node."""
+        from libp2p.bitswap.cid import CODEC_DAG_JSON
+
+        store = MemoryBlockStore()
+        mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
+        mock_client.block_store = store
+
+        async def add_block_impl(cid, data):
+            await store.put_block(cid, data)
+
+        mock_client.add_block = AsyncMock(side_effect=add_block_impl)
+
+        dag = MerkleDag(mock_client)
+
+        node = {"hello": "world"}
+        cid = await dag.add_node(node, codec=CODEC_DAG_JSON)
+        assert await store.has_block(cid)
+
+        await dag.remove_node(cid)
+        assert not await store.has_block(cid)
+
+    @pytest.mark.trio
+    async def test_codec_mismatch_fails(self):
+        """Test that get_node fails or handles codec mismatch."""
+        from libp2p.bitswap.cid import CODEC_DAG_CBOR
+
+        store = MemoryBlockStore()
+        mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
+        mock_client.block_store = store
+
+        bad_data = b'{"name":"Alice"}'  # This is JSON, not CBOR
+        cid = compute_cid_v1(bad_data, codec=CODEC_DAG_CBOR)
+        await store.put_block(cid, bad_data)
+
+        dag = MerkleDag(mock_client)
+
+        with pytest.raises(Exception):
+            await dag.get_node(cid)

@@ -24,10 +24,12 @@ import trio
 from libp2p.crypto.secp256k1 import (
     create_new_key_pair,
 )
+from libp2p.kad_dht.kad_dht import DHTMode, KadDHT
 from libp2p.kad_dht.routing_table import (
     BUCKET_SIZE,
     KBucket,
     RoutingTable,
+    _subnet_key,
 )
 from libp2p.kad_dht.utils import (
     create_key_from_binary,
@@ -208,19 +210,30 @@ class TestKBucket:
 
     @pytest.mark.trio
     async def test_ping_peer_scenarios(self, mock_host, sample_peer_info):
-        """Test different ping scenarios."""
+        """Test different ping scenarios using libp2p ping protocol."""
         bucket = KBucket(mock_host)
         bucket.peers[sample_peer_info.peer_id] = (sample_peer_info, time.time())
 
-        # Test ping peer not in bucket
+        # Test ping peer not in bucket — returns False on failure
         other_peer_id = create_valid_peer_id("other")
-        with pytest.raises(ValueError, match="Peer .* not in bucket"):
-            await bucket._ping_peer(other_peer_id)
-
-        # Test ping failure due to stream error
-        mock_host.new_stream.side_effect = Exception("Stream failed")
-        result = await bucket._ping_peer(sample_peer_info.peer_id)
+        result = await bucket._ping_peer(other_peer_id)
         assert result is False
+
+        # Test ping failure — PingService.ping raises exception
+        with patch(
+            "libp2p.host.ping.PingService.ping",
+            new_callable=lambda: AsyncMock(side_effect=Exception("Connection refused")),
+        ):
+            result = await bucket._ping_peer(sample_peer_info.peer_id)
+            assert result is False
+
+        # Test successful ping
+        with patch(
+            "libp2p.host.ping.PingService.ping",
+            new_callable=lambda: AsyncMock(return_value=[42]),
+        ):
+            result = await bucket._ping_peer(sample_peer_info.peer_id)
+            assert result is True
 
 
 class TestRoutingTable:
@@ -398,3 +411,373 @@ class TestRoutingTable:
         initial_bucket = routing_table.buckets[0]
         assert initial_bucket.min_range == 0
         assert initial_bucket.max_range == 2**256
+
+
+def _peer_with_addrs(*addr_strs: str) -> PeerInfo:
+    """Build a PeerInfo with a fresh valid peer ID and the given multiaddrs."""
+    return PeerInfo(create_valid_peer_id("p"), [Multiaddr(a) for a in addr_strs])
+
+
+class TestKBucketSubnetDiversity:
+    """
+    IP/subnet diversity enforcement in KBucket.add_peer (issue #1383).
+
+    Uses genuinely globally-routable addresses (8.8.8.x, 1.1.1.x, 9.9.9.x,
+    2606:4700:4700::x); documentation/TEST-NET ranges (203.0.113.x etc.) are
+    ``is_global == False`` and would be exempted, so they are deliberately
+    avoided here.
+    """
+
+    @pytest.fixture
+    def mock_host(self):
+        host = Mock()
+        host.get_peerstore.return_value = Mock()
+        host.new_stream = AsyncMock()
+        return host
+
+    @pytest.mark.trio
+    async def test_subnet_saturation_rejects(self, mock_host):
+        """A third peer in an already-saturated /24 is rejected."""
+        bucket = KBucket(mock_host)  # default bucket_size=20, so space is free
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/8.8.8.1/tcp/1")) is True
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/8.8.8.2/tcp/1")) is True
+        # Same /24 (8.8.8.0/24), MAX_PEERS_PER_SUBNET=2 already reached → reject
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/8.8.8.3/tcp/1")) is False
+        assert bucket.size() == 2
+
+    @pytest.mark.trio
+    async def test_subnet_different_subnets_allowed(self, mock_host):
+        """Peers in distinct /24s are all accepted past the per-subnet cap."""
+        bucket = KBucket(mock_host)
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/8.8.8.1/tcp/1")) is True
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/8.8.8.2/tcp/1")) is True
+        # Different /24s — not grouped with 8.8.8.0/24
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/1.1.1.1/tcp/1")) is True
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/9.9.9.9/tcp/1")) is True
+        assert bucket.size() == 4
+
+    @pytest.mark.trio
+    async def test_subnet_loopback_and_private_exempt(self, mock_host):
+        """Loopback and private peers are never grouped, regardless of count."""
+        bucket = KBucket(mock_host)
+        for i in range(5):
+            ok = await bucket.add_peer(
+                _peer_with_addrs(f"/ip4/127.0.0.1/tcp/{9000 + i}")
+            )
+            assert ok is True
+        # Private (RFC1918) also exempt
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/10.0.0.1/tcp/1")) is True
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/10.0.0.2/tcp/1")) is True
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/10.0.0.3/tcp/1")) is True
+        assert bucket.size() == 8
+
+    @pytest.mark.trio
+    async def test_subnet_opt_out_disables_check(self, mock_host):
+        """MAX_PEERS_PER_SUBNET <= 0 disables the gate entirely."""
+        bucket = KBucket(mock_host)
+        with patch("libp2p.kad_dht.routing_table.MAX_PEERS_PER_SUBNET", 0):
+            for i in range(1, 5):
+                ok = await bucket.add_peer(_peer_with_addrs(f"/ip4/8.8.8.{i}/tcp/1"))
+                assert ok is True
+        assert bucket.size() == 4
+
+    @pytest.mark.trio
+    async def test_subnet_ipv6_grouping(self, mock_host):
+        """IPv6 peers are grouped by /48."""
+        bucket = KBucket(mock_host)
+        assert (
+            await bucket.add_peer(_peer_with_addrs("/ip6/2606:4700:4700::1/tcp/1"))
+            is True
+        )
+        assert (
+            await bucket.add_peer(_peer_with_addrs("/ip6/2606:4700:4700::2/tcp/1"))
+            is True
+        )
+        # Same /48 → rejected
+        assert (
+            await bucket.add_peer(_peer_with_addrs("/ip6/2606:4700:4700::3/tcp/1"))
+            is False
+        )
+        # Different /48 → accepted
+        assert (
+            await bucket.add_peer(_peer_with_addrs("/ip6/2606:4700:4800::1/tcp/1"))
+            is True
+        )
+        assert bucket.size() == 3
+
+    @pytest.mark.trio
+    async def test_subnet_multihomed_counted_by_first_global(self, mock_host):
+        """A peer is grouped by its first globally-routable address."""
+        bucket = KBucket(mock_host)
+        # Both peers expose a private addr first, then the same global /24.
+        assert (
+            await bucket.add_peer(
+                _peer_with_addrs("/ip4/192.168.1.1/tcp/1", "/ip4/8.8.8.1/tcp/1")
+            )
+            is True
+        )
+        assert (
+            await bucket.add_peer(
+                _peer_with_addrs("/ip4/192.168.1.2/tcp/1", "/ip4/8.8.8.2/tcp/1")
+            )
+            is True
+        )
+        # Third shares the 8.8.8.0/24 group via its global addr → rejected
+        assert (
+            await bucket.add_peer(
+                _peer_with_addrs("/ip4/192.168.1.3/tcp/1", "/ip4/8.8.8.3/tcp/1")
+            )
+            is False
+        )
+        assert bucket.size() == 2
+
+    @pytest.mark.trio
+    async def test_subnet_rejection_on_non_full_bucket_does_not_split(self, mock_host):
+        """
+        Regression (#1383): a subnet rejection leaves the bucket non-full, which
+        must NOT be reported as splittable. Before the fix, _should_split_bucket
+        fell through to ``return True`` for any bucket under MAXIMUM_BUCKETS,
+        so a diversity rejection on a non-full bucket could trigger a spurious
+        split.
+        """
+        routing_table = RoutingTable(create_valid_peer_id("local"), mock_host)
+        bucket = routing_table.buckets[0]
+
+        # Two peers from 8.8.8.0/24 are admitted; the third is subnet-rejected.
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/8.8.8.1/tcp/1")) is True
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/8.8.8.2/tcp/1")) is True
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/8.8.8.3/tcp/1")) is False
+
+        # Bucket holds 2 peers, far below bucket_size — never splittable.
+        assert bucket.size() < bucket.bucket_size
+        assert routing_table._should_split_bucket(bucket) is False
+
+        # Sanity: a genuinely full bucket is still splittable (guard is specific,
+        # not a blanket "never split").
+        small = KBucket(mock_host, bucket_size=2)
+        assert await small.add_peer(_peer_with_addrs("/ip4/1.1.1.1/tcp/1")) is True
+        assert await small.add_peer(_peer_with_addrs("/ip4/9.9.9.9/tcp/1")) is True
+        assert small.size() == small.bucket_size
+        assert routing_table._should_split_bucket(small) is True
+
+    def test_subnet_key_helper(self):
+        """_subnet_key groups globals and exempts everything non-routable."""
+        assert _subnet_key(_peer_with_addrs("/ip4/8.8.8.7/tcp/1")) == "8.8.8.0/24"
+        assert (
+            _subnet_key(_peer_with_addrs("/ip6/2606:4700:4700::1111/tcp/1"))
+            == "2606:4700:4700::/48"
+        )
+        # Exempt cases → None
+        assert _subnet_key(_peer_with_addrs("/ip4/127.0.0.1/tcp/1")) is None
+        assert _subnet_key(_peer_with_addrs("/ip4/10.0.0.1/tcp/1")) is None
+        assert _subnet_key(_peer_with_addrs("/dns4/example.com/tcp/1")) is None
+        assert _subnet_key(_peer_with_addrs()) is None
+        # Relayed address exposes the relay's IP, not the peer's → exempt
+        assert _subnet_key(_peer_with_addrs("/ip4/8.8.8.9/tcp/1/p2p-circuit")) is None
+
+    def test_targeted_bucket_key_generation(self, mock_host):
+        """Test targeted K-bucket refresh keys."""
+        local_id = create_valid_peer_id("local")
+        rt = RoutingTable(local_id, mock_host)
+        keys = rt.get_target_keys_for_refresh()
+        assert len(keys) == len(rt.buckets)
+        for i, bucket in enumerate(rt.buckets):
+            assert bucket.key_in_range(keys[i])
+
+
+class TestConfigurableSubnetLimit:
+    """Runtime-configurable per-bucket subnet cap (issue #1422)."""
+
+    @pytest.fixture
+    def mock_host(self):
+        host = Mock()
+        host.get_peerstore.return_value = Mock()
+        host.new_stream = AsyncMock()
+        return host
+
+    @pytest.mark.trio
+    async def test_kbucket_override_lower_limit(self, mock_host):
+        """A per-instance limit of 1 rejects the second same-/24 peer."""
+        bucket = KBucket(mock_host, max_peers_per_subnet=1)
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/8.8.8.1/tcp/1")) is True
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/8.8.8.2/tcp/1")) is False
+        assert bucket.size() == 1
+
+    @pytest.mark.trio
+    async def test_kbucket_override_higher_limit(self, mock_host):
+        """A per-instance limit of 5 admits more than the default 2."""
+        bucket = KBucket(mock_host, max_peers_per_subnet=5)
+        for i in range(1, 6):
+            assert (
+                await bucket.add_peer(_peer_with_addrs(f"/ip4/8.8.8.{i}/tcp/1")) is True
+            )
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/8.8.8.6/tcp/1")) is False
+        assert bucket.size() == 5
+
+    @pytest.mark.trio
+    async def test_default_unchanged(self, mock_host):
+        """With no override the default cap of 2 still applies."""
+        bucket = KBucket(mock_host)
+        assert bucket.max_peers_per_subnet is None
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/8.8.8.1/tcp/1")) is True
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/8.8.8.2/tcp/1")) is True
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/8.8.8.3/tcp/1")) is False
+        assert bucket.size() == 2
+
+    @pytest.mark.trio
+    async def test_routing_table_propagates_and_survives_split(self, mock_host):
+        """
+        RoutingTable's limit reaches its buckets and is copied into split
+        children, so the cap stays enforced after a split.
+        """
+        rt = RoutingTable(
+            create_valid_peer_id("local"), mock_host, max_peers_per_subnet=1
+        )
+        assert rt.buckets[0].max_peers_per_subnet == 1
+        lower, upper = rt.buckets[0].split()
+        assert lower.max_peers_per_subnet == 1
+        assert upper.max_peers_per_subnet == 1
+
+    @pytest.mark.trio
+    async def test_routing_table_override_rejects_second_same_subnet(self, mock_host):
+        """RoutingTable-level override of 1 rejects the second same-/24 peer."""
+        rt = RoutingTable(
+            create_valid_peer_id("local"), mock_host, max_peers_per_subnet=1
+        )
+        assert await rt.add_peer(_peer_with_addrs("/ip4/8.8.8.1/tcp/1")) is True
+        assert await rt.add_peer(_peer_with_addrs("/ip4/8.8.8.2/tcp/1")) is False
+        assert rt.size() == 1
+
+
+class TestTableWideSubnetCap:
+    """Opt-in table-wide IP-group cap (issue #1421)."""
+
+    @pytest.fixture
+    def mock_host(self):
+        host = Mock()
+        host.get_peerstore.return_value = Mock()
+        host.new_stream = AsyncMock()
+        return host
+
+    @pytest.mark.trio
+    async def test_table_cap_rejects_once_reached(self, mock_host):
+        """
+        With the per-bucket check disabled, the table-wide cap alone rejects the
+        peer that pushes a subnet over the limit.
+        """
+        rt = RoutingTable(
+            create_valid_peer_id("local"),
+            mock_host,
+            max_peers_per_subnet=0,  # disable per-bucket check to isolate table cap
+            max_peers_per_subnet_table=2,
+        )
+        assert await rt.add_peer(_peer_with_addrs("/ip4/8.8.8.1/tcp/1")) is True
+        assert await rt.add_peer(_peer_with_addrs("/ip4/8.8.8.2/tcp/1")) is True
+        assert await rt.add_peer(_peer_with_addrs("/ip4/8.8.8.3/tcp/1")) is False
+        assert rt.size() == 2
+
+    @pytest.mark.trio
+    async def test_table_cap_counts_across_buckets(self, mock_host):
+        """
+        _table_peers_in_subnet sums matching peers across every bucket, and the
+        cap fires on peers placed in different buckets.
+        """
+        rt = RoutingTable(
+            create_valid_peer_id("local"),
+            mock_host,
+            max_peers_per_subnet=0,
+            max_peers_per_subnet_table=2,
+        )
+        # Manually spread two same-/24 peers into two distinct buckets.
+        rt.buckets = [
+            KBucket(mock_host, min_range=0, max_range=2**255, max_peers_per_subnet=0),
+            KBucket(
+                mock_host, min_range=2**255, max_range=2**256, max_peers_per_subnet=0
+            ),
+        ]
+        p1 = _peer_with_addrs("/ip4/8.8.8.1/tcp/1")
+        p2 = _peer_with_addrs("/ip4/8.8.8.2/tcp/1")
+        rt.buckets[0].peers[p1.peer_id] = (p1, time.time())
+        rt.buckets[1].peers[p2.peer_id] = (p2, time.time())
+        assert rt._table_peers_in_subnet("8.8.8.0/24") == 2
+        # A third same-/24 peer is rejected by the table-wide cap.
+        assert await rt.add_peer(_peer_with_addrs("/ip4/8.8.8.3/tcp/1")) is False
+
+    @pytest.mark.trio
+    async def test_table_cap_disabled_by_default(self, mock_host):
+        """Cap of 0 (default) never triggers the table-wide rejection."""
+        rt = RoutingTable(create_valid_peer_id("local"), mock_host)
+        assert rt.max_peers_per_subnet_table == 0
+        for i in range(1, 6):
+            # per-bucket default (2) would reject some; use distinct /24s
+            assert await rt.add_peer(_peer_with_addrs(f"/ip4/{i}.1.1.1/tcp/1")) is True
+        assert rt.size() == 5
+
+    @pytest.mark.trio
+    async def test_table_cap_exempts_private_peers(self, mock_host):
+        """Exempt (private/loopback) peers are never table-capped."""
+        rt = RoutingTable(
+            create_valid_peer_id("local"),
+            mock_host,
+            max_peers_per_subnet=0,
+            max_peers_per_subnet_table=1,
+        )
+        for i in range(1, 5):
+            assert await rt.add_peer(_peer_with_addrs(f"/ip4/10.0.0.{i}/tcp/1")) is True
+        assert rt.size() == 4
+
+    @pytest.mark.trio
+    async def test_both_caps_enabled(self, mock_host):
+        """
+        go-libp2p-style config: per-bucket cap 2 rejects the 3rd same-/24 peer in
+        one bucket; table cap 3 rejects the 4th across buckets.
+        """
+        rt = RoutingTable(
+            create_valid_peer_id("local"),
+            mock_host,
+            max_peers_per_subnet=2,
+            max_peers_per_subnet_table=3,
+        )
+        assert await rt.add_peer(_peer_with_addrs("/ip4/8.8.8.1/tcp/1")) is True
+        assert await rt.add_peer(_peer_with_addrs("/ip4/8.8.8.2/tcp/1")) is True
+        # Single bucket holds 2 from 8.8.8.0/24 → per-bucket cap rejects the 3rd.
+        assert await rt.add_peer(_peer_with_addrs("/ip4/8.8.8.3/tcp/1")) is False
+        # Spread 3 same-/24 peers over two buckets (per-bucket cap satisfied);
+        # the table-wide cap then rejects the 4th.
+        rt.buckets = [
+            KBucket(mock_host, min_range=0, max_range=2**255, max_peers_per_subnet=2),
+            KBucket(
+                mock_host, min_range=2**255, max_range=2**256, max_peers_per_subnet=2
+            ),
+        ]
+        for i, bucket in ((1, 0), (2, 0), (3, 1)):
+            p = _peer_with_addrs(f"/ip4/8.8.8.{i}/tcp/1")
+            rt.buckets[bucket].peers[p.peer_id] = (p, time.time())
+        assert rt._table_peers_in_subnet("8.8.8.0/24") == 3
+        assert await rt.add_peer(_peer_with_addrs("/ip4/8.8.8.4/tcp/1")) is False
+        assert rt.size() == 3
+
+
+class TestKadDHTSubnetConfig:
+    """KadDHT forwards subnet-diversity limits to its RoutingTable (issue #1422)."""
+
+    def test_kad_dht_forwards_limits(self):
+        host = Mock()
+        host.get_id.return_value = create_valid_peer_id("local")
+        host.get_peerstore.return_value = Mock()
+        host.new_stream = AsyncMock()
+        dht = KadDHT(
+            host, DHTMode.SERVER, max_peers_per_subnet=1, max_peers_per_subnet_table=3
+        )
+        assert dht.routing_table.max_peers_per_subnet == 1
+        assert dht.routing_table.max_peers_per_subnet_table == 3
+        assert dht.routing_table.buckets[0].max_peers_per_subnet == 1
+
+    def test_kad_dht_defaults_unchanged(self):
+        host = Mock()
+        host.get_id.return_value = create_valid_peer_id("local")
+        host.get_peerstore.return_value = Mock()
+        host.new_stream = AsyncMock()
+        dht = KadDHT(host, DHTMode.SERVER)
+        assert dht.routing_table.max_peers_per_subnet is None
+        assert dht.routing_table.max_peers_per_subnet_table == 0

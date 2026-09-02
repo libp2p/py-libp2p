@@ -1,0 +1,330 @@
+"""
+WebRTC Direct transport.
+
+Implements :class:`ITransport` for the ``/webrtc-direct`` multiaddr scheme.
+The server publishes its DTLS certificate hash in the multiaddr; the client
+constructs an SDP locally — no signaling exchange is needed.
+
+This transport provides native stream multiplexing (data channels), so it
+sets ``provides_native_muxing = True`` and the swarm skips the
+TransportUpgrader.
+
+Spec: https://github.com/libp2p/specs/blob/master/webrtc/webrtc-direct.md
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING, Any
+
+from multiaddr import Multiaddr
+import trio
+
+from libp2p.abc import ITransport
+from libp2p.crypto.keys import PrivateKey
+from libp2p.custom_types import THandler
+from libp2p.peer.id import ID
+
+from ._asyncio_bridge import AsyncioBridge
+from .certificate import WebRTCCertificate
+from .config import WebRTCTransportConfig
+from .connection import WebRTCConnection
+from .exceptions import WebRTCConnectionError
+from .listener import WebRTCDirectListener
+from .multiaddr_utils import (
+    is_webrtc_direct_multiaddr,
+    parse_webrtc_direct_multiaddr,
+)
+from .sdp import build_synthetic_answer, make_v1_credential
+
+if TYPE_CHECKING:
+    pass
+
+logger = logging.getLogger(__name__)
+
+
+async def _async_noop(value: object) -> object:
+    """Wrap a synchronous value as an awaitable for bridge.run_coro()."""
+    return value
+
+
+class WebRTCDirectTransport(ITransport):
+    """
+    WebRTC Direct transport (``/webrtc-direct``).
+
+    Usage::
+
+        transport = WebRTCDirectTransport(private_key=my_key)
+        # Dial a remote peer
+        conn = await transport.dial(
+            Multiaddr("/ip4/1.2.3.4/udp/9090/webrtc-direct/certhash/uEi.../p2p/12D3...")
+        )
+        # Or create a listener
+        listener = transport.create_listener(handler)
+        await listener.listen(Multiaddr("/ip4/0.0.0.0/udp/9090/webrtc-direct"))
+    """
+
+    # The swarm checks this to skip the TransportUpgrader
+    provides_native_muxing: bool = True
+
+    def __init__(
+        self,
+        private_key: PrivateKey,
+        config: WebRTCTransportConfig | None = None,
+    ) -> None:
+        self._private_key = private_key
+        self._config = config or WebRTCTransportConfig()
+        self._certificate = self._config.get_or_generate_certificate()
+        self._bridge: AsyncioBridge | None = None
+        self._bridge_lock = trio.Lock()
+        self._local_peer_id = ID.from_pubkey(private_key.get_public_key())
+
+    async def _ensure_bridge(self) -> AsyncioBridge:
+        """Start the asyncio bridge on first use (concurrency-safe)."""
+        if self._bridge is not None:
+            return self._bridge
+        async with self._bridge_lock:
+            if self._bridge is None:
+                self._bridge = AsyncioBridge()
+                await self._bridge.start()
+        return self._bridge
+
+    def can_dial(self, maddr: Multiaddr) -> bool:
+        return is_webrtc_direct_multiaddr(maddr)
+
+    def can_listen(self, maddr: Multiaddr) -> bool:
+        return is_webrtc_direct_multiaddr(maddr)
+
+    def protocols(self) -> list[str]:
+        return ["webrtc-direct"]
+
+    async def dial(self, maddr: Multiaddr) -> WebRTCConnection:
+        """
+        Dial a remote peer over WebRTC Direct.
+
+        :param maddr: A ``/webrtc-direct`` multiaddr with certhash.
+        :returns: A :class:`WebRTCConnection` (implements both
+            ``IRawConnection`` and ``IMuxedConn``).
+        :raises WebRTCConnectionError: If the connection fails.
+        """
+        if not is_webrtc_direct_multiaddr(maddr):
+            raise WebRTCConnectionError(f"Not a WebRTC Direct multiaddr: {maddr}")
+        host, port, certhash, peer_id_str = parse_webrtc_direct_multiaddr(maddr)
+        if not certhash:
+            raise WebRTCConnectionError(
+                f"WebRTC Direct multiaddr missing certhash: {maddr}"
+            )
+
+        bridge = await self._ensure_bridge()
+        logger.info("Dialing WebRTC Direct %s:%d", host, port)
+
+        remote_peer_id: ID | None = None
+        if peer_id_str:
+            remote_peer_id = ID.from_base58(peer_id_str)
+
+        # All aiortc calls go through the bridge (asyncio thread).
+        from ._aiortc_helpers import (
+            close_peer_connection,
+            create_noise_channel,
+            create_peer_connection,
+            get_remote_fingerprint,
+            make_noise_channel_callbacks,
+            post_sdp,
+            set_private_attr,
+            wait_for_connected,
+            wire_pc_to_connection,
+        )
+        from .certificate import fingerprint_from_multibase
+        from .noise_handshake import DataChannelReadWriter, perform_noise_handshake
+
+        rtc_cert = getattr(self._certificate, "_rtc_certificate", None)
+        if rtc_cert is None:
+            raise WebRTCConnectionError(
+                "WebRTC certificate was not generated via aiortc. "
+                "Ensure aiortc is installed and config uses from_aiortc()."
+            )
+
+        pc: Any = None
+        try:
+            # 1. Create RTCPeerConnection + Noise channel
+            # Spec path: no STUN/TURN. We dial a known public address and the
+            # listener infers our offer from the first BINDING REQUEST, so
+            # server-reflexive candidates buy nothing and a public STUN query
+            # would add seconds on offline/firewalled hosts. config.ice_servers
+            # only applies to the experimental HTTP harness (explicit opt-in).
+            ice_servers = (
+                self._config.ice_servers if self._config.enable_sdp_http_harness else []
+            )
+            pc = await bridge.run_coro(
+                create_peer_connection(rtc_cert, ice_servers=ice_servers)
+            )
+            noise_ch = await bridge.run_coro(create_noise_channel(pc))
+
+            # make_noise_channel_callbacks is sync; wrap inline.
+            async def _setup_noise() -> tuple:  # type: ignore[type-arg]
+                return make_noise_channel_callbacks(noise_ch)
+
+            noise_send, noise_recv, _ = await bridge.run_coro(_setup_noise())
+
+            if self._config.enable_sdp_http_harness:
+                # Experimental py<->py harness: real SDP exchange over HTTP.
+                offer = await bridge.run_coro(pc.createOffer())
+                await bridge.run_coro(pc.setLocalDescription(offer))
+                answer_sdp = await bridge.run_coro(
+                    post_sdp(host, port, pc.localDescription.sdp)
+                )
+            else:
+                # Spec v1 (SDP munging): the same "libp2p+webrtc+v1/<random>"
+                # string is our ufrag *and* pwd on both the local offer and the
+                # synthetic remote answer, so the server can reconstruct
+                # everything from our first STUN USERNAME. aiortc regenerates
+                # local ICE credentials from its aioice Connection when
+                # setLocalDescription runs (SDP text edits are ignored), so
+                # "munging" means setting those fields.
+                cred = make_v1_credential()
+
+                async def _set_local_ice_credentials() -> None:
+                    assert pc.sctp is not None  # createDataChannel ran above
+                    ice_conn = pc.sctp.transport.transport._connection
+                    set_private_attr(ice_conn, "_local_username", cred)
+                    set_private_attr(ice_conn, "_local_password", cred)
+
+                await bridge.run_coro(_set_local_ice_credentials())
+                offer = await bridge.run_coro(pc.createOffer())
+                await bridge.run_coro(pc.setLocalDescription(offer))
+                # The listener is ICE-Lite/controlled and the DTLS server; its
+                # fingerprint comes from the certhash so aiortc pins it.
+                answer_sdp = build_synthetic_answer(
+                    host=host,
+                    port=port,
+                    certhash_multibase=certhash,
+                    ufrag=cred,
+                    pwd=cred,
+                    max_message_size=self._config.max_message_size,
+                )
+
+            # 4. Set remote description
+            from aiortc import RTCSessionDescription
+
+            answer = RTCSessionDescription(sdp=answer_sdp, type="answer")
+            await bridge.run_coro(pc.setRemoteDescription(answer))
+
+            # 5. Wait for ICE connection
+            await bridge.run_coro(
+                wait_for_connected(pc, timeout=self._config.handshake_timeout)
+            )
+
+            # 6. Verify remote DTLS fingerprint
+            expected_fp = fingerprint_from_multibase(certhash)
+            remote_fp = get_remote_fingerprint(pc)  # sync, safe off-thread
+            if remote_fp != expected_fp:
+                raise WebRTCConnectionError(
+                    "Remote DTLS fingerprint does not match certhash in the multiaddr"
+                )
+
+            # 7. Build WebRTCConnection and wire callbacks
+            conn = WebRTCConnection(
+                peer_id=remote_peer_id or ID(b"\x00" * 32),
+                bridge=bridge,
+                is_initiator=True,
+                config=self._config,
+                remote_addrs=[maddr],
+            )
+            wire_pc_to_connection(pc, conn)  # sync, wires callbacks
+
+            # 8. Noise XX handshake over channel 0
+            from libp2p.crypto.x25519 import (
+                create_new_key_pair as create_x25519_keypair,
+            )
+
+            noise_kp = create_x25519_keypair()
+
+            async def _trio_noise_send(data: bytes) -> None:
+                await bridge.run_coro(noise_send(data))
+
+            async def _trio_noise_recv() -> bytes:
+                return await bridge.run_coro(noise_recv())
+
+            # Per the WebRTC-Direct spec the *server* is the Noise initiator
+            # and the dialer is the responder (this is independent of the
+            # transport-level ``is_initiator`` used for stream-ID parity).
+            noise_rw = DataChannelReadWriter(
+                send_cb=_trio_noise_send,
+                recv_cb=_trio_noise_recv,
+                is_initiator=False,
+            )
+            # As responder our first step is a read; bound it — nothing else
+            # (swarm, transport) times out a hung dial.
+            with trio.fail_after(self._config.handshake_timeout):
+                authenticated_peer = await perform_noise_handshake(
+                    conn=noise_rw,
+                    local_peer=self._local_peer_id,
+                    libp2p_privkey=self._private_key,
+                    noise_static_key=noise_kp.private_key,
+                    dialer_fingerprint=self._certificate.fingerprint,
+                    server_fingerprint=expected_fp,
+                    is_initiator=False,
+                )
+            # The responder cannot pin the peer during the handshake, so
+            # verify the authenticated identity against ``/p2p/`` here.
+            if remote_peer_id is not None and authenticated_peer != remote_peer_id:
+                raise WebRTCConnectionError(
+                    f"Remote peer ID {authenticated_peer} does not match "
+                    f"/p2p/{remote_peer_id} in the multiaddr"
+                )
+
+            # 9. Finalize connection
+            conn.peer_id = authenticated_peer
+            await conn.start()
+            logger.info(
+                "WebRTC Direct connection established to %s",
+                authenticated_peer,
+            )
+            return conn
+
+        except BaseException as e:
+            # Every failure path (ICE timeout, fingerprint/peer-ID mismatch,
+            # Noise failure, cancellation) must release the PC — it owns UDP
+            # sockets and asyncio tasks on the bridge loop.
+            if pc is not None:
+                with trio.CancelScope(shield=True):
+                    try:
+                        await bridge.run_coro(close_peer_connection(pc))
+                    except Exception:
+                        pass
+            if isinstance(e, WebRTCConnectionError | trio.Cancelled):
+                raise
+            raise WebRTCConnectionError(f"WebRTC Direct dial failed: {e}") from e
+
+    def create_listener(self, handler_function: THandler) -> WebRTCDirectListener:
+        """
+        Create a WebRTC Direct listener.
+
+        :param handler_function: Called with each new inbound connection.
+        :returns: A :class:`WebRTCDirectListener`.
+        """
+        return WebRTCDirectListener(
+            handler_function=handler_function,
+            private_key=self._private_key,
+            certificate=self._certificate,
+            config=self._config,
+            bridge_factory=self._ensure_bridge,
+            local_peer_id=self._local_peer_id,
+        )
+
+    async def close(self) -> None:
+        """
+        Shut down the transport and its asyncio bridge.
+
+        Acquires the same lock as :meth:`_ensure_bridge` so a concurrent
+        dial cannot resurrect the bridge mid-shutdown.
+        """
+        async with self._bridge_lock:
+            if self._bridge is not None:
+                await self._bridge.stop()
+                self._bridge = None
+
+    @property
+    def certificate(self) -> WebRTCCertificate:
+        """The local DTLS certificate."""
+        return self._certificate

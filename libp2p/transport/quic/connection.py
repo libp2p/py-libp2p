@@ -43,6 +43,18 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Event-loop cadence for QUIC connections.  The sans-IO aioquic core needs
+# periodic pumping for timers and queued events, but the old fixed 1-10ms
+# polling (and a zero-sleep yield while events were being processed) made
+# every connection — including fully idle ones and in-flight handshakes —
+# wake the trio event loop hundreds to thousands of times per second.
+# With hundreds of connections that saturates a core, starves established
+# connections, and causes mass disconnects.  Idle connections now sleep up
+# to _IDLE_POLL_INTERVAL (waking sooner when aioquic reports a pending
+# timer), and active connections pace themselves at _ACTIVE_POLL_INTERVAL.
+_IDLE_POLL_INTERVAL = 2.0  # seconds: max idle gap between event-loop polls
+_ACTIVE_POLL_INTERVAL = 0.001  # seconds: min gap between event-processing runs
+
 
 class QUICConnection(IRawConnection, IMuxedConn):
     """
@@ -177,9 +189,12 @@ class QUICConnection(IRawConnection, IMuxedConn):
         # Background task management
         self._background_tasks_started: bool = False
         self._nursery: trio.Nursery | None = None
+        self._cancel_scope: trio.CancelScope = trio.CancelScope()
+        self._task_cancel_scopes: list[trio.CancelScope] = []
         self._event_processing_task: Any | None = None
         self.on_close: Callable[[], Awaitable[None]] | None = None
         self.event_started = trio.Event()
+        self._activity_event: trio.Event = trio.Event()
 
         self._available_connection_ids: set[bytes] = set()
         self._current_connection_id: bytes | None = None
@@ -339,38 +354,27 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
     async def start(self) -> None:
         """
-        Start the connection and its background tasks.
+        Signal that this connection is ready for use by the Swarm.
 
-        This method implements the IMuxedConn.start() interface.
-        It should be called to begin processing connection events.
+        This method implements the IMuxedConn.start() interface and is the
+        EXCLUSIVE responsibility of Swarm.add_conn(). All raw transport
+        setup (handshake, background tasks, peer verification) is handled
+        by connect(), which sets _started=True when the connection is
+        operational. start() then completes the Swarm lifecycle by setting
+        event_started, which add_conn() waits on.
         """
-        if self._started:
-            logger.warning("Connection already started")
+        if self.event_started.is_set():
+            logger.debug("Connection already signalled to Swarm")
             return
 
         if self._closed:
-            raise QUICConnectionError("Cannot start a closed connection")
+            logger.debug("Cannot start a closed connection (shutdown race), silencing.")
+            self.event_started.set()
+            return
 
         self._started = True
-        logger.debug(f"Starting QUIC connection to {self._remote_peer_id}")
-
-        try:
-            # If this is a client connection, we need to establish the connection
-            if self._is_initiator:
-                await self._initiate_connection()
-                # event_started will be set in connect() after connection is established
-            else:
-                # For server connections, we're already connected via the listener
-                self._established = True
-                self._connected_event.set()
-                # Set event_started after connection is established for server
-                self.event_started.set()
-
-            logger.debug(f"QUIC connection to {self._remote_peer_id} started")
-
-        except Exception as e:
-            logger.error(f"Failed to start connection: {e}")
-            raise QUICConnectionError(f"Connection start failed: {e}") from e
+        logger.debug(f"QUIC connection ready for Swarm: {self._remote_peer_id}")
+        self.event_started.set()
 
     async def _initiate_connection(self) -> None:
         """Initiate client-side connection, reusing listener socket if available."""
@@ -378,11 +382,17 @@ class QUICConnection(IRawConnection, IMuxedConn):
             with QUICErrorContext("connection_initiation", "connection"):
                 if not self._socket:
                     logger.debug("Creating new socket for outbound connection")
+                    family = (
+                        socket.AF_INET6
+                        if ":" in self._remote_addr[0]
+                        else socket.AF_INET
+                    )
                     self._socket = trio.socket.socket(
-                        family=socket.AF_INET, type=socket.SOCK_DGRAM
+                        family=family, type=socket.SOCK_DGRAM
                     )
 
-                await self._socket.bind(("0.0.0.0", 0))
+                bind_addr = "::" if family == socket.AF_INET6 else "0.0.0.0"
+                await self._socket.bind((bind_addr, 0))
 
                 self._quic.connect(self._remote_addr, now=time.time())
 
@@ -399,6 +409,13 @@ class QUICConnection(IRawConnection, IMuxedConn):
         """
         Establish the QUIC connection using trio nursery for background tasks.
 
+        This method handles all raw transport setup: physical connection
+        initiation (for clients), background event-loop tasks, TLS handshake
+        completion, and peer identity verification. It intentionally does NOT
+        call start() or set event_started — those are exclusively owned by
+        Swarm.add_conn() to maintain a uniform lifecycle contract across all
+        transports.
+
         Args:
             nursery: Trio nursery for managing connection background tasks
 
@@ -410,15 +427,21 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         try:
             with QUICErrorContext("connection_establishment", "connection"):
-                # Start the connection if not already started
-                if not self._started:
-                    await self.start()
+                # Raw transport setup — inlined directly instead of delegating
+                # to start(), so that start() remains a pure Swarm signal.
+                if self._is_initiator:
+                    # Client: initiate the UDP handshake
+                    await self._initiate_connection()
+                else:
+                    # Server: already physically connected via the listener socket
+                    self._established = True
+                    self._connected_event.set()
 
                 # Start background event processing
                 if not self._background_tasks_started:
                     await self._start_background_tasks()
 
-                # Wait for handshake completion with timeout
+                # Wait for TLS handshake completion with timeout
                 with trio.move_on_after(
                     self.CONNECTION_HANDSHAKE_TIMEOUT
                 ) as cancel_scope:
@@ -426,7 +449,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
                 if cancel_scope.cancelled_caught:
                     raise QUICConnectionTimeoutError(
-                        "Connection handshake timed out after"
+                        "Connection handshake timed out after "
                         f"{self.CONNECTION_HANDSHAKE_TIMEOUT}s"
                     )
 
@@ -441,15 +464,18 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
                 logger.debug(f"QUICConnection {id(self)}: Peer identity verified")
                 self._established = True
+                self._started = True  # Connection is fully set up and operational
                 logger.debug(f"QUIC connection established with {self._remote_peer_id}")
+                # NOTE: event_started is NOT set here. Swarm.add_conn() calls
+                # start() which is the sole setter of event_started for the
+                # Swarm lifecycle contract.
 
-                # Set event_started after connection is fully established for initiator
-                if self._is_initiator:
-                    self.event_started.set()
-
-        except Exception as e:
-            logger.error(f"Failed to establish connection: {e}")
-            await self.close()
+        except BaseException as e:
+            if not isinstance(e, trio.Cancelled):
+                logger.error(f"Failed to establish connection: {e}")
+            with trio.CancelScope() as close_scope:
+                close_scope.shield = True
+                await self.close()
             raise
 
     async def _start_background_tasks(self) -> None:
@@ -459,13 +485,32 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         self._background_tasks_started = True
 
-        if self._is_initiator:
-            self._nursery.start_soon(async_fn=self._client_packet_receiver)
+        async def _run_scoped(fn: Callable[[], Awaitable[None]]) -> None:
+            scope = trio.CancelScope()
+            self._task_cancel_scopes.append(scope)
+            try:
+                with scope:
+                    await fn()
+            except trio.Cancelled:
+                pass
+            except Exception as e:
+                logger.debug(f"QUIC background task exited: {e}")
+            finally:
+                if scope in self._task_cancel_scopes:
+                    self._task_cancel_scopes.remove(scope)
 
-        self._nursery.start_soon(async_fn=self._event_processing_loop)
-        self._nursery.start_soon(async_fn=self._periodic_maintenance)
+        if self._is_initiator:
+            self._nursery.start_soon(_run_scoped, self._client_packet_receiver)
+
+        self._nursery.start_soon(_run_scoped, self._event_processing_loop)
+        self._nursery.start_soon(_run_scoped, self._periodic_maintenance)
 
         logger.debug("Started background tasks for QUIC connection")
+
+    def _signal_activity(self) -> None:
+        """Signal that new datagram or stream activity occurred."""
+        if hasattr(self, "_activity_event") and not self._activity_event.is_set():
+            self._activity_event.set()
 
     async def _event_processing_loop(self) -> None:
         """Main event processing loop for the connection."""
@@ -475,7 +520,6 @@ class QUICConnection(IRawConnection, IMuxedConn):
         )
 
         try:
-            consecutive_idle_iterations = 0
             while not self._closed:
                 # Batch process events - returns True if events were processed
                 events_processed = await self._process_quic_events_batched()
@@ -486,24 +530,33 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 # Transmit any pending data
                 await self._transmit()
 
-                # Adaptive sleep based on activity
-                # When processing events: use minimal sleep (just yield) for low latency
-                # When idle: use longer sleep to reduce CPU usage
-                if not events_processed:
-                    consecutive_idle_iterations += 1
-                    # Use longer sleep when idle to reduce CPU usage
-                    # Start with 1ms, increase to 10ms after several idle iterations
-                    sleep_time = 0.01 if consecutive_idle_iterations > 5 else 0.001
-                    await trio.sleep(sleep_time)
+                if events_processed:
+                    # When active events were processed, pace at 1ms so other tasks
+                    # run and remaining in-flight events are drained without spinning.
+                    await trio.sleep(0.001)
+                    continue
+
+                # Calculate next sleep duration based on pending aioquic timer
+                timer = self._quic.get_timer()
+                now = time.time()
+                if timer is not None:
+                    delay = min(max(0.0, timer - now), _IDLE_POLL_INTERVAL)
                 else:
-                    consecutive_idle_iterations = 0
-                    # Minimal sleep when processing events - just yield to allow
-                    # other tasks to run, but keep latency low
-                    await trio.sleep(0)  # Yield without sleeping
+                    delay = _IDLE_POLL_INTERVAL
+
+                if delay > 0.0:
+                    with trio.move_on_after(delay):
+                        await self._activity_event.wait()
+                    if self._activity_event.is_set():
+                        self._activity_event = trio.Event()
+                else:
+                    # Timer already due; yield cooperatively to drain immediately
+                    await trio.sleep(0.001)
 
         except Exception as e:
-            logger.error(f"Error in event processing loop: {e}")
-            await self._handle_connection_error(e)
+            if not self._closed:
+                logger.error(f"Error in event processing loop: {e}")
+                await self._handle_connection_error(e)
         finally:
             logger.debug("QUIC event processing loop finished")
 
@@ -554,6 +607,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
                     # Feed packet to QUIC connection
                     self._quic.receive_datagram(data, addr, now=time.time())
+                    self._signal_activity()
 
                     # Batch process events
                     await self._process_quic_events_batched()
@@ -561,10 +615,12 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     # Send any response packets
                     await self._transmit()
 
-                except trio.ClosedResourceError:
+                except (trio.ClosedResourceError, OSError):
                     logger.debug("Client socket closed")
                     break
                 except Exception as e:
+                    if self._closed or not self._socket:
+                        break
                     logger.error(f"Error receiving client packet: {e}")
                     await trio.sleep(0.01)
 
@@ -593,6 +649,17 @@ class QUICConnection(IRawConnection, IMuxedConn):
             await self._extract_peer_certificate()
 
             if not self._peer_certificate:
+                # Inbound (server-side) connections MUST present a peer
+                # certificate so the remote libp2p identity can be established.
+                # Accepting a connection without one would allow unauthenticated
+                # peers to reach the application callback — the libp2p QUIC
+                # trust boundary requires verified peer identity before promotion.
+                if not self._is_initiator:
+                    raise QUICPeerVerificationError(
+                        "Inbound QUIC connection has no peer certificate: "
+                        "remote peer identity cannot be established. "
+                        "Connection rejected."
+                    )
                 logger.debug("No peer certificate available for verification")
                 return None
 
@@ -614,7 +681,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
             elif self._remote_peer_id != verified_peer_id:
                 raise QUICPeerVerificationError(
                     f"Peer ID mismatch: expected {self._remote_peer_id}, "
-                    "got {verified_peer_id}"
+                    f"got {verified_peer_id}"
                 )
 
             self._peer_verified = True
@@ -674,8 +741,21 @@ class QUICConnection(IRawConnection, IMuxedConn):
             The peer's X.509 certificate, or None if not available
 
         """
-        # If we don't have a certificate yet, try to extract it
-        if not self._peer_certificate and self._handshake_completed:
+        # Fast path: already extracted
+        if self._peer_certificate:
+            return self._peer_certificate
+
+        # If our high-level handshake flag is set, extract now
+        if self._handshake_completed:
+            await self._extract_peer_certificate()
+            return self._peer_certificate
+
+        # For server-side connections promoted before background tasks have
+        # processed the HandshakeCompleted event, the aioquic-level TLS
+        # handshake is already done (quic_conn._handshake_complete is True)
+        # but our _handshake_completed flag hasn't been set yet.  Read the
+        # certificate directly from the TLS context in that case.
+        if self._quic and getattr(self._quic, "_handshake_complete", False):
             await self._extract_peer_certificate()
 
         return self._peer_certificate
@@ -962,11 +1042,8 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 self._event_batch.append(event)
                 events_processed += 1
 
-            # Process batch if we have events or timeout
-            if self._event_batch and (
-                len(self._event_batch) >= self._event_batch_size
-                or current_time - self._last_event_time > 0.01  # 10ms timeout
-            ):
+            # Process batch if we have events
+            if self._event_batch:
                 await self._process_event_batch()
                 self._event_batch.clear()
                 self._last_event_time = current_time
@@ -1361,10 +1438,52 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self._closed = True
         self._closed_event.set()
 
+        # Release resource scope if present (mirrors close())
+        try:
+            scope = getattr(self, "_resource_scope", None)
+            if scope is not None:
+                if hasattr(scope, "close"):
+                    scope.close()
+                elif hasattr(scope, "release"):
+                    scope.release()
+                elif hasattr(scope, "done"):
+                    scope.done()
+        except Exception as e:
+            logger.debug(f"Error releasing resource scope: {e}")
+
         self._stream_accept_event.set()
         logger.debug(f"Woke up pending accept_stream() calls, {id(self)}")
 
+        # Ensure socket is closed immediately on connection termination
+        if self._socket and self._owns_socket:
+            try:
+                self._socket.close()
+            except Exception:
+                pass
+            self._socket = None
+
+        # Cancel background tasks
+        if hasattr(self, "_task_cancel_scopes"):
+            for s in list(self._task_cancel_scopes):
+                try:
+                    s.cancel()
+                except Exception:
+                    pass
+        if hasattr(self, "_cancel_scope") and self._cancel_scope is not None:
+            try:
+                self._cancel_scope.cancel()
+            except Exception:
+                pass
+
         await self._notify_parent_of_termination()
+
+        # Notify swarm/on_close listeners so peer bookkeeping is cleaned up too —
+        # close() does this but this termination path bypassed it entirely.
+        if self.on_close:
+            try:
+                await self.on_close()
+            except Exception as e:
+                logger.debug(f"Error in on_close during termination: {e}")
 
     async def _handle_stream_data(self, event: events.StreamDataReceived) -> None:
         """Handle stream data events - create streams and add to accept queue."""
@@ -1538,9 +1657,22 @@ class QUICConnection(IRawConnection, IMuxedConn):
     async def close(self) -> None:
         """Connection close with proper stream cleanup."""
         if self._closed:
+            if self._socket and self._owns_socket:
+                try:
+                    self._socket.close()
+                except Exception:
+                    pass
+                self._socket = None
             return
 
         self._closed = True
+        self._signal_activity()
+        if hasattr(self, "_task_cancel_scopes"):
+            for s in list(self._task_cancel_scopes):
+                try:
+                    s.cancel()
+                except Exception:
+                    pass
         logger.debug(f"Closing QUIC connection to {self._remote_peer_id}")
 
         try:
@@ -1578,30 +1710,80 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 await self.on_close()
 
             # Close QUIC connection
-            self._quic.close()
+            try:
+                self._quic.close()
+            except Exception:
+                pass
 
+            # Best-effort transmit close frame (bounded with 0.1s timeout)
             if self._socket:
-                await self._transmit()  # Send close frames
+                try:
+                    with trio.move_on_after(0.1):
+                        await self._transmit()
+                except Exception:
+                    pass
 
-            # Close socket
+            # Guaranteed socket close
             if self._socket and self._owns_socket:
-                self._socket.close()
+                try:
+                    self._socket.close()
+                except Exception:
+                    pass
                 self._socket = None
 
             self._streams.clear()
             self._stream_cache.clear()  # Clear cache
             self._closed_event.set()
 
+            # Immediately cancel background tasks (receiver, event loop, maintenance)
+            if hasattr(self, "_task_cancel_scopes"):
+                for s in list(self._task_cancel_scopes):
+                    try:
+                        s.cancel()
+                    except Exception:
+                        pass
+            if hasattr(self, "_cancel_scope") and self._cancel_scope is not None:
+                try:
+                    self._cancel_scope.cancel()
+                except Exception:
+                    pass
+
+            # Always notify parent transport and listener to remove this connection
+            # from their connection tracking dictionaries to prevent memory leaks.
+            try:
+                await self._notify_parent_of_termination()
+            except Exception as e:
+                logger.debug(f"Error notifying parent of connection termination: {e}")
+
+            # Clear internal aioquic event queues and stream maps to free memory
+            # immediately.
+            if self._quic is not None:
+                if hasattr(self._quic, "_events"):
+                    try:
+                        self._quic._events.clear()
+                    except Exception:
+                        pass
+                if hasattr(self._quic, "_streams"):
+                    try:
+                        self._quic._streams.clear()
+                    except Exception:
+                        pass
+
             logger.debug(f"QUIC connection to {self._remote_peer_id} closed")
 
             # Release resource scope if present
             try:
                 scope = getattr(self, "_resource_scope", None)
-                if scope is not None and hasattr(scope, "done"):
-                    scope.done()
+                if scope is not None:
+                    if hasattr(scope, "close"):
+                        scope.close()
+                    elif hasattr(scope, "release"):
+                        scope.release()
+                    elif hasattr(scope, "done"):
+                        scope.done()
                     self._resource_scope = None
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Error releasing resource scope: {e}")
 
         except Exception as e:
             logger.error(f"Error during connection close: {e}")

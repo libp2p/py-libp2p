@@ -178,8 +178,8 @@ class SQLiteDatastoreSync(IBatchingDatastoreSync):
             cursor = self.connection.cursor()
             if prefix:
                 cursor.execute(
-                    "SELECT key, value FROM datastore WHERE key LIKE ?",
-                    (prefix + b"%",),
+                    "SELECT key, value FROM datastore WHERE substr(key, 1, ?) = ?",
+                    (len(prefix), prefix),
                 )
             else:
                 cursor.execute("SELECT key, value FROM datastore")

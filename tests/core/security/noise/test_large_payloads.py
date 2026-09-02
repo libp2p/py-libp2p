@@ -17,6 +17,23 @@ class TestLargePayloads:
     """Test large payload handling in Noise transport."""
 
     @pytest.mark.trio
+    async def test_go_large_payload_roundtrip(self, nursery):
+        """Match go-libp2p's large-payload transport test."""
+        async with noise_conn_factory(nursery) as conns:
+            local_conn, remote_conn = conns
+
+            random.seed(1234)
+            size = 100000
+            test_data = bytes(random.getrandbits(8) for _ in range(size))
+
+            await local_conn.write(test_data)
+
+            received_data = await remote_conn.read(len(test_data))
+
+            assert len(received_data) == len(test_data)
+            assert received_data == test_data
+
+    @pytest.mark.trio
     async def test_large_payload_roundtrip(self, nursery):
         """Test large payload requiring multiple Noise messages."""
         async with noise_conn_factory(nursery) as conns:

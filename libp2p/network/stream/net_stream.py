@@ -5,6 +5,7 @@ from enum import (
 import logging
 from typing import (
     TYPE_CHECKING,
+    Any,
 )
 
 import trio
@@ -122,9 +123,13 @@ class NetStream(INetStream):
 
     muxed_stream: IMuxedStream
     protocol_id: TProtocol | None
+    metric_send_channel: trio.MemorySendChannel[Any] | None = None
 
     def __init__(
-        self, muxed_stream: IMuxedStream, swarm_conn: "SwarmConn | None"
+        self,
+        muxed_stream: IMuxedStream,
+        swarm_conn: "SwarmConn | None",
+        metric_send_channel: trio.MemorySendChannel[Any] | None,
     ) -> None:
         self.muxed_stream = muxed_stream
         self.muxed_conn = muxed_stream.muxed_conn
@@ -140,6 +145,9 @@ class NetStream(INetStream):
 
         # Thread safety for state operations (following AkMo3's approach)
         self._state_lock = trio.Lock()
+
+        # Metrics emit endpoint
+        self.metric_send_channel = metric_send_channel
 
     def get_protocol(self) -> TProtocol | None:
         """
@@ -371,3 +379,38 @@ class NetStream(INetStream):
                 StreamState.RESET,
                 StreamState.CLOSE_BOTH,
             ]
+
+    @property
+    def is_closed(self) -> bool:
+        """
+        True when the stream is in a terminal state or its underlying muxed
+        stream is closed/reset.
+
+        Consumers that cannot rely on ``closed_stream`` notifee events (e.g.
+        resource-leak monitors reconciling streams whose connection died
+        without dispatching per-stream close events) use this to detect
+        streams that are no longer live.
+
+        :return: True if the stream is closed or reset, otherwise False.
+        """
+        if self._state in (
+            StreamState.CLOSE_BOTH,
+            StreamState.RESET,
+            StreamState.ERROR,
+        ):
+            return True
+
+        # Delegate to the underlying muxed stream when it exposes a closed
+        # check (e.g. QUICStream.is_closed()), or fall back to its state.
+        is_closed = getattr(self.muxed_stream, "is_closed", None)
+        if is_closed is not None:
+            try:
+                return bool(is_closed() if callable(is_closed) else is_closed)
+            except Exception:
+                return False
+        state = getattr(self.muxed_stream, "_state", None)
+        if state is not None:
+            name = getattr(state, "name", None) or getattr(state, "value", None)
+            if name in ("CLOSED", "RESET", "closed", "reset"):
+                return True
+        return False
