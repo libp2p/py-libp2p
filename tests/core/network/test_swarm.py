@@ -26,6 +26,9 @@ from libp2p.network.exceptions import (
 from libp2p.network.swarm import (
     Swarm,
 )
+from libp2p.peer.id import (
+    ID,
+)
 from libp2p.tools.anyio_service import (
     background_trio_service,
 )
@@ -613,3 +616,48 @@ async def test_swarm_peer_id_validation(security_protocol):
         # Verify connections are established
         assert correct_peer_id in swarms[0].connections
         assert swarms[0].get_peer_id() in swarms[1].connections
+
+
+@pytest.mark.trio
+async def test_swarm_skips_unsupported_multiaddrs():
+    """
+    Regression for #391: peerstore UDP/QUIC-only addresses must not dial via
+    TCP. TransportManager filters them and dial_peer raises SwarmException.
+    """
+    swarm = new_swarm()
+    peer_id = ID.from_pubkey(generate_new_ed25519_identity().public_key)
+    unsupported = [
+        Multiaddr("/ip4/127.0.0.1/udp/9090"),
+        Multiaddr("/ip4/127.0.0.1/udp/9090/quic"),
+    ]
+    swarm.peerstore.add_addrs(peer_id, unsupported, ttl=3600)
+
+    with pytest.raises(SwarmException, match="No supported transport"):
+        await swarm.dial_peer(peer_id)
+
+
+@pytest.mark.trio
+async def test_swarm_filters_unsupported_and_dials_tcp():
+    """
+    Mixed peerstore: unsupported addrs are skipped; a reachable TCP addr is used.
+    """
+    async with SwarmFactory.create_batch_and_listen(2) as swarms:
+        dialer, listener = swarms[0], swarms[1]
+        peer_id = listener.get_peer_id()
+        tcp_addrs = tuple(
+            addr
+            for transport in listener.listeners.values()
+            for addr in transport.get_addrs()
+        )
+        assert tcp_addrs
+
+        mixed = [
+            Multiaddr("/ip4/127.0.0.1/udp/9090"),
+            Multiaddr("/ip4/127.0.0.1/udp/9090/quic-v1"),
+            *tcp_addrs,
+        ]
+        dialer.peerstore.add_addrs(peer_id, mixed, ttl=3600)
+
+        connections = await dialer.dial_peer(peer_id)
+        assert len(connections) > 0
+        assert peer_id in dialer.connections
