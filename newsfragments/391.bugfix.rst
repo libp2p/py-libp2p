@@ -1,0 +1,3 @@
+TCP dial now raises ``OpenConnectionError`` instead of leaking
+``ProtocolLookupError`` when a multiaddr has no TCP component, matching
+listen() and closing the defence-in-depth gap left after #1357 / #391.
