@@ -1,0 +1,1 @@
+Add opt-in peer identity persistence utilities to enable stable peer IDs across node restarts. New functions ``save_identity()``, ``load_identity()``, and ``create_identity_from_seed()`` allow users to explicitly persist and reuse cryptographic identities without changing default behavior.
