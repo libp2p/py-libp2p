@@ -196,7 +196,7 @@ async def test_excessive_ihave_iwant_spam_penalized():
 
         # Add a large number of fake message IDs to simulate spam
         for i in range(20):  # Reasonable number for testing
-            ihave.messageIDs.append(f"fake_message_id_{i}")
+            ihave.messageIDs.append(f"fake_message_id_{i}".encode())
 
         # Create a control message with the IHAVE
         control = rpc_pb2.ControlMessage()
