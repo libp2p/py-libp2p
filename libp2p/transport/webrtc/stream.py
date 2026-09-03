@@ -332,6 +332,8 @@ class WebRTCStream(IMuxedStream):
         )
 
     def _reset_locally(self) -> None:
+        if self._state == StreamState.RESET:
+            return
         self._state = StreamState.RESET
         self._enqueue_eof_sentinel_locked()
 
@@ -352,6 +354,10 @@ class WebRTCStream(IMuxedStream):
         MUST be called from a Trio task — see :meth:`on_data`.
         """
         for payload, flag in items:
+            if self._state == StreamState.RESET:
+                # Nothing after a RESET is meaningful; do not deliver a
+                # crafted batch's trailing data to a reset stream.
+                break
             # Enqueue payload BEFORE processing flags — the spec allows a
             # message to carry both data and FIN, and the data must be
             # delivered to the reader before the read channel is closed.
@@ -531,6 +537,10 @@ def _decode_frames(buf: bytearray) -> Iterator[Message]:
     while buf:
         head = buf[:_MAX_PREFIX]
         length, consumed = decode_varint_with_size(bytes(head))
+        if consumed == 0:
+            # Contract violation from the decoder on non-empty input; treat
+            # as malformed rather than index head[-1] below.
+            raise ValueError("empty varint length prefix")
         if head[consumed - 1] & 0x80:
             # Varint not terminated; a prefix this long can't encode a legal size.
             if len(head) == _MAX_PREFIX:

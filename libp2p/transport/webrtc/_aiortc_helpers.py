@@ -355,8 +355,17 @@ def wire_pc_to_connection(
         role = "auto"
         if sctp is not None:
             dtls = sctp.transport
-            assert hasattr(dtls, "_role"), "RTCDtlsTransport has no attribute '_role'"
-            role = dtls._role
+            if hasattr(dtls, "_role"):
+                role = dtls._role
+            else:
+                # Not an assert: this runs on every open_stream(), and an
+                # aiortc upgrade that renames the slot should degrade to
+                # aiortc's default parity with a warning, not crash.
+                logger.warning(
+                    "channel %d: RTCDtlsTransport has no '_role' (aiortc API "
+                    "changed?); using aiortc's default stream-id parity",
+                    channel_id,
+                )
         if role in ("client", "server"):
             set_private_attr(sctp, "_data_channel_id", 0 if role == "client" else 1)
         else:
