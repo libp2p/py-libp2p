@@ -120,9 +120,10 @@ Probe behavior (issue #1453)
     Record successful ping RTT into peerstore LatencyEWMA (seconds).
 
 ``abort_connection_on_ping_failure`` (``bool``, default ``False``)
-    When ``True``, close the probed connection immediately after a failed ping.
-    Replacement rules still apply on later ticks; Protect applies to replace,
-    not to this local abort.
+    When ``True``, close the probed connection immediately after a failed ping
+    via the connection's normal Swarm teardown (``SwarmConn.close`` /
+    ``remove_conn``, including notifees and rcmgr). Replacement rules still
+    apply on later ticks; Protect applies to replace, not to this local abort.
 
 Host and Swarm API
 ------------------

@@ -30,7 +30,7 @@ async def test_ping_connection_real_hosts() -> None:
 
 @pytest.mark.trio
 async def test_ping_connection_records_peerstore_latency() -> None:
-    """Successful ping updates peerstore LatencyEWMA when enabled."""
+    """Monitor records successful ping RTT into peerstore LatencyEWMA."""
     config = ConnectionConfig(
         enable_health_monitoring=True,
         health_warmup_window=0.0,
@@ -42,10 +42,10 @@ async def test_ping_connection_records_peerstore_latency() -> None:
         conn = cast(SwarmConn, swarm.get_connections(peer_b)[0])
 
         swarm.initialize_connection_health(peer_b, conn)
-        result = await ping_connection(conn, ping_timeout=5.0, negotiate_timeout=10)
-        assert result.success is True
+        monitor = swarm._health_monitor
+        assert monitor is not None
 
-        if result.protocol_supported:
-            swarm.peerstore.record_latency(peer_b, max(result.rtt_ms / 1000.0, 0.001))
-            latency = swarm.peerstore.latency_EWMA(peer_b)
-            assert latency > 0
+        await monitor._check_connection_health(peer_b, conn)
+
+        latency = swarm.peerstore.latency_EWMA(peer_b)
+        assert latency > 0

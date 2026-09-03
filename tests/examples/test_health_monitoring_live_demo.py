@@ -47,6 +47,32 @@ def test_health_view_imports() -> None:
     assert callable(web_gui.run_health_web)
 
 
+def test_web_gui_html_escapes_peer_id() -> None:
+    from examples.health_monitoring.web_gui import _html_page
+
+    html = _html_page(
+        [
+            {
+                "peer_id": "<script>alert(1)</script>",
+                "connections": 1,
+                "score": 0.9,
+                "latency_ms": 1.5,
+                "success_rate": 1.0,
+                "protected": False,
+                "unhealthy": 0,
+            }
+        ],
+        {
+            "total_peers": 1,
+            "total_connections": 1,
+            "average_peer_health": 0.9,
+        },
+    ).decode("utf-8")
+
+    assert "<script>" not in html
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+
+
 @pytest.mark.trio
 async def test_live_health_demo_connects_and_reports() -> None:
     result = await run_live_demo(

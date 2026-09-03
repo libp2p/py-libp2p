@@ -3,7 +3,6 @@
 from typing import Any, cast
 
 import pytest
-from multiaddr import Multiaddr
 import trio
 
 from libp2p.host.basic_host import BasicHost
@@ -25,6 +24,11 @@ def _is_loopback_only() -> bool:
     return all("/ip4/127." in str(addr) or "/ip6/::1" in str(addr) for addr in addrs)
 
 
+def _assert_non_loopback(addr: object) -> None:
+    addr_str = str(addr)
+    assert "/ip4/127." not in addr_str and "/ip6/::1" not in addr_str, addr_str
+
+
 def _health_config() -> ConnectionConfig:
     return ConnectionConfig(
         enable_health_monitoring=True,
@@ -40,13 +44,18 @@ def _health_config() -> ConnectionConfig:
 
 @pytest.mark.trio
 async def test_health_monitor_updates_rtt_on_real_network() -> None:
-    """Health monitor records ping RTT over a non-loopback path when available."""
+    """
+    Health monitor records ping RTT when both hosts bind non-loopback TCP.
+
+    Skipped on loopback-only machines (typical restricted CI images).
+    """
     if _is_loopback_only():
         pytest.skip("No non-loopback interfaces available for real-network test")
 
-    bind_addr = get_optimal_binding_address(0, "tcp")
-    bind_str = str(bind_addr)
-    assert "/ip4/127." not in bind_str and "/ip6/::1" not in bind_str
+    bind_a = get_optimal_binding_address(0, "tcp")
+    bind_b = get_optimal_binding_address(0, "tcp")
+    _assert_non_loopback(bind_a)
+    _assert_non_loopback(bind_b)
 
     config = _health_config()
     swarm_factory = cast(Any, SwarmFactory)
@@ -57,8 +66,8 @@ async def test_health_monitor_updates_rtt_on_real_network() -> None:
 
     async with background_trio_service(swarm_a):
         async with background_trio_service(swarm_b):
-            await swarm_a.listen(bind_addr)
-            await swarm_b.listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
+            await swarm_a.listen(bind_a)
+            await swarm_b.listen(bind_b)
             await connect(host_a, host_b)
 
             peer_a = host_a.get_id()
@@ -76,12 +85,20 @@ async def test_health_monitor_updates_rtt_on_real_network() -> None:
 
 @pytest.mark.trio
 async def test_health_monitor_detects_failed_ping_on_real_network() -> None:
-    """A closed connection yields failed ping metrics on the next probe."""
+    """
+    A closed connection yields failed ping metrics on the next probe.
+
+    Both peers bind non-loopback TCP; skipped when only loopback is available.
+    """
     if _is_loopback_only():
         pytest.skip("No non-loopback interfaces available for real-network test")
 
     config = _health_config()
-    bind_addr = get_optimal_binding_address(0, "tcp")
+    bind_a = get_optimal_binding_address(0, "tcp")
+    bind_b = get_optimal_binding_address(0, "tcp")
+    _assert_non_loopback(bind_a)
+    _assert_non_loopback(bind_b)
+
     swarm_factory = cast(Any, SwarmFactory)
     swarm_a = swarm_factory(connection_config=config)
     swarm_b = swarm_factory(connection_config=config)
@@ -90,8 +107,8 @@ async def test_health_monitor_detects_failed_ping_on_real_network() -> None:
 
     async with background_trio_service(swarm_a):
         async with background_trio_service(swarm_b):
-            await swarm_a.listen(bind_addr)
-            await swarm_b.listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
+            await swarm_a.listen(bind_a)
+            await swarm_b.listen(bind_b)
             await connect(host_a, host_b)
 
             peer_a = host_a.get_id()

@@ -206,12 +206,8 @@ class ConnectionHealthMonitor(Service):
                 logger.info(
                     "Aborting connection to %s after failed ping probe", peer_id
                 )
-                self.swarm.cleanup_connection_health(peer_id, conn)
-                if (
-                    peer_id in self.swarm.connections
-                    and conn in self.swarm.connections[peer_id]
-                ):
-                    self.swarm.connections[peer_id].remove(conn)
+                # SwarmConn.close() -> swarm.remove_conn() handles health cleanup,
+                # connection list removal, and rcmgr lifecycle notification.
                 try:
                     await conn.close()
                 except Exception as error:
@@ -306,13 +302,13 @@ class ConnectionHealthMonitor(Service):
         """
         Replace an unhealthy connection with a new one.
 
-        Dial a replacement first (go-libp2p does not auto-replace; this is a
-        Python-local QoS policy). Only drop the old connection after a new one
-        succeeds, so we never go below ``min_connections_per_peer`` on failure.
+        Dial a replacement first (Python-local QoS; not a wire-protocol
+        requirement). Only drop the old connection after a new one succeeds,
+        so we never go below ``min_connections_per_peer`` on failure.
         Protected peers (ConnMgr Protect / tag_store) are never auto-replaced.
         """
         try:
-            # Respect go-libp2p Protect semantics via TagStore
+            # Skip ConnMgr-protected peers (tag_store Protect)
             tag_store = getattr(self.swarm, "tag_store", None)
             if tag_store is not None and tag_store.is_protected(peer_id):
                 logger.info(
@@ -396,14 +392,7 @@ class ConnectionHealthMonitor(Service):
                     peer_id,
                 )
 
-            # Now safe to drop the old connection
-            self.swarm.cleanup_connection_health(peer_id, old_conn)
-            if (
-                peer_id in self.swarm.connections
-                and old_conn in self.swarm.connections[peer_id]
-            ):
-                self.swarm.connections[peer_id].remove(old_conn)
-
+            # Drop via SwarmConn.close() so remove_conn cleans health + rcmgr.
             try:
                 await old_conn.close()
             except Exception as e:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from typing import Any
@@ -21,16 +22,19 @@ from .health_view import (
 def _html_page(rows: list[dict[str, Any]], summary: dict[str, Any]) -> bytes:
     body_rows = "".join(
         "<tr>"
-        f"<td>{row['peer_id']}</td>"
-        f"<td>{row['connections']}</td>"
-        f"<td>{row['score']}</td>"
-        f"<td>{row['latency_ms']}</td>"
-        f"<td>{row['success_rate']}</td>"
-        f"<td>{'yes' if row['protected'] else 'no'}</td>"
-        f"<td>{row['unhealthy']}</td>"
+        f"<td>{escape(str(row['peer_id']))}</td>"
+        f"<td>{escape(str(row['connections']))}</td>"
+        f"<td>{escape(str(row['score']))}</td>"
+        f"<td>{escape(str(row['latency_ms']))}</td>"
+        f"<td>{escape(str(row['success_rate']))}</td>"
+        f"<td>{escape('yes' if row['protected'] else 'no')}</td>"
+        f"<td>{escape(str(row['unhealthy']))}</td>"
         "</tr>"
         for row in rows
     )
+    total_peers = escape(str(summary.get("total_peers", 0)))
+    total_conns = escape(str(summary.get("total_connections", 0)))
+    avg_health = escape(f"{float(summary.get('average_peer_health', 0.0)):.3f}")
     html = f"""<!DOCTYPE html>
 <html><head>
 <meta charset="utf-8"/>
@@ -44,9 +48,9 @@ th {{ background: #f0f0f0; }}
 </style>
 </head><body>
 <h1>Connection health</h1>
-<p>Peers: {summary.get("total_peers", 0)} |
-Connections: {summary.get("total_connections", 0)} |
-Avg health: {summary.get("average_peer_health", 0.0):.3f}</p>
+<p>Peers: {total_peers} |
+Connections: {total_conns} |
+Avg health: {avg_health}</p>
 <p><a href="/api/summary">JSON summary</a> |
 <a href="/api/metrics">JSON metrics</a> |
 <a href="/api/metrics?format=prometheus">Prometheus</a></p>

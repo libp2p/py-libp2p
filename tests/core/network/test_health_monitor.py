@@ -45,10 +45,14 @@ class MockConnection(INetConn):
         self.event_started = trio.Event()
         self.new_stream_called = False
         self.close_called = False
+        self.swarm: Any = None
 
     async def close(self) -> None:
         self._is_closed = True
         self.close_called = True
+        # Mirror SwarmConn.close() -> swarm.remove_conn(self)
+        if self.swarm is not None:
+            self.swarm.remove_conn(self)
 
     @property
     def is_closed(self) -> bool:
@@ -119,11 +123,28 @@ class MockSwarm:
             if not self.health_data[peer_id]:
                 del self.health_data[peer_id]
 
+    def remove_conn(self, swarm_conn: INetConn) -> None:
+        """Mirror Swarm.remove_conn: clean health, then drop from the list."""
+        peer_id = getattr(swarm_conn, "peer_id", None)
+        if peer_id is None:
+            muxed = getattr(swarm_conn, "muxed_conn", None)
+            peer_id = getattr(muxed, "peer_id", None)
+        if peer_id is None:
+            return
+        self.cleanup_connection_health(peer_id, swarm_conn)
+        if peer_id in self.connections:
+            self.connections[peer_id] = [
+                conn for conn in self.connections[peer_id] if conn != swarm_conn
+            ]
+            if not self.connections[peer_id]:
+                del self.connections[peer_id]
+
     async def dial_peer_replacement(self, peer_id: ID) -> INetConn | None:
         """Mock replacement connection dialing."""
         self.dial_peer_replacement_called += 1
         # Return a new mock connection
         new_conn = MockConnection(peer_id)
+        new_conn.swarm = self
         if peer_id not in self.connections:
             self.connections[peer_id] = []
         self.connections[peer_id].append(new_conn)
@@ -584,6 +605,8 @@ async def test_replace_unhealthy_connection() -> None:
     peer_id = ID(b"peer1")
     old_conn = MockConnection(peer_id)
     healthy_conn = MockConnection(peer_id)  # Keep a healthy connection
+    old_conn.swarm = swarm
+    healthy_conn.swarm = swarm
 
     # Add two connections to swarm (so we can replace one)
     swarm.connections[peer_id] = [old_conn, healthy_conn]
@@ -826,6 +849,7 @@ async def test_abort_connection_on_ping_failure(
     swarm = MockSwarm(config)
     peer_id = ID(b"peer1")
     conn = MockConnection(peer_id)
+    conn.swarm = swarm
     swarm.connections[peer_id] = [conn]
     swarm.initialize_connection_health(peer_id, conn)
 
@@ -833,7 +857,7 @@ async def test_abort_connection_on_ping_failure(
     await monitor._check_connection_health(peer_id, conn)
 
     assert conn.close_called
-    assert conn not in swarm.connections[peer_id]
+    assert conn not in swarm.connections.get(peer_id, [])
     assert swarm.cleanup_connection_health_called == 1
 
 
