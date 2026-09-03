@@ -13,7 +13,7 @@ import anyio
 from anyio import TaskInfo
 
 if TYPE_CHECKING:
-    from anyio.abc import CancelScope, Event
+    from anyio import CancelScope, Event
 
 from .exceptions import DaemonTaskExit, LifecycleError, TooManyChildrenException
 

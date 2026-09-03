@@ -794,10 +794,10 @@ async def test_handle_ihave(monkeypatch):
         mock_emit_iwant = AsyncMock()
         monkeypatch.setattr(gossipsubs[index_alice], "emit_iwant", mock_emit_iwant)
 
-        # Create a test message ID as hex-encoded bytes (from_id + seqno)
+        # Create a test message ID as opaque bytes (from_id + seqno)
         test_seqno = b"1234"
         test_from = id_bob.to_bytes()
-        test_msg_id = (test_from + test_seqno).hex()
+        test_msg_id = test_from + test_seqno
         ihave_msg = rpc_pb2.ControlIHave(messageIDs=[test_msg_id])
 
         # Mock seen_messages.cache to avoid false positives
@@ -818,6 +818,21 @@ def test_safe_bytes_from_hex_accepts_bytes_message_ids():
     assert safe_bytes_from_hex("616263") == b"abc"
     assert safe_bytes_from_hex(b"616263") == b"abc"
     assert safe_bytes_from_hex(b"\x01\x02") == b"\x01\x02"
+    assert safe_bytes_from_hex(b"\x95\xff") == b"\x95\xff"
+
+
+def test_control_ihave_iwant_accept_non_utf8_message_ids():
+    """IHAVE/IWANT messageIDs are opaque bytes (non-UTF-8 must round-trip)."""
+    opaque = b"\x95\xff\x00\xde\xad"
+    ihave = rpc_pb2.ControlIHave(topicID="t", messageIDs=[opaque])
+    ihave2 = rpc_pb2.ControlIHave()
+    ihave2.ParseFromString(ihave.SerializeToString())
+    assert list(ihave2.messageIDs) == [opaque]
+
+    iwant = rpc_pb2.ControlIWant(messageIDs=[opaque])
+    iwant2 = rpc_pb2.ControlIWant()
+    iwant2.ParseFromString(iwant.SerializeToString())
+    assert list(iwant2.messageIDs) == [opaque]
 
 
 @pytest.mark.trio
@@ -849,8 +864,8 @@ async def test_handle_iwant(monkeypatch):
         test_seqno = b"1234"
         test_from = id_alice.to_bytes()
 
-        # Use hex-encoded bytes (from_id + seqno) as message ID
-        test_msg_id = (test_from + test_seqno).hex()
+        # Use opaque bytes (from_id + seqno) as message ID
+        test_msg_id = test_from + test_seqno
 
         mock_mcache_get = MagicMock(return_value=test_message)
         monkeypatch.setattr(gossipsubs[index_bob].mcache, "get", mock_mcache_get)
@@ -878,16 +893,18 @@ async def test_handle_iwant(monkeypatch):
 
 
 def test_safe_bytes_from_hex_rejects_invalid_hex_text():
-    """safe_bytes_from_hex should return None for malformed hex strings."""
+    """safe_bytes_from_hex should return None for malformed hex text."""
     assert safe_bytes_from_hex("not_a_valid_msg_id") is None
     assert safe_bytes_from_hex("('abc', 123)") is None
+    # Odd-length all-hex ASCII bytes are treated as malformed hex text
+    assert safe_bytes_from_hex(b"abc") is None
 
 
 @pytest.mark.trio
 async def test_handle_iwant_invalid_msg_id(monkeypatch):
     """
-    Test that handle_iwant silently skips malformed (non-hex) message IDs
-    instead of raising ValueError, so a misbehaving peer cannot crash the handler.
+    Test that handle_iwant silently skips malformed (invalid hex-text) message IDs
+    instead of raising, so a misbehaving peer cannot crash the handler.
     mcache.get must not be called for invalid IDs (proving they were skipped).
     """
     async with PubsubFactory.create_batch_with_gossipsub(2) as pubsubs_gsub:
@@ -915,8 +932,8 @@ async def test_handle_iwant_invalid_msg_id(monkeypatch):
         mock_mcache_get = MagicMock()
         monkeypatch.setattr(gossipsubs[index_bob].mcache, "get", mock_mcache_get)
 
-        # Malformed message ID (not valid hex) — should be skipped without raising
-        malformed_msg_id = "not_a_valid_msg_id"
+        # Odd-length hex ASCII on the wire — should be skipped without raising
+        malformed_msg_id = b"abc"
         iwant_msg = rpc_pb2.ControlIWant(messageIDs=[malformed_msg_id])
 
         mock_mcache_get.reset_mock()
@@ -924,9 +941,9 @@ async def test_handle_iwant_invalid_msg_id(monkeypatch):
         mock_mcache_get.assert_not_called()
         mock_send_rpc.assert_not_called()
 
-        # Another malformed ID — also silently skipped
-        invalid_tuple_msg_id = "('abc', 123)"
-        iwant_msg = rpc_pb2.ControlIWant(messageIDs=[invalid_tuple_msg_id])
+        # Another malformed odd-length hex payload — also silently skipped
+        invalid_hex_msg_id = b"abcdef123"
+        iwant_msg = rpc_pb2.ControlIWant(messageIDs=[invalid_hex_msg_id])
 
         mock_mcache_get.reset_mock()
         await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
@@ -961,7 +978,7 @@ async def test_handle_iwant_mixed_valid_and_invalid_msg_ids(monkeypatch):
         test_message = rpc_pb2.Message(data=b"test_data")
         test_seqno = b"1234"
         test_from = id_alice.to_bytes()
-        valid_msg_id = (test_from + test_seqno).hex()
+        valid_msg_id = test_from + test_seqno
         valid_mid = test_from + test_seqno
 
         def lookup_message(mid: bytes) -> rpc_pb2.Message | None:
@@ -976,7 +993,7 @@ async def test_handle_iwant_mixed_valid_and_invalid_msg_ids(monkeypatch):
         monkeypatch.setattr(gossipsubs[index_bob], "send_rpc", mock_send_rpc)
 
         iwant_msg = rpc_pb2.ControlIWant(
-            messageIDs=["not_a_valid_msg_id", valid_msg_id]
+            messageIDs=[b"abcdef123", valid_msg_id]  # odd-length hex + valid
         )
         await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
 
