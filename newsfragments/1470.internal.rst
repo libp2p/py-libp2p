@@ -1,0 +1,4 @@
+Added go-libp2p WebRTC-Direct interop tests: a pinned go-libp2p v0.49 harness
+built on demand (skipped when the Go toolchain is absent) drives our transport
+in both directions and both protocol versions. py -> go is exercised for v1
+and v2; go -> py is xfail pending the inbound stall in #1470.
