@@ -29,6 +29,48 @@ def test_parser_defaults() -> None:
     args = build_parser().parse_args([])
     assert args.peers == 25
     assert args.scenario == "all"
+    assert args.gui == "none"
+    assert args.gui_port == 8765
+
+
+def test_parser_gui_options() -> None:
+    args = build_parser().parse_args(["--gui", "web", "--gui-port", "9000"])
+    assert args.gui == "web"
+    assert args.gui_port == 9000
+
+
+def test_health_view_imports() -> None:
+    from examples.health_monitoring import health_view, tui, web_gui
+
+    assert callable(health_view.build_peer_table)
+    assert callable(tui.run_health_tui)
+    assert callable(web_gui.run_health_web)
+
+
+def test_web_gui_html_escapes_peer_id() -> None:
+    from examples.health_monitoring.web_gui import _html_page
+
+    html = _html_page(
+        [
+            {
+                "peer_id": "<script>alert(1)</script>",
+                "connections": 1,
+                "score": 0.9,
+                "latency_ms": 1.5,
+                "success_rate": 1.0,
+                "protected": False,
+                "unhealthy": 0,
+            }
+        ],
+        {
+            "total_peers": 1,
+            "total_connections": 1,
+            "average_peer_health": 0.9,
+        },
+    ).decode("utf-8")
+
+    assert "<script>" not in html
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
 
 
 @pytest.mark.trio
