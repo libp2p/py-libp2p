@@ -16,7 +16,7 @@ from anyio import TaskInfo
 from anyio.abc import TaskGroup
 
 if TYPE_CHECKING:
-    from anyio.abc import Event, Lock
+    from anyio import Event, Lock
 
 from .api import InternalManagerAPI
 from .exceptions import DaemonTaskExit, LifecycleError

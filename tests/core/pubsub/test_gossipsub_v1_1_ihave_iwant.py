@@ -37,9 +37,8 @@ async def test_ihave_triggers_iwant_for_missing_messages():
         await pubsubs[1].subscribe(topic)
         await trio.sleep(1.0)  # Allow time for mesh formation
 
-        # Create a message ID that gsub0 doesn't have
-        # Message IDs in GossipSub are hex-encoded bytes (from_id + seqno)
-        missing_msg_id = (b"peer456" + b"seqno123").hex()
+        # Create a message ID that gsub0 doesn't have (opaque bytes)
+        missing_msg_id = b"peer456" + b"seqno123"
 
         # Mock emit_iwant to capture IWANT requests
         emit_iwant_mock = AsyncMock()
@@ -80,11 +79,9 @@ async def test_iwant_retrieves_missing_messages():
         await trio.sleep(1.0)  # Allow time for mesh formation
 
         # Create a message that gsub1 has but gsub0 doesn't
-        # Message IDs in GossipSub are hex-encoded bytes (from_id + seqno)
         seqno = b"seqno123"
         from_id = b"peer456"
         msg_id_bytes = from_id + seqno
-        msg_id_str = msg_id_bytes.hex()
 
         msg_data = b"test message data"
 
@@ -104,7 +101,7 @@ async def test_iwant_retrieves_missing_messages():
         gsub1.send_rpc = send_rpc_mock
 
         # Create IWANT control message
-        iwant_msg = rpc_pb2.ControlIWant(messageIDs=[msg_id_str])
+        iwant_msg = rpc_pb2.ControlIWant(messageIDs=[msg_id_bytes])
 
         # Simulate gsub0 sending IWANT to gsub1
         await gsub1.handle_iwant(iwant_msg, host0.get_id())
@@ -145,9 +142,7 @@ async def test_ihave_rate_limiting():
         await trio.sleep(1.0)  # Allow time for mesh formation
 
         # Create multiple message IDs
-        msg_ids = [
-            (f"peer_{i}".encode() + f"seqno_{i}".encode()).hex() for i in range(100)
-        ]
+        msg_ids = [f"peer_{i}".encode() + f"seqno_{i}".encode() for i in range(100)]
 
         # Create IHAVE control message with many message IDs
         ihave_msg = rpc_pb2.ControlIHave(messageIDs=msg_ids, topicID=topic)
@@ -195,7 +190,6 @@ async def test_no_infinite_gossip_loops():
         seqno = b"seqno123"
         from_id = host1.get_id().to_bytes()
         msg_id_bytes = from_id + seqno
-        msg_id_str = msg_id_bytes.hex()
 
         # Create a mock for pubsub
         mock_pubsub = MagicMock()
@@ -212,7 +206,7 @@ async def test_no_infinite_gossip_loops():
         gsub0.emit_iwant = emit_iwant_mock
 
         # Create IHAVE message for the same message from host2
-        ihave_msg = rpc_pb2.ControlIHave(messageIDs=[msg_id_str], topicID=topic)
+        ihave_msg = rpc_pb2.ControlIHave(messageIDs=[msg_id_bytes], topicID=topic)
 
         # Simulate receiving IHAVE from host2 for a message already seen from host1
         await gsub0.handle_ihave(ihave_msg, host2.get_id())
@@ -246,14 +240,13 @@ async def test_dropping_gossip_triggers_iwant():
         seqno = b"seqno123"
         from_id = host2.get_id().to_bytes()
         msg_id_bytes = from_id + seqno
-        msg_id_str = msg_id_bytes.hex()
 
         # Mock emit_iwant to capture IWANT requests
         emit_iwant_mock = AsyncMock()
         gsub0.emit_iwant = emit_iwant_mock
 
         # Create IHAVE control message from host2 (not directly connected)
-        ihave_msg = rpc_pb2.ControlIHave(messageIDs=[msg_id_str], topicID=topic)
+        ihave_msg = rpc_pb2.ControlIHave(messageIDs=[msg_id_bytes], topicID=topic)
 
         # Simulate host1 forwarding IHAVE from host2 to host0
         await gsub0.handle_ihave(ihave_msg, host1.get_id())

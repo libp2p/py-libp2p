@@ -488,7 +488,7 @@ class TestGossipSubSignedPeerRecords:
                 gsub0.send_rpc = mock_send_rpc
 
                 # Test emit_iwant
-                msg_ids = ["msg1", "msg2"]
+                msg_ids = [b"msg1", b"msg2"]
                 await gsub0.emit_iwant(msg_ids, host1.get_id())
 
                 # Verify that send_rpc was called
