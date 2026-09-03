@@ -261,7 +261,14 @@ class TCP(ITransport):
     async def _dial_resolved(self, maddr: Multiaddr) -> IRawConnection:
         """Dial using a multiaddr that has an IP (no DNS)."""
         host_str = extract_ip_from_multiaddr(maddr)
-        port_str = maddr.value_for_protocol("tcp")
+        try:
+            port_str = maddr.value_for_protocol("tcp")
+        except ProtocolLookupError as error:
+            # Defence in depth: Swarm/TransportManager should filter these via
+            # can_dial(), but match listen()'s handling if a bad addr slips through.
+            raise OpenConnectionError(
+                f"Failed to dial {maddr}: no TCP component in multiaddr."
+            ) from error
 
         if host_str is None:
             raise OpenConnectionError(
