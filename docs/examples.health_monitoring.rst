@@ -1,6 +1,10 @@
 examples.health\_monitoring package
 ===================================
 
+Example scripts for the opt-in connection health monitor (live demo, config
+walkthrough, QUIC sample). User guide: :doc:`connection_health_monitoring`.
+Runnable example snippets: :doc:`examples.connection_health_monitoring`.
+
 Submodules
 ----------
 

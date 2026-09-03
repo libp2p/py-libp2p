@@ -51,6 +51,7 @@ from libp2p.host.routed_host import (
 from libp2p.io.abc import (
     ReadWriteCloser,
 )
+from libp2p.network.config import ConnectionConfig
 from libp2p.network.connection.raw_connection import (
     RawConnection,
 )
@@ -464,6 +465,7 @@ class SwarmFactory(factory.Factory):
         )
     )
     transports = factory.LazyFunction(lambda: [TCP()])
+    connection_config = factory.LazyFunction(ConnectionConfig)
 
     @classmethod
     @asynccontextmanager
@@ -472,6 +474,7 @@ class SwarmFactory(factory.Factory):
         key_pair: KeyPair | None = None,
         security_protocol: TProtocol | None = None,
         muxer_opt: TMuxerOptions | None = None,
+        connection_config: ConnectionConfig | None = None,
     ) -> AsyncIterator[Swarm]:
         # `factory.Factory.__init__` does *not* prepare a *default value* if we pass
         # an argument explicitly with `None`. If an argument is `None`, we don't pass it
@@ -483,6 +486,8 @@ class SwarmFactory(factory.Factory):
             optional_kwargs["security_protocol"] = security_protocol
         if muxer_opt is not None:
             optional_kwargs["muxer_opt"] = muxer_opt
+        if connection_config is not None:
+            optional_kwargs["connection_config"] = connection_config
         swarm = cls(**optional_kwargs)
         async with background_trio_service(swarm):
             await swarm.listen(LISTEN_MADDR)
@@ -495,12 +500,15 @@ class SwarmFactory(factory.Factory):
         number: int,
         security_protocol: TProtocol | None = None,
         muxer_opt: TMuxerOptions | None = None,
+        connection_config: ConnectionConfig | None = None,
     ) -> AsyncIterator[tuple[Swarm, ...]]:
         async with AsyncExitStack() as stack:
             ctx_mgrs = [
                 await stack.enter_async_context(
                     cls.create_and_listen(
-                        security_protocol=security_protocol, muxer_opt=muxer_opt
+                        security_protocol=security_protocol,
+                        muxer_opt=muxer_opt,
+                        connection_config=connection_config,
                     )
                 )
                 for _ in range(number)
@@ -530,9 +538,13 @@ class HostFactory(factory.Factory):
         number: int,
         security_protocol: TProtocol | None = None,
         muxer_opt: TMuxerOptions | None = None,
+        connection_config: ConnectionConfig | None = None,
     ) -> AsyncIterator[tuple[BasicHost, ...]]:
         async with SwarmFactory.create_batch_and_listen(
-            number, security_protocol=security_protocol, muxer_opt=muxer_opt
+            number,
+            security_protocol=security_protocol,
+            muxer_opt=muxer_opt,
+            connection_config=connection_config,
         ) as swarms:
             hosts = tuple(BasicHost(swarm) for swarm in swarms)
             yield hosts
@@ -867,9 +879,13 @@ async def swarm_pair_factory(
 async def host_pair_factory(
     security_protocol: TProtocol | None = None,
     muxer_opt: TMuxerOptions | None = None,
+    connection_config: ConnectionConfig | None = None,
 ) -> AsyncIterator[tuple[BasicHost, BasicHost]]:
     async with HostFactory.create_batch_and_listen(
-        2, security_protocol=security_protocol, muxer_opt=muxer_opt
+        2,
+        security_protocol=security_protocol,
+        muxer_opt=muxer_opt,
+        connection_config=connection_config,
     ) as hosts:
         await connect(hosts[0], hosts[1])
         yield hosts[0], hosts[1]
