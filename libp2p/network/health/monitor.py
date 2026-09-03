@@ -16,6 +16,7 @@ from libp2p.peer.id import ID
 from libp2p.tools.anyio_service import Service
 
 from .data_structures import HealthMonitorStatus
+from .ping_probe import ConnectionPingResult, ping_connection
 
 if TYPE_CHECKING:
     from libp2p.network.swarm import Swarm
@@ -159,22 +160,38 @@ class ConnectionHealthMonitor(Service):
                 self.swarm.initialize_connection_health(peer_id, conn)
                 return
 
-            # Measure ping latency
-            start_time = trio.current_time()
-            ping_success = await self._ping_connection(conn)
-            latency_ms = (trio.current_time() - start_time) * 1000
+            ping_result = await self._ping_connection(conn)
+
+            if ping_result.skipped:
+                return
+
+            latency_ms = ping_result.rtt_ms
+            ping_success = ping_result.success
 
             # Update health metrics
             health = self.swarm.health_data[peer_id][conn]
             health.update_ping_metrics(latency_ms, ping_success)
             health.update_stream_metrics(len(conn.get_streams()))
 
+            if (
+                ping_success
+                and ping_result.protocol_supported
+                and getattr(self.config, "record_ping_latency_in_peerstore", True)
+            ):
+                try:
+                    self.swarm.peerstore.record_latency(peer_id, latency_ms / 1000.0)
+                except Exception as error:
+                    logger.debug(
+                        "Failed to record ping latency for %s: %s", peer_id, error
+                    )
+
             # Log health status periodically
             if ping_success:
                 logger.debug(
                     f"Health check for {peer_id}: latency={latency_ms:.1f}ms, "
                     f"score={health.health_score:.2f}, "
-                    f"success_rate={health.ping_success_rate:.2f}"
+                    f"success_rate={health.ping_success_rate:.2f}, "
+                    f"ping_protocol={ping_result.protocol_supported}"
                 )
             else:
                 logger.warning(
@@ -182,6 +199,22 @@ class ConnectionHealthMonitor(Service):
                     f"score={health.health_score:.2f}, "
                     f"success_rate={health.ping_success_rate:.2f}"
                 )
+
+            if not ping_success and getattr(
+                self.config, "abort_connection_on_ping_failure", False
+            ):
+                logger.info(
+                    "Aborting connection to %s after failed ping probe", peer_id
+                )
+                # SwarmConn.close() -> swarm.remove_conn() handles health cleanup,
+                # connection list removal, and rcmgr lifecycle notification.
+                try:
+                    await conn.close()
+                except Exception as error:
+                    logger.debug(
+                        "Error closing connection after ping failure: %s", error
+                    )
+                return
 
             # Check if connection needs replacement
             if self._should_replace_connection(peer_id, conn):
@@ -194,46 +227,24 @@ class ConnectionHealthMonitor(Service):
                 health = self.swarm.health_data[peer_id][conn]
                 health.add_error(f"Health check error: {e}")
 
-    async def _ping_connection(self, conn: INetConn) -> bool:
+    async def _ping_connection(self, conn: INetConn) -> ConnectionPingResult:
         """
-        Ping a connection to measure responsiveness.
+        Ping a connection using ``/ipfs/ping/1.0.0`` on that specific connection.
 
-        Uses a simple stream creation test as a health check.
-        In a production implementation, this could use a dedicated ping protocol.
-
-        Note: When active streams are present, we skip the ping to avoid
-        interfering with active communication. This is a performance optimization
-        that assumes active streams indicate the connection is functional.
-        However, this may mask connection issues in some edge cases where streams
-        are open but the connection is degraded. For more aggressive health
-        checking, consider performing lightweight pings even with active streams.
+        When ``skip_ping_when_streams_open`` is enabled, busy connections are
+        skipped (legacy behavior). By default, probes run even with open streams.
         """
-        try:
-            # If there are active streams, avoid intrusive ping; assume healthy
-            # This is a performance optimization to avoid interfering with
-            # active communication, but may mask some connection issues
-            if len(conn.get_streams()) > 0:
-                return True
-
-            # Use a timeout for the ping
-            with trio.move_on_after(self.config.ping_timeout):
-                # Create a throwaway stream and immediately reset it to avoid
-                # affecting muxer stream accounting in tests
-                stream = await conn.new_stream()
-                try:
-                    await stream.reset()
-                finally:
-                    # Best-effort close in case reset was a no-op
-                    try:
-                        await stream.close()
-                    except Exception:
-                        pass
-                return True
-
-        except Exception as e:
-            logger.debug(f"Ping failed for connection: {e}")
-
-        return False
+        negotiate_timeout = int(
+            self.config.outbound_stream_protocol_negotiation_timeout
+        )
+        return await ping_connection(
+            conn,
+            ping_timeout=self.config.ping_timeout,
+            negotiate_timeout=negotiate_timeout,
+            skip_when_streams_open=getattr(
+                self.config, "skip_ping_when_streams_open", False
+            ),
+        )
 
     def _should_replace_connection(self, peer_id: ID, conn: INetConn) -> bool:
         """Determine if a connection should be replaced based on health metrics."""
@@ -291,13 +302,13 @@ class ConnectionHealthMonitor(Service):
         """
         Replace an unhealthy connection with a new one.
 
-        Dial a replacement first (go-libp2p does not auto-replace; this is a
-        Python-local QoS policy). Only drop the old connection after a new one
-        succeeds, so we never go below ``min_connections_per_peer`` on failure.
+        Dial a replacement first (Python-local QoS; not a wire-protocol
+        requirement). Only drop the old connection after a new one succeeds,
+        so we never go below ``min_connections_per_peer`` on failure.
         Protected peers (ConnMgr Protect / tag_store) are never auto-replaced.
         """
         try:
-            # Respect go-libp2p Protect semantics via TagStore
+            # Skip ConnMgr-protected peers (tag_store Protect)
             tag_store = getattr(self.swarm, "tag_store", None)
             if tag_store is not None and tag_store.is_protected(peer_id):
                 logger.info(
@@ -381,14 +392,7 @@ class ConnectionHealthMonitor(Service):
                     peer_id,
                 )
 
-            # Now safe to drop the old connection
-            self.swarm.cleanup_connection_health(peer_id, old_conn)
-            if (
-                peer_id in self.swarm.connections
-                and old_conn in self.swarm.connections[peer_id]
-            ):
-                self.swarm.connections[peer_id].remove(old_conn)
-
+            # Drop via SwarmConn.close() so remove_conn cleans health + rcmgr.
             try:
                 await old_conn.close()
             except Exception as e:
