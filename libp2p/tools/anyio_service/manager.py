@@ -80,9 +80,7 @@ class AnyIOManager(InternalManagerAPI):
         # Lifecycle events (created lazily to avoid async context requirement)
         self._started: Event | None = None
         self._finished: Event | None = None
-
-        # Cancellation flag (sync, since cancel() must be non-async per API)
-        self._cancel_requested: bool = False
+        self._cancelled: Event | None = None
 
         # Lifecycle lock (created lazily to avoid async context requirement)
         self._run_lock: Lock | None = None
@@ -124,7 +122,7 @@ class AnyIOManager(InternalManagerAPI):
 
     @property
     def is_cancelled(self) -> bool:
-        return self._cancel_requested
+        return bool(self._cancelled is not None and self._cancelled.is_set())
 
     @property
     def is_finished(self) -> bool:
@@ -153,6 +151,7 @@ class AnyIOManager(InternalManagerAPI):
         if self._started is None:
             self._started = anyio.Event()
             self._finished = anyio.Event()
+            self._cancelled = anyio.Event()
             self._run_lock = anyio.Lock()
 
     async def wait_started(self) -> None:
@@ -176,7 +175,8 @@ class AnyIOManager(InternalManagerAPI):
         elif not self.is_running:
             return
         else:
-            self._cancel_requested = True
+            assert self._cancelled is not None
+            self._cancelled.set()
 
     async def stop(self) -> None:
         """Stop the service and wait for completion."""
@@ -209,6 +209,7 @@ class AnyIOManager(InternalManagerAPI):
         assert self._run_lock is not None
         assert self._started is not None
         assert self._finished is not None
+        assert self._cancelled is not None
 
         # Lock-based lifecycle check
         if self._run_lock.locked():
@@ -296,9 +297,8 @@ class AnyIOManager(InternalManagerAPI):
         self.logger.debug(
             "%s: _handle_cancelled waiting for cancellation", self._service
         )
-        # Poll for cancellation (since cancel() is sync, we use a flag)
-        while not self._cancel_requested:
-            await anyio.sleep(0)  # Yield to other tasks without delay
+        assert self._cancelled is not None
+        await self._cancelled.wait()
 
         self.logger.debug(
             "%s: _handle_cancelled triggering task cancellation", self._service
