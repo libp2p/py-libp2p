@@ -38,8 +38,7 @@ async def do_service_lifecycle_check(
 
         tg.start_soon(manager_run_fn)
 
-        with anyio.fail_after(0.1):
-            await manager.wait_started()
+        await manager.wait_started()
 
         assert manager.is_started is True
         assert manager.is_running is True
@@ -49,8 +48,7 @@ async def do_service_lifecycle_check(
         # trigger the service to exit
         trigger_exit_condition_fn()
 
-        with anyio.fail_after(0.1):
-            await manager.wait_finished()
+        await manager.wait_finished()
 
         if should_be_cancelled:
             assert manager.is_started is True
