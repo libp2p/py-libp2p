@@ -117,6 +117,25 @@ class TestDataChannelReadWriter:
         assert await rw.read(4) == b"ab"  # short read: peer finished
 
     @pytest.mark.trio
+    async def test_read_joins_frame_split_across_channel_messages(self):
+        # go-libp2p writes the varint prefix and the body as two SCTP messages.
+        framed = _frame(Message(message=b"noise-msg"))
+        recv_cb = AsyncMock(side_effect=[framed[:1], framed[1:5], framed[5:]])
+        rw = DataChannelReadWriter(
+            send_cb=AsyncMock(), recv_cb=recv_cb, is_initiator=False
+        )
+        assert await rw.read() == b"noise-msg"
+        assert recv_cb.await_count == 3
+
+    @pytest.mark.trio
+    async def test_read_decodes_batched_frames(self):
+        raw = _frame(Message(message=b"ab")) + _frame(Message(message=b"cd"))
+        rw = DataChannelReadWriter(
+            send_cb=AsyncMock(), recv_cb=AsyncMock(return_value=raw), is_initiator=False
+        )
+        assert await rw.read(4) == b"abcd"
+
+    @pytest.mark.trio
     async def test_read_rejects_malformed_frame(self):
         rw = DataChannelReadWriter(
             send_cb=AsyncMock(),

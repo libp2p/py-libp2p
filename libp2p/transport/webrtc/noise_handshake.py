@@ -32,12 +32,11 @@ from libp2p.connection_types import ConnectionType
 from libp2p.crypto.keys import PrivateKey
 from libp2p.peer.id import ID
 from libp2p.security.noise.patterns import PatternXX
-from libp2p.utils.varint import decode_varint_with_size
 
 from .constants import MAX_PAYLOAD_SIZE, NOISE_PROLOGUE_PREFIX
 from .exceptions import WebRTCHandshakeError
 from .pb.webrtc_pb2 import Message
-from .stream import _frame
+from .stream import _decode_frames, _frame
 
 logger = logging.getLogger(__name__)
 
@@ -127,29 +126,6 @@ async def perform_noise_handshake(
         raise WebRTCHandshakeError(f"Noise handshake failed: {e}") from e
 
 
-def _unframe(raw: bytes) -> tuple[bytes, bool]:
-    """
-    Decode one uvarint-prefixed ``webrtc.pb.Message`` from a channel message.
-
-    :returns: ``(payload, fin)`` — the ``message`` bytes (possibly empty for a
-        pure flag frame) and whether the peer signalled FIN/RESET.
-    :raises WebRTCHandshakeError: on malformed framing.
-    """
-    try:
-        length, consumed = decode_varint_with_size(raw)
-    except ValueError as e:
-        raise WebRTCHandshakeError(f"malformed handshake frame: {e}") from e
-    if consumed == 0 or raw[consumed - 1] & 0x80 or consumed + length != len(raw):
-        raise WebRTCHandshakeError("malformed handshake frame length")
-    msg = Message()
-    try:
-        msg.ParseFromString(raw[consumed:])
-    except Exception as e:  # DecodeError
-        raise WebRTCHandshakeError(f"malformed handshake frame: {e}") from e
-    fin = msg.HasField("flag") and msg.flag in (Message.FIN, Message.RESET)
-    return msg.message, fin
-
-
 class DataChannelReadWriter(IRawConnection):
     """
     Wraps a WebRTC data channel (stream) as an ``IRawConnection`` so the
@@ -163,7 +139,9 @@ class DataChannelReadWriter(IRawConnection):
     over a WebRTC *stream* on channel 0, i.e. every data-channel message is a
     uvarint-length-prefixed ``webrtc.pb.Message`` whose ``message`` field
     carries a chunk of the Noise byte stream (2-byte length prefix + payload).
-    ``write`` frames, ``read`` unframes and buffers, so the byte-oriented
+    Frames need not line up with channel messages (go-libp2p sends the varint
+    prefix and the body separately), so ``read`` accumulates raw bytes and
+    decodes complete frames from them. ``write`` frames, so the byte-oriented
     Noise packet reader (``read_exactly(conn, 2)`` then the payload) works
     unchanged and the bytes on the wire match other implementations.
     """
@@ -176,22 +154,35 @@ class DataChannelReadWriter(IRawConnection):
     ) -> None:
         self._send_cb = send_cb
         self._recv_cb = recv_cb
-        self._buffer = bytearray()
+        self._raw = bytearray()  # channel bytes not yet forming a whole frame
+        self._buffer = bytearray()  # decoded Noise bytes
         self._closed = False
         self.is_initiator = is_initiator
 
     async def _fill(self) -> bool:
-        """Pull one channel message into the buffer. False once the peer is done."""
+        """
+        Pull one channel message and decode any complete frames into the
+        buffer (possibly none yet). False once the peer is done.
+
+        Frames after a FIN/RESET are dropped by design: the handshake owner
+        tears the channel down at that point (go never closes channel 0 at
+        all), so nothing meaningful can follow.
+        """
         if self._closed:
             return False
         raw = await self._recv_cb()
         if not raw:
             self._closed = True
             return False
-        payload, fin = _unframe(raw)
-        self._buffer.extend(payload)
-        if fin:
-            self._closed = True
+        self._raw.extend(raw)
+        try:
+            for msg in _decode_frames(self._raw):
+                self._buffer.extend(msg.message)
+                if msg.HasField("flag") and msg.flag in (Message.FIN, Message.RESET):
+                    self._closed = True
+                    break
+        except ValueError as e:
+            raise WebRTCHandshakeError(f"malformed handshake frame: {e}") from e
         return True
 
     async def read(self, n: int | None = None) -> bytes:
@@ -203,8 +194,8 @@ class DataChannelReadWriter(IRawConnection):
         channel messages as needed (short only if the peer closed).
         """
         if n is None:
-            if not self._buffer:
-                await self._fill()
+            while not self._buffer and await self._fill():
+                pass
             data = bytes(self._buffer)
             self._buffer.clear()
             return data

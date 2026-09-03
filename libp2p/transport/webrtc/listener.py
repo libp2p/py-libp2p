@@ -4,7 +4,9 @@ WebRTC Direct listener.
 Spec path (default): one shared UDP socket (:class:`UdpMux`). A dialer's
 first STUN BINDING REQUEST carries ``USERNAME = server_ufrag:client_ufrag``;
 the version prefix on ``server_ufrag`` (``libp2p+webrtc+v1/`` /
-``libp2p+webrtc+v2/``) selects the flow. The listener infers the dialer's
+``libp2p+webrtc+v2/``, both accepted) selects how the dialer's ICE password
+is derived (v1: its ufrag; v2: the server ufrag minus the prefix,
+libp2p/specs#715). The listener infers the dialer's
 SDP offer from that packet (credentials + source address), answers over the
 muxed ICE agent, completes DTLS (as DTLS server, without verifying the
 dialer's fingerprint — it cannot know it yet), then runs the Noise XX
@@ -215,29 +217,41 @@ class WebRTCDirectListener(IListener):
 
         # Shared UDP socket + STUN dispatch (runs on the asyncio thread).
         # Bind before spawning anything so a bind failure leaves no orphans.
-        try:
-            mux, bound_port = await bridge.run_coro(UdpMux.create(host, port))
-        except OSError as e:
-            raise WebRTCConnectionError(
-                f"Failed to bind WebRTC Direct listener on {host}:{port}: {e}"
-            ) from e
+        # The experimental harness also binds TCP on the *same* port number
+        # (one multiaddr describes both); with an OS-chosen port that TCP
+        # bind can collide (Windows reserves port ranges per protocol), so
+        # retry with a fresh UDP port a few times.
+        for attempt in range(5):
+            try:
+                mux, bound_port = await bridge.run_coro(UdpMux.create(host, port))
+            except OSError as e:
+                raise WebRTCConnectionError(
+                    f"Failed to bind WebRTC Direct listener on {host}:{port}: {e}"
+                ) from e
+            if not self._config.enable_sdp_http_harness:
+                break
+            from ._aiortc_helpers import run_signaling_server
+
+            try:
+                self._signaling_server = await bridge.run_coro(
+                    run_signaling_server(
+                        host=host,
+                        port=bound_port,
+                        on_offer=self._make_offer_handler(bridge, rtc_cert),
+                    )
+                )
+                break
+            except OSError as e:
+                await bridge.run_coro(mux.close())
+                if port != 0 or attempt == 4:
+                    raise WebRTCConnectionError(
+                        f"Failed to bind /sdp harness on {host}:{bound_port}: {e}"
+                    ) from e
+                logger.debug("harness TCP port %d busy, retrying", bound_port)
         self._mux = mux
         await self._start_trio_nursery()
         self._candidate_host = _resolve_candidate_host(host)
         mux.set_unknown_stun_handler(self._on_unknown_stun)
-
-        if self._config.enable_sdp_http_harness:
-            from ._aiortc_helpers import run_signaling_server
-
-            # Experimental py<->py harness: TCP, same port number as the UDP
-            # socket so one multiaddr describes both.
-            self._signaling_server = await bridge.run_coro(
-                run_signaling_server(
-                    host=host,
-                    port=bound_port,
-                    on_offer=self._make_offer_handler(bridge, rtc_cert),
-                )
-            )
 
         # Build advertised multiaddr(s) with certhash and peer ID.
         certhash_mb = self._certificate.fingerprint_to_multibase()
@@ -279,14 +293,9 @@ class WebRTCDirectListener(IListener):
             logger.debug("WebRTC Direct: in-flight cap reached, dropping %s", addr)
             return
         try:
-            version, server_ufrag, client_ufrag = parse_direct_username(username)
-            if version != 1:
-                logger.debug(
-                    "WebRTC Direct: v%d not supported yet, dropping %s", version, addr
-                )
-                return
-            # v1: the dialer set ufrag == pwd on both offer and answer, so the
-            # server credential *is* the password.
+            _, server_ufrag, client_ufrag, client_pwd = parse_direct_username(username)
+            # Both versions: the dialer's synthetic answer carries
+            # ufrag == pwd == server_ufrag, so that is our local credential.
             conn = mux.add_ice_connection(
                 server_ufrag, server_ufrag, host=self._candidate_host
             )
@@ -300,15 +309,20 @@ class WebRTCDirectListener(IListener):
         # mux the peer's address.
         mux.datagram_received(data, addr)
         task = asyncio.ensure_future(
-            self._accept_v1(conn, server_ufrag, client_ufrag, addr)
+            self._accept(conn, server_ufrag, client_ufrag, client_pwd, addr)
         )
         self._accept_tasks.add(task)
         task.add_done_callback(self._accept_tasks.discard)
 
-    async def _accept_v1(
-        self, conn: Any, server_ufrag: str, client_ufrag: str, addr: tuple[str, int]
+    async def _accept(
+        self,
+        conn: Any,
+        server_ufrag: str,
+        client_ufrag: str,
+        client_pwd: str,
+        addr: tuple[str, int],
     ) -> None:
-        """Build the muxed PC for a v1 first contact and drive it to connected."""
+        """Build the muxed PC for a first contact and drive it to connected."""
         from aiortc import RTCSessionDescription
 
         from ._aiortc_helpers import (
@@ -337,11 +351,9 @@ class WebRTCDirectListener(IListener):
                 pc.sctp.transport, "_validate_peer_identity", lambda _params: None
             )
 
-            # v1: the dialer's own ufrag doubles as its pwd (spec step 6.1);
-            # use the *client* half of USERNAME, as go-libp2p does.
             offer_sdp = build_inferred_offer(
                 client_ufrag=client_ufrag,
-                client_pwd=client_ufrag,
+                client_pwd=client_pwd,
                 remote_host=addr[0],
                 remote_port=addr[1],
                 max_message_size=self._config.max_message_size,

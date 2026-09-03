@@ -35,7 +35,7 @@ from .multiaddr_utils import (
     is_webrtc_direct_multiaddr,
     parse_webrtc_direct_multiaddr,
 )
-from .sdp import build_synthetic_answer, make_v1_credential
+from .sdp import build_synthetic_answer, make_v1_credential, make_v2_credential
 
 if TYPE_CHECKING:
     pass
@@ -174,22 +174,18 @@ class WebRTCDirectTransport(ITransport):
                     post_sdp(host, port, pc.localDescription.sdp)
                 )
             else:
-                # Spec v1 (SDP munging): the same "libp2p+webrtc+v1/<random>"
-                # string is our ufrag *and* pwd on both the local offer and the
-                # synthetic remote answer, so the server can reconstruct
-                # everything from our first STUN USERNAME. aiortc regenerates
-                # local ICE credentials from its aioice Connection when
-                # setLocalDescription runs (SDP text edits are ignored), so
-                # "munging" means setting those fields.
-                cred = make_v1_credential()
-
-                async def _set_local_ice_credentials() -> None:
-                    assert pc.sctp is not None  # createDataChannel ran above
-                    ice_conn = pc.sctp.transport.transport._connection
+                # Spec STUN path: `cred` = the server's ufrag == pwd on the
+                # synthetic answer. v1 munges our aioice creds to it; v2
+                # carries our real pwd in it (specs#715). aiortc ignores SDP-
+                # text credential edits, hence the attribute writes.
+                assert pc.sctp is not None  # createDataChannel ran above
+                ice_conn = pc.sctp.transport.transport._connection
+                if self._config.webrtc_direct_dial_version == 1:
+                    cred = make_v1_credential()
                     set_private_attr(ice_conn, "_local_username", cred)
                     set_private_attr(ice_conn, "_local_password", cred)
-
-                await bridge.run_coro(_set_local_ice_credentials())
+                else:
+                    cred = make_v2_credential(ice_conn.local_password)
                 offer = await bridge.run_coro(pc.createOffer())
                 await bridge.run_coro(pc.setLocalDescription(offer))
                 # The listener is ICE-Lite/controlled and the DTLS server; its
