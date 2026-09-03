@@ -294,3 +294,38 @@ class TestChannelClose:
         stream.on_channel_close()
         assert stream._read_closed is True
         assert stream._write_closed is True
+
+
+class TestReviewGuards:
+    """Guards added in review: decoder contract, RESET semantics."""
+
+    def test_decode_frames_rejects_zero_consumed(self):
+        """
+        A decoder returning (0, 0) on non-empty input must not wrap to
+        head[-1]; it is treated as a malformed prefix.
+        """
+        from unittest.mock import patch
+
+        import libp2p.transport.webrtc.stream as stream_mod
+
+        buf = bytearray(b"\x01a")
+        with patch.object(stream_mod, "decode_varint_with_size", return_value=(0, 0)):
+            with pytest.raises(ValueError, match="empty varint"):
+                list(stream_mod._decode_frames(buf))
+
+    @pytest.mark.trio
+    async def test_reset_locally_is_idempotent(self):
+        stream = _make_stream()
+        stream._reset_locally()
+        stream._reset_locally()  # second call is a no-op, no double sentinel
+        assert stream._state is StreamState.RESET
+
+    @pytest.mark.trio
+    async def test_data_after_reset_in_same_batch_is_dropped(self):
+        """A crafted batch [RESET, data] must not deliver the data."""
+        stream = _make_stream()
+        raw = _framed(Message(flag=Message.RESET)) + _framed(Message(message=b"late"))
+        stream.on_data(raw)
+        assert stream._state is StreamState.RESET
+        with pytest.raises(Exception):
+            await stream.read(4)

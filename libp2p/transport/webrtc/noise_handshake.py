@@ -163,6 +163,10 @@ class DataChannelReadWriter(IRawConnection):
         """
         Pull one channel message and decode any complete frames into the
         buffer (possibly none yet). False once the peer is done.
+
+        Frames after a FIN/RESET are dropped by design: the handshake owner
+        tears the channel down at that point (go never closes channel 0 at
+        all), so nothing meaningful can follow.
         """
         if self._closed:
             return False
