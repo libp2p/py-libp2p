@@ -3576,6 +3576,25 @@ class IPubsubRouter(ABC):
 
         """
 
+    async def on_peer_subscribed(self, peer_id: ID, topic: str) -> None:
+        """
+        React to a newly observed peer subscription for a topic.
+
+        Optional hook, invoked when a peer announces a subscription we had
+        not previously recorded. GossipSub uses this for event-driven mesh
+        first-fill (GRAFT) so publish does not wait on the next heartbeat.
+        Heartbeat still owns ongoing mesh maintenance. Routers that do not
+        use a mesh keep the no-op.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer that subscribed.
+        topic : str
+            The topic they subscribed to.
+
+        """
+
 
 class IPubsub(ServiceAPI):
     """
