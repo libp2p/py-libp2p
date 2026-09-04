@@ -66,7 +66,9 @@ To stop recording Identify observations entirely (privacy or to avoid the
 ``ObservedAddrManager`` footprint), set
 ``disable_identify_address_discovery=True`` (parity with go-libp2p's
 ``DisableIdentifyAddressDiscovery``). In that mode ``get_nat_type()``
-returns ``(UNKNOWN, UNKNOWN)``.
+returns ``(UNKNOWN, UNKNOWN)``. The Identify protocol itself still runs
+(peer metadata is still exchanged); only consumption of Identify
+``observed_addr`` for local address discovery is skipped.
 
 .. automodule:: libp2p.host.observed_addr_manager
    :members:

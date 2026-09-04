@@ -269,8 +269,10 @@ class BasicHost(IHost):
         :param disable_identify_address_discovery: When ``True``, do not
             create an :class:`~libp2p.host.observed_addr_manager.ObservedAddrManager`
             and never record Identify ``observed_addr`` reports (parity with
-            go-libp2p's ``DisableIdentifyAddressDiscovery``). Useful with a
-            known public address via ``announce_addrs`` / ``addrs_factory``.
+            go-libp2p's ``DisableIdentifyAddressDiscovery``). The Identify
+            protocol itself still runs for peer metadata; only observed-address
+            discovery is skipped. Useful with a known public address via
+            ``announce_addrs`` / ``addrs_factory``.
         """
         self._network = network
         self._network.set_stream_handler(self._swarm_stream_handler)
@@ -525,6 +527,7 @@ class BasicHost(IHost):
 
         When ``disable_identify_address_discovery`` is enabled there is no
         observed-address manager, so ``(UNKNOWN, UNKNOWN)`` is returned.
+        Identify itself still runs; only observed-address discovery is skipped.
 
         .. note::
            Experimental API. Intended primarily for AutoNAT / hole-punch
