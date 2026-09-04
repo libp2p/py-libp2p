@@ -47,11 +47,13 @@ async def _spawn(harness: Path, *args: str) -> trio.Process:
 
 async def _read_lines(proc: trio.Process, prefix: str, count: int = 1) -> list[str]:
     """Read stdout until *count* lines start with *prefix* (or the process ends)."""
+    stdout = proc.stdout
+    assert stdout is not None  # opened with stdout=PIPE above
     found: list[str] = []
     buf = b""
     with trio.move_on_after(45):
         while len(found) < count:
-            chunk = await proc.stdout.receive_some(4096)
+            chunk = await stdout.receive_some(4096)
             if not chunk:
                 break
             buf += chunk
