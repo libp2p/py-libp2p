@@ -1,0 +1,2 @@
+GossipSub now GRAFTs peers into an underfilled mesh when their subscription is
+observed, so publish after join/connect no longer waits on the next heartbeat.

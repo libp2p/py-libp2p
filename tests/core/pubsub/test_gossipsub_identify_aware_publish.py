@@ -50,15 +50,18 @@ def _identify_aware_publisher_state(publisher: Pubsub, peer_id: ID, topic: str) 
     in_peers = peer_id in publisher.peers
     in_protocol = False
     pending_queued = False
+    in_mesh = False
     router = publisher.router
     if isinstance(router, GossipSub):
         in_protocol = peer_id in router.peer_protocol
         pending_queued = bool(router._pending_messages.get(peer_id))
+        in_mesh = peer_id in router.mesh.get(topic, ())
     subscribed = peer_id in publisher.peer_topics.get(topic, ())
     return (
         f"peer_in_peers={in_peers}, "
         f"peer_in_protocol={in_protocol}, "
         f"peer_subscribed={subscribed}, "
+        f"peer_in_mesh={in_mesh}, "
         f"pending_queued={pending_queued}"
     )
 
@@ -450,6 +453,10 @@ async def test_publish_after_identify_still_works():
     """
     Sanity check: publishing *after* identify completes should still work
     normally (no regression from the queue logic).
+
+    Mesh membership is established by the event-driven GRAFT on subscription
+    observation (not the heartbeat), so this stays reliable with heartbeats
+    disabled for mcache safety in this file.
     """
     topic = "test-publish-after-identify"
     data = b"hello-normal-publish"
@@ -469,14 +476,53 @@ async def test_publish_after_identify_still_works():
         await pubsubs[1].wait_for_peer(pubsubs[0].my_id)
         await pubsubs[0].wait_for_subscription(pubsubs[1].my_id, topic)
         await pubsubs[1].wait_for_subscription(pubsubs[0].my_id, topic)
+        await pubsubs[0].wait_for_mesh(pubsubs[1].my_id, topic)
+        await pubsubs[1].wait_for_mesh(pubsubs[0].my_id, topic)
 
         await pubsubs[0].publish(topic, data)
 
         await wait_for_pubsub_payload(
             sub_1,
             data,
-            fail_msg="Normal publish (after identify) was not delivered.",
+            fail_msg=lambda: (
+                "Normal publish (after identify) was not delivered. "
+                + _identify_aware_publisher_state(pubsubs[0], pubsubs[1].my_id, topic)
+            ),
         )
+
+
+@pytest.mark.trio
+async def test_mesh_forms_on_subscription_without_heartbeat():
+    """
+    Regression for #1454: observing a peer subscription must GRAFT into an
+    underfilled mesh without waiting for the next heartbeat.
+    """
+    topic = "test-mesh-on-subscription"
+
+    async with PubsubFactory.create_batch_with_gossipsub(
+        2,
+        degree=1,
+        degree_low=1,
+        degree_high=2,
+        heartbeat_interval=_HEARTBEAT_DISABLED,
+    ) as pubsubs:
+        await pubsubs[0].subscribe(topic)
+        await pubsubs[1].subscribe(topic)
+        await connect(pubsubs[0].host, pubsubs[1].host)
+
+        await pubsubs[0].wait_for_peer(pubsubs[1].my_id)
+        await pubsubs[1].wait_for_peer(pubsubs[0].my_id)
+        await pubsubs[0].wait_for_subscription(pubsubs[1].my_id, topic)
+        await pubsubs[1].wait_for_subscription(pubsubs[0].my_id, topic)
+        await pubsubs[0].wait_for_mesh(pubsubs[1].my_id, topic)
+        await pubsubs[1].wait_for_mesh(pubsubs[0].my_id, topic)
+
+        router_0 = pubsubs[0].router
+        router_1 = pubsubs[1].router
+        assert isinstance(router_0, GossipSub)
+        assert isinstance(router_1, GossipSub)
+        assert pubsubs[1].my_id in router_0.mesh[topic]
+        assert pubsubs[0].my_id in router_1.mesh[topic]
 
 
 @pytest.mark.trio
