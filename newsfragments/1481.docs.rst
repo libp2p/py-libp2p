@@ -1,0 +1,2 @@
+Document Filecoin network parity expectations versus Lotus/Forest and add a
+machine-readable interop matrix with reproducible Filecoin demo workflows.
