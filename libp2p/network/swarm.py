@@ -428,6 +428,25 @@ class Swarm(Service, INetworkService):
                         f"Error stopping connection management components: {e}"
                     )
 
+                # Close live connections so their sockets are released on
+                # shutdown. self.connections maps peer id -> list[INetConn];
+                # a previous version iterated the dict itself (the peer ids)
+                # and called ID.close(), which raised and was swallowed, so
+                # the sockets leaked (#1485). close() clears self.connections
+                # before stopping the manager, so this is a no-op on the
+                # explicit-close path; SwarmConn.close() is idempotent.
+                for peer_id, conns in list(self.connections.items()):
+                    for conn in list(conns):
+                        try:
+                            await conn.close()
+                        except Exception as e:
+                            logger.debug(
+                                "Error closing connection to %s during shutdown: %s",
+                                peer_id,
+                                e,
+                            )
+                self.connections.clear()
+
                 # Close all listeners so their internal nurseries are
                 # cancelled and system tasks finish cleanly.
                 for listener in list(self.listeners.values()):
