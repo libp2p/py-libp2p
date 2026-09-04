@@ -74,6 +74,42 @@ Use ``announce_addrs`` when you already know the exact public address(es) you
 want peers to dial (e.g. a reverse proxy hostname such as ngrok). Rely on
 automatic observed-address discovery otherwise.
 
+Callable ``addrs_factory``
+--------------------------
+
+When you need to **compose** addresses (for example keep listen + confirmed
+observed and add an extra hostname), pass ``addrs_factory`` instead of a
+static list. The factory receives the live candidate list and returns what
+to advertise::
+
+    from multiaddr import Multiaddr
+    from libp2p import new_host
+
+    def my_factory(candidates):
+        # candidates already include confirmed observed addrs when discovery
+        # is enabled
+        return list(candidates) + [Multiaddr("/dns4/example.com/tcp/4001")]
+
+    host = new_host(addrs_factory=my_factory)
+
+``announce_addrs`` and ``addrs_factory`` cannot be set together.
+
+Disabling Identify address discovery
+------------------------------------
+
+If public addresses are known ahead of time and you do not want Identify to
+drive discovery (privacy or to avoid ``ObservedAddrManager`` overhead), set
+``disable_identify_address_discovery=True``. This matches go-libp2p's
+``DisableIdentifyAddressDiscovery``::
+
+    host = new_host(
+        announce_addrs=[Multiaddr("/ip4/1.2.3.4/tcp/4001")],
+        disable_identify_address_discovery=True,
+    )
+
+In that mode observations are not recorded and
+:meth:`~libp2p.host.basic_host.BasicHost.get_nat_type` returns unknown.
+
 The full source code for this example is below:
 
 .. literalinclude:: ../examples/announce_addrs/announce_addrs.py

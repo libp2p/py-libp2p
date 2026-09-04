@@ -1,0 +1,3 @@
+Added a callable ``addrs_factory`` (go-libp2p ``AddrsFactory`` parity) and
+``disable_identify_address_discovery`` so hosts can compose advertised
+addresses and optionally opt out of Identify-driven observed-address discovery.

@@ -56,6 +56,7 @@ from libp2p.custom_types import (
     TSecurityOptions,
 )
 from libp2p.host.basic_host import (
+    AddrsFactory,
     BasicHost,
 )
 from libp2p.host.routed_host import (
@@ -694,6 +695,8 @@ def new_host(
     bootstrap_dns_max_retries: int = 3,
     connection_config: ConnectionConfig | None = None,
     announce_addrs: Sequence[multiaddr.Multiaddr] | None = None,
+    addrs_factory: AddrsFactory | None = None,
+    disable_identify_address_discovery: bool = False,
     # NEW: explicit transport list — highest priority
     transports: Sequence[ITransport] | None = None,
     # NEW: convenience flags
@@ -738,6 +741,13 @@ def new_host(
         and health monitoring. When both connection_config and quic_transport_opt
         are provided, all ConnectionConfig attributes are merged into the QUIC config.
     :param announce_addrs: if set, these replace listen addrs in get_addrs()
+        (mutually exclusive with ``addrs_factory``)
+    :param addrs_factory: optional callable matching go-libp2p ``AddrsFactory``;
+        receives the live candidate address list and returns addresses to
+        advertise (mutually exclusive with ``announce_addrs``)
+    :param disable_identify_address_discovery: if True, do not record or
+        advertise Identify observed addresses (go
+        ``DisableIdentifyAddressDiscovery``)
     :param transports: explicit list of transport instances to register.  When
         provided, all ``enable_*`` flags and ``listen_addrs``-based detection
         are bypassed.
@@ -821,6 +831,8 @@ def new_host(
             bootstrap_dns_timeout=bootstrap_dns_timeout,
             bootstrap_dns_max_retries=bootstrap_dns_max_retries,
             announce_addrs=announce_addrs,
+            addrs_factory=addrs_factory,
+            disable_identify_address_discovery=disable_identify_address_discovery,
         )
     return BasicHost(
         network=swarm,
@@ -834,6 +846,8 @@ def new_host(
         bootstrap_dns_timeout=bootstrap_dns_timeout,
         bootstrap_dns_max_retries=bootstrap_dns_max_retries,
         announce_addrs=announce_addrs,
+        addrs_factory=addrs_factory,
+        disable_identify_address_discovery=disable_identify_address_discovery,
     )
 
 __version__ = __version("libp2p")
