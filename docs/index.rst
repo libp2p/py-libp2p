@@ -20,6 +20,7 @@ The Python implementation of the libp2p networking stack
     Connection Health Monitoring <connection_health_monitoring>
     Filecoin Architecture Positioning <filecoin_architecture_positioning>
     Filecoin Protocol Support Matrix <filecoin_protocol_support_matrix>
+    Filecoin Network Parity and Interop <filecoin_network_parity_and_interop>
     API <libp2p>
 
 .. toctree::
