@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import (
     AsyncIterator,
+    Callable,
     Sequence,
 )
 from contextlib import (
@@ -127,6 +128,10 @@ logger = logging.getLogger(__name__)
 DEFAULT_NEGOTIATE_TIMEOUT = 30  # Increased to 30s for high-concurrency scenarios
 # Under load with 5 concurrent negotiations, some may take longer due to contention
 
+# Matches go-libp2p's ``AddrsFactory``: transform the live candidate address
+# list into the set the host should advertise.
+AddrsFactory = Callable[[list[multiaddr.Multiaddr]], list[multiaddr.Multiaddr]]
+
 _SAFE_CACHED_PROTOCOLS: set[TProtocol] = {
     PING_PROTOCOL_ID,
     IdentifyID,
@@ -228,6 +233,8 @@ class BasicHost(IHost):
         bootstrap_dns_timeout: float = 10.0,
         bootstrap_dns_max_retries: int = 3,
         announce_addrs: Sequence[multiaddr.Multiaddr] | None = None,
+        addrs_factory: AddrsFactory | None = None,
+        disable_identify_address_discovery: bool = False,
     ) -> None:
         """
         Initialize a BasicHost instance.
@@ -243,8 +250,8 @@ class BasicHost(IHost):
         :param bootstrap_allow_ipv6: If True, bootstrap uses IPv6+TCP when available.
         :param bootstrap_dns_timeout: DNS resolution timeout in seconds per attempt.
         :param bootstrap_dns_max_retries: Max DNS resolution retries (with backoff).
-        :param announce_addrs: Optional addresses to advertise instead of
-            listen addresses.  ``None`` (default) uses listen addresses
+        :param announce_addrs: Optional static addresses to advertise instead of
+            the live candidate list.  ``None`` (default) uses listen addresses
             augmented with confirmed observed addresses from
             :class:`~libp2p.host.observed_addr_manager.ObservedAddrManager`.
             An empty list advertises no addresses. When set, this list acts
@@ -252,8 +259,18 @@ class BasicHost(IHost):
             ``applyAddrsFactory``) and wins over observed addresses:
             observations are still **recorded** by the manager (for
             :meth:`get_nat_type` and future AutoNAT consumers) but are
-            **not** emitted by :meth:`get_addrs`. See also
-            :meth:`get_addrs` for the exact composition rules.
+            **not** emitted by :meth:`get_addrs`. Mutually exclusive with
+            ``addrs_factory``. See also :meth:`get_addrs`.
+        :param addrs_factory: Optional callable matching go-libp2p's
+            ``AddrsFactory``. Receives the live candidate list (transport
+            addresses plus confirmed observed addresses when Identify
+            address discovery is enabled) and returns the addresses to
+            advertise. Mutually exclusive with ``announce_addrs``.
+        :param disable_identify_address_discovery: When ``True``, do not
+            create an :class:`~libp2p.host.observed_addr_manager.ObservedAddrManager`
+            and never record Identify ``observed_addr`` reports (parity with
+            go-libp2p's ``DisableIdentifyAddressDiscovery``). Useful with a
+            known public address via ``announce_addrs`` / ``addrs_factory``.
         """
         self._network = network
         self._network.set_stream_handler(self._swarm_stream_handler)
@@ -298,12 +315,27 @@ class BasicHost(IHost):
                 dns_max_retries=bootstrap_dns_max_retries,
             )
 
-        # Address announcement configuration (from #1268)
-        self._announce_addrs = (
-            list(announce_addrs) if announce_addrs is not None else None
+        # Address announcement configuration (#1268 / #1311)
+        if announce_addrs is not None and addrs_factory is not None:
+            raise ValueError("cannot specify both announce_addrs and addrs_factory")
+        self._disable_identify_address_discovery = disable_identify_address_discovery
+        if announce_addrs is not None:
+            static_addrs = list(announce_addrs)
+
+            def _static_addrs_factory(
+                _candidates: list[multiaddr.Multiaddr],
+                _addrs: list[multiaddr.Multiaddr] = static_addrs,
+            ) -> list[multiaddr.Multiaddr]:
+                return list(_addrs)
+
+            self._addrs_factory: AddrsFactory | None = _static_addrs_factory
+        else:
+            self._addrs_factory = addrs_factory
+        # Observed-address tracking (#1284 / #1250). Omit the manager when
+        # Identify address discovery is disabled (go DisableIdentifyAddressDiscovery).
+        self._observed_addr_manager: ObservedAddrManager | None = (
+            None if disable_identify_address_discovery else ObservedAddrManager()
         )
-        # Observed-address tracking (from #1284, issue #1250)
-        self._observed_addr_manager = ObservedAddrManager()
 
         # Cache a signed-record if the local-node in the PeerStore
         envelope = create_signed_peer_record(
@@ -431,33 +463,35 @@ class BasicHost(IHost):
 
         Behavior (mirrors go-libp2p's ``AddrsFactory`` pipeline):
 
-        * If ``announce_addrs`` was provided at construction time, that list
-          replaces everything — it is treated as a static ``AddrsFactory`` in
-          go-libp2p terms.  Observed (NAT) addresses are **still recorded**
-          by :class:`~libp2p.host.observed_addr_manager.ObservedAddrManager`
-          (for ``get_nat_type`` and future AutoNAT consumers) but are not
-          emitted here, since the caller has explicitly chosen which
-          addresses to advertise.
-        * Otherwise the set of raw transport addresses is augmented with
-          externally observed addresses that have been confirmed by enough
-          distinct peer groups (see :data:`ACTIVATION_THRESHOLD`), then the
-          ``/p2p/{peer_id}`` suffix is appended to each.
+        * Build a live candidate list from transport listen addresses,
+          augmented with confirmed observed addresses when Identify address
+          discovery is enabled (no ``ObservedAddrManager`` when
+          ``disable_identify_address_discovery`` is set).
+        * If ``announce_addrs`` or ``addrs_factory`` was provided, apply that
+          factory to the candidate list. Static ``announce_addrs`` ignores
+          the candidates and returns the fixed list (observations may still
+          be recorded for ``get_nat_type`` when discovery is enabled).
+        * Otherwise advertise the candidate list as-is.
+        * Finally append the ``/p2p/{peer_id}`` suffix to each address.
 
         Use :meth:`get_transport_addrs` for the raw transport addresses
         without any observed-address augmentation or ``/p2p`` suffix.
         """
         p2p_part = multiaddr.Multiaddr(f"/p2p/{self.get_id()!s}")
 
-        if self._announce_addrs is not None:
-            addrs = list(self._announce_addrs)
-        else:
-            addrs = list(self.get_transport_addrs())
-            seen = {str(a) for a in addrs}
+        candidates = list(self.get_transport_addrs())
+        if self._observed_addr_manager is not None:
+            seen = {str(a) for a in candidates}
             for obs_addr in self._observed_addr_manager.addrs():
                 key = str(obs_addr)
                 if key not in seen:
                     seen.add(key)
-                    addrs.append(obs_addr)
+                    candidates.append(obs_addr)
+
+        if self._addrs_factory is not None:
+            addrs = list(self._addrs_factory(candidates))
+        else:
+            addrs = candidates
 
         result = []
         for addr in addrs:
@@ -489,6 +523,9 @@ class BasicHost(IHost):
         observed addresses reported through Identify. Matches go-libp2p's
         ``host.getNATType()`` algorithm.
 
+        When ``disable_identify_address_discovery`` is enabled there is no
+        observed-address manager, so ``(UNKNOWN, UNKNOWN)`` is returned.
+
         .. note::
            Experimental API. Intended primarily for AutoNAT / hole-punch
            consumers; the return values, thresholds, and method name may
@@ -497,6 +534,8 @@ class BasicHost(IHost):
         :return: ``(tcp_nat_type, udp_nat_type)``, each one of
             :class:`~libp2p.host.observed_addr_manager.NATDeviceType`.
         """
+        if self._observed_addr_manager is None:
+            return (NATDeviceType.UNKNOWN, NATDeviceType.UNKNOWN)
         return self._observed_addr_manager.get_nat_type()
 
     def run(
@@ -1176,43 +1215,50 @@ class BasicHost(IHost):
                 self._identified_peers[peer_id] = ts
 
             if identify_msg.HasField("observed_addr") and identify_msg.observed_addr:
-                try:
-                    our_observed = multiaddr.Multiaddr(identify_msg.observed_addr)
+                if self._observed_addr_manager is None:
                     logger.debug(
-                        "Identify[%s]: recording observed_addr %s from peer %s",
+                        "Identify[%s]: ignoring observed_addr "
+                        "(Identify address discovery disabled)",
                         reason,
-                        our_observed,
-                        peer_id,
                     )
-                    self._observed_addr_manager.record_observation(
-                        swarm_conn, our_observed, self.get_transport_addrs()
-                    )
-                except MultiaddrError as exc:
-                    # Malformed observed_addr bytes or unknown protocols from a
-                    # misbehaving peer. Expected at low rates; log quietly.
-                    logger.debug(
-                        "ObservedAddrManager: ignoring malformed observed_addr "
-                        "from peer %s: %s",
-                        peer_id,
-                        exc,
-                    )
-                except ValueError as exc:
-                    logger.debug(
-                        "ObservedAddrManager: ignoring invalid observed_addr "
-                        "value from peer %s: %s",
-                        peer_id,
-                        exc,
-                    )
-                except Exception as exc:
-                    # Unexpected failure: surface at warning with traceback so
-                    # regressions don't disappear into debug logs.
-                    logger.warning(
-                        "ObservedAddrManager: unexpected failure recording "
-                        "observation from peer %s: %s",
-                        peer_id,
-                        exc,
-                        exc_info=True,
-                    )
+                else:
+                    try:
+                        our_observed = multiaddr.Multiaddr(identify_msg.observed_addr)
+                        logger.debug(
+                            "Identify[%s]: recording observed_addr %s from peer %s",
+                            reason,
+                            our_observed,
+                            peer_id,
+                        )
+                        self._observed_addr_manager.record_observation(
+                            swarm_conn, our_observed, self.get_transport_addrs()
+                        )
+                    except MultiaddrError as exc:
+                        # Malformed observed_addr bytes or unknown protocols from a
+                        # misbehaving peer. Expected at low rates; log quietly.
+                        logger.debug(
+                            "ObservedAddrManager: ignoring malformed observed_addr "
+                            "from peer %s: %s",
+                            peer_id,
+                            exc,
+                        )
+                    except ValueError as exc:
+                        logger.debug(
+                            "ObservedAddrManager: ignoring invalid observed_addr "
+                            "value from peer %s: %s",
+                            peer_id,
+                            exc,
+                        )
+                    except Exception as exc:
+                        # Unexpected failure: surface at warning with traceback so
+                        # regressions don't disappear into debug logs.
+                        logger.warning(
+                            "ObservedAddrManager: unexpected failure recording "
+                            "observation from peer %s: %s",
+                            peer_id,
+                            exc,
+                            exc_info=True,
+                        )
             else:
                 logger.debug(
                     "Identify[%s]: peer %s returned no observed_addr; "
@@ -1257,7 +1303,8 @@ class BasicHost(IHost):
             return
         self._identified_peers.pop(peer_id, None)
         self._identify_inflight.discard(peer_id)
-        self._observed_addr_manager.remove_conn(conn)
+        if self._observed_addr_manager is not None:
+            self._observed_addr_manager.remove_conn(conn)
 
     def _get_first_connection(self, peer_id: ID) -> INetConn | None:
         connections = self._network.get_connections(peer_id)
