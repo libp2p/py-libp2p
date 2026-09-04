@@ -397,6 +397,15 @@ class CircuitV2Transport(ITransport):
                     logger.warning(
                         "Failed to make reservation with relay %s", relay_peer_id
                     )
+                # rust-libp2p (and similar) relays finish each HOP substream after one
+                # exchange. After RESERVE, open a new stream for CONNECT so the relay
+                # does not drop the substream before we read the STATUS response.
+                await relay_stream.close()
+                relay_stream = await self.host.new_stream(relay_peer_id, [PROTOCOL_ID])
+                if not relay_stream:
+                    raise ConnectionError(
+                        f"Could not open stream to relay {relay_peer_id} for CONNECT"
+                    )
             # Create signed peer record to send with the HOP message
             envelope_bytes, _ = env_to_send_in_RPC(self.host)
 
