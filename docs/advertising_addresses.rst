@@ -26,9 +26,11 @@ than choosing only a static list. ``announce_addrs`` and ``addrs_factory`` are
 mutually exclusive.
 
 **4. ``disable_identify_address_discovery``** — When you know your public
-addresses upfront and do not want Identify-driven discovery (privacy or to skip
-``ObservedAddrManager`` work), set this to ``True``. Observations are not
-recorded; ``get_nat_type()`` returns unknown. Pair with ``announce_addrs`` or
+addresses upfront and do not want Identify-driven **address** discovery
+(privacy or to skip ``ObservedAddrManager`` work), set this to ``True``.
+Observations are not recorded; ``get_nat_type()`` returns unknown. Identify
+itself still runs for peer metadata; only ``observed_addr`` consumption for
+local discovery is disabled. Pair with ``announce_addrs`` or
 ``addrs_factory`` as go-libp2p recommends with
 ``DisableIdentifyAddressDiscovery``.
 

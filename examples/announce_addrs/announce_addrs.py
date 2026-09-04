@@ -199,9 +199,10 @@ def main() -> None:
         "--disable-identify-address-discovery",
         action="store_true",
         help=(
-            "Do not record Identify observed addresses "
-            "(go-libp2p DisableIdentifyAddressDiscovery). "
-            "Useful with --announce when public addresses are known upfront."
+            "Do not record Identify observed addresses for local discovery "
+            "(go-libp2p DisableIdentifyAddressDiscovery). Identify still runs "
+            "for peer metadata. Useful with --announce when public addresses "
+            "are known upfront."
         ),
     )
     parser.add_argument(

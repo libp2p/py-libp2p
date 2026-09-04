@@ -114,9 +114,9 @@ Disabling Identify address discovery
 ------------------------------------
 
 If public addresses are known ahead of time and you do not want Identify to
-drive discovery (privacy or to avoid ``ObservedAddrManager`` overhead), set
-``disable_identify_address_discovery=True``. This matches go-libp2p's
-``DisableIdentifyAddressDiscovery``::
+drive **address** discovery (privacy or to avoid ``ObservedAddrManager``
+overhead), set ``disable_identify_address_discovery=True``. This matches
+go-libp2p's ``DisableIdentifyAddressDiscovery``::
 
     host = new_host(
         announce_addrs=[Multiaddr("/ip4/1.2.3.4/tcp/4001")],
@@ -125,6 +125,9 @@ drive discovery (privacy or to avoid ``ObservedAddrManager`` overhead), set
 
 In that mode observations are not recorded and
 :meth:`~libp2p.host.basic_host.BasicHost.get_nat_type` returns unknown.
+The Identify protocol itself still runs (peer metadata is still exchanged);
+only consumption of Identify ``observed_addr`` for local address discovery
+is skipped.
 
 The full source code for this example is below:
 
