@@ -74,6 +74,14 @@ Use ``announce_addrs`` when you already know the exact public address(es) you
 want peers to dial (e.g. a reverse proxy hostname such as ngrok). Rely on
 automatic observed-address discovery otherwise.
 
+**CLI (static announce + optional Identify opt-out):**
+
+.. code-block:: console
+
+    $ python examples/announce_addrs/announce_addrs.py --listen-port 9001 \
+        --announce /ip4/1.2.3.4/tcp/4001 \
+        --disable-identify-address-discovery
+
 Callable ``addrs_factory``
 --------------------------
 
@@ -93,6 +101,14 @@ to advertise::
     host = new_host(addrs_factory=my_factory)
 
 ``announce_addrs`` and ``addrs_factory`` cannot be set together.
+
+**CLI (factory compose mode)** -- keep live candidates and append extras via
+``--factory-extra`` (mutually exclusive with ``--announce``):
+
+.. code-block:: console
+
+    $ python examples/announce_addrs/announce_addrs.py --listen-port 9001 \
+        --factory-extra /dns4/example.ngrok-free.app/tcp/9001
 
 Disabling Identify address discovery
 ------------------------------------
