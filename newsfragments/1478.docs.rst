@@ -1,0 +1,4 @@
+Extended the announce-addrs example CLI with ``--factory-extra``
+(``addrs_factory`` compose mode) and ``--disable-identify-address-discovery``,
+and clarified that the flag skips observed-address discovery only (Identify
+itself still runs for peer metadata).

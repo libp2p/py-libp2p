@@ -1,20 +1,39 @@
 """
 Announce Addresses Example for py-libp2p
 
-Demonstrates how to use announce addresses so that a node behind NAT
-or a reverse proxy (e.g. ngrok) advertises its publicly reachable
-address instead of its local listen address.
+Demonstrates how to advertise publicly reachable addresses when a node is
+behind NAT or a reverse proxy (e.g. ngrok), including the go-libp2p parity
+knobs from issue #1311 / #1478:
 
-Node A (listener):
+* static ``--announce`` / ``announce_addrs``
+* callable ``addrs_factory`` via ``--factory-extra`` (compose live candidates
+  + extra multiaddrs)
+* ``--disable-identify-address-discovery`` (opt out of Identify observations)
+
+Static announce and factory mode are mutually exclusive (same as the API).
+
+Node A (listener, static announce):
     python announce_addrs.py --listen-port 9001 \
         --announce /dns4/example.ngrok-free.app/tcp/9001 /ip4/1.2.3.4/tcp/4001
+
+Node A (listener, static announce + disable Identify discovery):
+    python announce_addrs.py --listen-port 9001 \
+        --announce /ip4/1.2.3.4/tcp/4001 \
+        --disable-identify-address-discovery
+
+Node A (listener, addrs_factory compose mode):
+    python announce_addrs.py --listen-port 9001 \
+        --factory-extra /dns4/example.ngrok-free.app/tcp/9001
 
 Node B (dialer):
     python announce_addrs.py --listen-port 9002 \
         --dial /dns4/example.ngrok-free.app/tcp/9001/p2p/<PEER_ID_OF_A>
 """
 
+from __future__ import annotations
+
 import argparse
+from collections.abc import Callable, Sequence
 import logging
 import secrets
 
@@ -35,21 +54,58 @@ logger = logging.getLogger("announce_addrs_example")
 logging.getLogger("multiaddr").setLevel(logging.WARNING)
 
 
-async def run_listener(port: int, announce_addrs: list[str]) -> None:
-    """Start a node that listens locally and announces external addresses."""
-    key_pair = create_new_key_pair(secrets.token_bytes(32))
+def _make_compose_factory(
+    extra_addrs: Sequence[multiaddr.Multiaddr],
+) -> Callable[[list[multiaddr.Multiaddr]], list[multiaddr.Multiaddr]]:
+    """Build an AddrsFactory that keeps live candidates and appends extras."""
+    extras = list(extra_addrs)
 
+    def factory(candidates: list[multiaddr.Multiaddr]) -> list[multiaddr.Multiaddr]:
+        seen = {str(a) for a in candidates}
+        result = list(candidates)
+        for addr in extras:
+            key = str(addr)
+            if key not in seen:
+                seen.add(key)
+                result.append(addr)
+        return result
+
+    return factory
+
+
+async def run_listener(
+    port: int,
+    announce_addrs: list[str] | None,
+    factory_extra: list[str] | None,
+    disable_identify_address_discovery: bool = False,
+) -> None:
+    """Start a node that listens locally and advertises configured addresses."""
+    key_pair = create_new_key_pair(secrets.token_bytes(32))
     listen_addrs = [multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")]
 
-    parsed_announce = [multiaddr.Multiaddr(a) for a in announce_addrs]
+    host_kwargs: dict = {
+        "key_pair": key_pair,
+        "disable_identify_address_discovery": disable_identify_address_discovery,
+    }
+    if announce_addrs is not None:
+        host_kwargs["announce_addrs"] = [multiaddr.Multiaddr(a) for a in announce_addrs]
+    elif factory_extra is not None:
+        extras = [multiaddr.Multiaddr(a) for a in factory_extra]
+        host_kwargs["addrs_factory"] = _make_compose_factory(extras)
 
-    host = new_host(key_pair=key_pair, announce_addrs=parsed_announce)
+    host = new_host(**host_kwargs)
 
     async with host.run(listen_addrs=listen_addrs):
         peer_id = host.get_id().to_string()
 
         logger.info("Node started")
         logger.info(f"Peer ID: {peer_id}")
+        if disable_identify_address_discovery:
+            logger.info("Identify address discovery: disabled")
+        if announce_addrs is not None:
+            logger.info("Mode: static announce_addrs")
+        elif factory_extra is not None:
+            logger.info("Mode: addrs_factory (compose live candidates + extras)")
 
         logger.info("Transport (local) addresses:")
         for addr in host.get_transport_addrs():
@@ -93,8 +149,26 @@ async def run_dialer(port: int, dial_addr: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Announce Addresses Example",
+        description=(
+            "Announce Addresses Example — static announce_addrs, "
+            "addrs_factory compose mode, and optional Identify discovery opt-out."
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  Static announce:\n"
+            "    %(prog)s --listen-port 9001 "
+            "--announce /dns4/example.ngrok-free.app/tcp/9001\n"
+            "  Static announce + disable Identify discovery:\n"
+            "    %(prog)s --listen-port 9001 --announce /ip4/1.2.3.4/tcp/4001 "
+            "--disable-identify-address-discovery\n"
+            "  Factory compose (live candidates + extras):\n"
+            "    %(prog)s --listen-port 9001 "
+            "--factory-extra /dns4/example.ngrok-free.app/tcp/9001\n"
+            "  Dialer:\n"
+            "    %(prog)s --listen-port 9002 "
+            "--dial /dns4/example.ngrok-free.app/tcp/9001/p2p/<PEER_ID>\n"
+        ),
     )
     parser.add_argument(
         "--listen-port",
@@ -105,7 +179,31 @@ def main() -> None:
     parser.add_argument(
         "--announce",
         nargs="+",
-        help="Announce addresses (e.g. /dns4/example.ngrok-free.app/tcp/443)",
+        help=(
+            "Static announce addresses "
+            "(e.g. /dns4/example.ngrok-free.app/tcp/443). "
+            "Mutually exclusive with --factory-extra."
+        ),
+    )
+    parser.add_argument(
+        "--factory-extra",
+        nargs="+",
+        metavar="MULTIADDR",
+        help=(
+            "Use addrs_factory: advertise live candidates "
+            "(listen + confirmed observed, unless discovery is disabled) "
+            "plus these extra multiaddrs. Mutually exclusive with --announce."
+        ),
+    )
+    parser.add_argument(
+        "--disable-identify-address-discovery",
+        action="store_true",
+        help=(
+            "Do not record Identify observed addresses for local discovery "
+            "(go-libp2p DisableIdentifyAddressDiscovery). Identify still runs "
+            "for peer metadata. Useful with --announce when public addresses "
+            "are known upfront."
+        ),
     )
     parser.add_argument(
         "--dial",
@@ -117,10 +215,27 @@ def main() -> None:
 
     if args.dial:
         trio.run(run_dialer, args.listen_port, args.dial)
-    elif args.announce:
-        trio.run(run_listener, args.listen_port, args.announce)
-    else:
-        parser.error("Provide --announce to listen, or --dial to connect to a peer.")
+        return
+
+    if args.announce and args.factory_extra:
+        parser.error(
+            "cannot combine --announce and --factory-extra "
+            "(same mutual exclusion as announce_addrs vs addrs_factory)"
+        )
+
+    if not args.announce and not args.factory_extra:
+        parser.error(
+            "Provide --announce or --factory-extra to listen, "
+            "or --dial to connect to a peer."
+        )
+
+    trio.run(
+        run_listener,
+        args.listen_port,
+        args.announce,
+        args.factory_extra,
+        args.disable_identify_address_discovery,
+    )
 
 
 if __name__ == "__main__":
