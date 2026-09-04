@@ -745,9 +745,10 @@ def new_host(
     :param addrs_factory: optional callable matching go-libp2p ``AddrsFactory``;
         receives the live candidate address list and returns addresses to
         advertise (mutually exclusive with ``announce_addrs``)
-    :param disable_identify_address_discovery: if True, do not record or
-        advertise Identify observed addresses (go
-        ``DisableIdentifyAddressDiscovery``)
+    :param disable_identify_address_discovery: if True, do not record Identify
+        observed addresses for local discovery (go
+        ``DisableIdentifyAddressDiscovery``). Identify itself still runs for
+        peer metadata; only observed-address discovery is skipped.
     :param transports: explicit list of transport instances to register.  When
         provided, all ``enable_*`` flags and ``listen_addrs``-based detection
         are bypassed.
