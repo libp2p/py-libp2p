@@ -781,6 +781,28 @@ class Pubsub(Service, IPubsub):
         with trio.fail_after(timeout):
             await event.wait()
 
+    async def wait_for_mesh(
+        self, peer_id: ID, topic_id: str, timeout: float = 5.0
+    ) -> None:
+        """
+        Wait until *peer_id* is in this node's GossipSub mesh for *topic_id*.
+
+        Delegates to the router's event-based ``wait_for_mesh``. Requires a
+        GossipSub router.
+
+        :param peer_id: the peer to wait for in the mesh
+        :param topic_id: the topic whose mesh to check
+        :param timeout: maximum time to wait in seconds (default: 5.0)
+        :raises TypeError: if the router does not support ``wait_for_mesh``
+        :raises trio.TooSlowError: if the peer is not in the mesh within timeout
+        """
+        wait = getattr(self.router, "wait_for_mesh", None)
+        if wait is None:
+            raise TypeError(
+                "wait_for_mesh requires a GossipSub router with mesh support"
+            )
+        await wait(peer_id, topic_id, timeout=timeout)
+
     async def ensure_peer_stream(self, peer_id: ID, timeout: float = 15.0) -> bool:
         """
         Ensure a pubsub stream with *peer_id* is open (idempotent).
@@ -1195,7 +1217,7 @@ class Pubsub(Service, IPubsub):
                 if key in self._subscription_events:
                     self._subscription_events.pop(key).set()
 
-                # Both hooks are async while `handle_subscription` is sync, so
+                # These hooks are async while `handle_subscription` is sync, so
                 # they have to be spawned.
                 if self.manager.is_running:
                     # Flush any messages that were queued while waiting for this
@@ -1211,6 +1233,15 @@ class Pubsub(Service, IPubsub):
                     # setup).
                     self.manager.run_task(
                         self._replay_recent_messages,
+                        origin_id,
+                        sub_message.topicid,
+                    )
+
+                    # Event-driven mesh first-fill (GossipSub GRAFT); no-op on
+                    # routers without a mesh. Avoids waiting on the next
+                    # heartbeat after subscribe-before-connect.
+                    self.manager.run_task(
+                        self.router.on_peer_subscribed,
                         origin_id,
                         sub_message.topicid,
                     )
