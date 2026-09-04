@@ -455,7 +455,6 @@ class Swarm(Service, INetworkService):
                     except Exception as e:
                         logger.debug("Error closing listener during shutdown: %s", e)
 
-
                 # Cancel the background nursery (transport / auto-connector).
                 nursery.cancel_scope.cancel()
                 self.background_nursery = None
