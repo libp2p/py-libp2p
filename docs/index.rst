@@ -13,11 +13,13 @@ The Python implementation of the libp2p networking stack
     release_notes
 
 .. toctree::
-    :maxdepth: 1
-    :caption: py-libp2p
+   :maxdepth: 1
+   :caption: py-libp2p
 
     Examples <examples>
+    Connection Health Monitoring <connection_health_monitoring>
     Filecoin Architecture Positioning <filecoin_architecture_positioning>
+    Filecoin Protocol Support Matrix <filecoin_protocol_support_matrix>
     API <libp2p>
 
 .. toctree::

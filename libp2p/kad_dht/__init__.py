@@ -5,6 +5,13 @@ This module provides a Distributed Hash Table (DHT) implementation
 based on the Kademlia protocol.
 """
 
+from .diagnostics import (
+    BucketStat,
+    CoverageGap,
+    FreshnessDistribution,
+    RoutingTableDiagnostics,
+    RoutingTableReport,
+)
 from .kad_dht import (
     KadDHT,
     DHTMode,
@@ -49,4 +56,9 @@ __all__ = [
     "get_testing_config",
     "get_small_network_config",
     "get_large_network_config",
+    "RoutingTableDiagnostics",
+    "RoutingTableReport",
+    "BucketStat",
+    "CoverageGap",
+    "FreshnessDistribution",
 ]

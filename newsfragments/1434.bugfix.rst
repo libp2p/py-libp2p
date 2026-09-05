@@ -1,0 +1,1 @@
+Kademlia DHT ``FIND_NODE`` queries to a single peer are bounded by ``QUERY_TIMEOUT``, so a peer that opens the query stream but never replies cannot stall ``find_peer``, ``provide``, ``find_providers`` or routing-table refresh; a regression test now covers the silent-peer case.

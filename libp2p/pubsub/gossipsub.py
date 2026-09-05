@@ -162,6 +162,9 @@ class GossipSub(IPubsubRouter, Service):
     _pending_control: DefaultDict[ID, rpc_pb2.ControlMessage]
     _max_pending_graft_prune_per_peer: int
 
+    # Event-based waiting for mesh membership (wait_for_mesh).
+    _mesh_peer_events: dict[tuple[ID, str], trio.Event]
+
     def __init__(
         self,
         protocols: Sequence[TProtocol],
@@ -293,6 +296,9 @@ class GossipSub(IPubsubRouter, Service):
         # Deferred retry queue for dropped control chunks.
         self._pending_control = defaultdict(lambda: rpc_pb2.ControlMessage())
         self._max_pending_graft_prune_per_peer = _MAX_PENDING_GRAFT_PRUNE_PER_PEER
+
+        # Event-based mesh membership waits (see wait_for_mesh).
+        self._mesh_peer_events = {}
 
         # Extensions support (v1.3+)
         self.extension_handlers: dict[str, Callable[[bytes, ID], Awaitable[None]]] = {}
@@ -787,6 +793,89 @@ class GossipSub(IPubsubRouter, Service):
                     exc_info=True,
                 )
 
+    def _is_gossipsub_peer(self, peer_id: ID) -> bool:
+        return self.peer_protocol.get(peer_id) in (
+            PROTOCOL_ID,
+            PROTOCOL_ID_V11,
+            PROTOCOL_ID_V12,
+            PROTOCOL_ID_V13,
+            PROTOCOL_ID_V14,
+            PROTOCOL_ID_V20,
+        )
+
+    def _notify_mesh_peer_added(self, peer_id: ID, topic: str) -> None:
+        """Wake any ``wait_for_mesh`` waiter for this peer/topic."""
+        key = (peer_id, topic)
+        event = self._mesh_peer_events.pop(key, None)
+        if event is not None:
+            event.set()
+
+    async def wait_for_mesh(
+        self, peer_id: ID, topic_id: str, timeout: float = 5.0
+    ) -> None:
+        """
+        Wait until *peer_id* is in ``mesh[topic_id]``.
+
+        Blocks on a :class:`trio.Event` set when the peer is added to the mesh
+        (subscription-driven GRAFT, ``join``, ``handle_graft``, or heartbeat
+        fill). Use this instead of sleeping or polling for mesh readiness.
+
+        :param peer_id: the peer to wait for in the mesh
+        :param topic_id: the topic whose mesh to check
+        :param timeout: maximum time to wait in seconds (default: 5.0)
+        :raises trio.TooSlowError: if the peer is not in the mesh within timeout
+        """
+        if topic_id in self.mesh and peer_id in self.mesh[topic_id]:
+            return
+        event = self._mesh_peer_events.setdefault((peer_id, topic_id), trio.Event())
+        with trio.fail_after(timeout):
+            await event.wait()
+
+    async def on_peer_subscribed(self, peer_id: ID, topic: str) -> None:
+        """
+        Event-driven mesh first-fill when a peer announces a subscription.
+
+        If we have already joined *topic* and the mesh is underfilled, GRAFT
+        the peer immediately instead of waiting for the next heartbeat. Ongoing
+        prune / opportunistic graft / degree maintenance remain heartbeat-owned.
+        """
+        if topic not in self.mesh:
+            return
+
+        if peer_id in self.mesh[topic]:
+            # Already meshed (e.g. remote GRAFT won the race); wake waiters.
+            self._notify_mesh_peer_added(peer_id, topic)
+            return
+
+        if peer_id in self.direct_peers:
+            return
+
+        if not self._is_gossipsub_peer(peer_id):
+            return
+
+        if self._check_back_off(peer_id, topic):
+            return
+
+        effective_degree_low = (
+            self.adaptive_degree_low
+            if self.adaptive_gossip_enabled
+            else self.degree_low
+        )
+        if len(self.mesh[topic]) >= effective_degree_low:
+            return
+
+        self.mesh[topic].add(peer_id)
+        if self.scorer is not None:
+            self.scorer.on_join_mesh(peer_id, topic)
+        self._notify_mesh_peer_added(peer_id, topic)
+
+        logger.debug(
+            "event-driven GRAFT of peer %s on topic %s after subscription",
+            peer_id,
+            topic,
+        )
+        await self.emit_graft(topic, peer_id)
+
     def remove_peer(self, peer_id: ID) -> None:
         """
         Notifies the router that a peer has been disconnected.
@@ -820,6 +909,11 @@ class GossipSub(IPubsubRouter, Service):
         # Discard any pending messages for this peer
         self._pending_messages.pop(peer_id, None)
         self._pending_control.pop(peer_id, None)
+
+        # Drop mesh-wait events for this peer (do not set — peer is gone).
+        stale_keys = [key for key in self._mesh_peer_events if key[0] == peer_id]
+        for key in stale_keys:
+            self._mesh_peer_events.pop(key, None)
 
         # Track disconnection for adaptive gossip metrics (only when enabled)
         if self.adaptive_gossip_enabled:
@@ -1118,6 +1212,7 @@ class GossipSub(IPubsubRouter, Service):
         # Add fanout peers to mesh and notifies them with a GRAFT(topic) control message
         for peer in fanout_peers:
             self.mesh[topic].add(peer)
+            self._notify_mesh_peer_added(peer, topic)
             await self.emit_graft(topic, peer)
 
         self.fanout.pop(topic, None)
@@ -1149,7 +1244,7 @@ class GossipSub(IPubsubRouter, Service):
         self,
         peers_to_graft: dict[ID, list[str]],
         peers_to_prune: dict[ID, list[str]],
-        peers_to_gossip: dict[ID, dict[str, list[str]]],
+        peers_to_gossip: dict[ID, dict[str, list[bytes]]],
     ) -> None:
         graft_msgs: list[rpc_pb2.ControlGraft] = []
         prune_msgs: list[rpc_pb2.ControlPrune] = []
@@ -1327,6 +1422,7 @@ class GossipSub(IPubsubRouter, Service):
                 for peer in selected_peers:
                     # Add peer to mesh[topic]
                     self.mesh[topic].add(peer)
+                    self._notify_mesh_peer_added(peer, topic)
 
                     # Emit GRAFT(topic) control message to peer
                     peers_to_graft[peer].append(topic)
@@ -1358,7 +1454,7 @@ class GossipSub(IPubsubRouter, Service):
         topic: str,
         current_peers: set[ID],
         is_fanout: bool = False,
-        peers_to_gossip: DefaultDict[ID, dict[str, list[str]]] | None = None,
+        peers_to_gossip: DefaultDict[ID, dict[str, list[bytes]]] | None = None,
     ) -> tuple[set[ID], bool]:
         """
         Helper method to handle heartbeat for a single topic,
@@ -1414,9 +1510,8 @@ class GossipSub(IPubsubRouter, Service):
                 peers_to_emit_ihave_to = self._get_in_topic_gossipsub_peers_from_minus(
                     topic, gossip_count, current_peers, True
                 )
-                msg_id_strs = [msg_id.hex() for msg_id in msg_ids]
                 for peer in peers_to_emit_ihave_to:
-                    peers_to_gossip[peer][topic] = msg_id_strs
+                    peers_to_gossip[peer][topic] = list(msg_ids)
 
         return in_topic_peers, False
 
@@ -1436,8 +1531,8 @@ class GossipSub(IPubsubRouter, Service):
             else:
                 self.fanout[topic] = updated_peers
 
-    def gossip_heartbeat(self) -> DefaultDict[ID, dict[str, list[str]]]:
-        peers_to_gossip: DefaultDict[ID, dict[str, list[str]]] = defaultdict(dict)
+    def gossip_heartbeat(self) -> DefaultDict[ID, dict[str, list[bytes]]]:
+        peers_to_gossip: DefaultDict[ID, dict[str, list[bytes]]] = defaultdict(dict)
 
         # Handle mesh topics
         for topic in self.mesh:
@@ -1668,13 +1763,13 @@ class GossipSub(IPubsubRouter, Service):
             mid_bytes = safe_bytes_from_hex(msg_id)
             if mid_bytes is None:
                 logger.warning(
-                    "Received invalid hex message ID in IHAVE from %s: %r",
+                    "Received invalid message ID in IHAVE from %s: %r",
                     sender_peer_id,
                     msg_id,
                 )
                 continue
             if not pubsub.seen_messages.has(mid_bytes):
-                msg_ids_wanted.append(MessageID(mid_bytes.hex()))
+                msg_ids_wanted.append(MessageID(mid_bytes))
 
         # Request messages with IWANT message
         if msg_ids_wanted:
@@ -1698,13 +1793,13 @@ class GossipSub(IPubsubRouter, Service):
             return
 
         msg_ids: list[bytes] = []
-        for msg_id_str in iwant_msg.messageIDs:
-            mid_bytes = safe_bytes_from_hex(msg_id_str)
+        for msg_id_wire in iwant_msg.messageIDs:
+            mid_bytes = safe_bytes_from_hex(msg_id_wire)
             if mid_bytes is None:
                 logger.warning(
-                    "Received invalid hex message ID in IWANT from %s: %r",
+                    "Received invalid message ID in IWANT from %s: %r",
                     sender_peer_id,
-                    msg_id_str,
+                    msg_id_wire,
                 )
                 continue
             msg_ids.append(mid_bytes)
@@ -1789,6 +1884,7 @@ class GossipSub(IPubsubRouter, Service):
 
             if sender_peer_id not in self.mesh[topic]:
                 self.mesh[topic].add(sender_peer_id)
+                self._notify_mesh_peer_added(sender_peer_id, topic)
                 if self.scorer is not None:
                     self.scorer.on_join_mesh(sender_peer_id, topic)
         else:
@@ -1849,7 +1945,9 @@ class GossipSub(IPubsubRouter, Service):
             control_msg.idontwant.extend(idontwant_msgs)
         return control_msg
 
-    async def emit_ihave(self, topic: str, msg_ids: Any, to_peer: ID) -> None:
+    async def emit_ihave(
+        self, topic: str, msg_ids: Sequence[bytes], to_peer: ID
+    ) -> None:
         """Emit ihave message, sent to to_peer, for topic and msg_ids."""
         ihave_msg: rpc_pb2.ControlIHave = rpc_pb2.ControlIHave()
         ihave_msg.messageIDs.extend(msg_ids)
@@ -1860,7 +1958,7 @@ class GossipSub(IPubsubRouter, Service):
 
         await self.emit_control_message(control_msg, to_peer)
 
-    async def emit_iwant(self, msg_ids: Any, to_peer: ID) -> None:
+    async def emit_iwant(self, msg_ids: Sequence[bytes], to_peer: ID) -> None:
         """Emit iwant message, sent to to_peer, for msg_ids."""
         iwant_msg: rpc_pb2.ControlIWant = rpc_pb2.ControlIWant()
         iwant_msg.messageIDs.extend(msg_ids)
@@ -2286,10 +2384,7 @@ class GossipSub(IPubsubRouter, Service):
             return
         pubsub = self.pubsub  # narrow type for pyrefly / mypy
 
-        # Use hex() to match heartbeat path; str(bytes) produces "b'...'" which
-        # fails safe_bytes_from_hex() in handle_ihave().
-        msg_id_str = msg_id.hex()
-
+        # Emit opaque bytes message IDs (aligned with IHAVE/IWANT protobuf schema).
         for topic in topic_ids:
             observers = self.topic_observation.get_observers(topic)
             if not observers:
@@ -2298,12 +2393,12 @@ class GossipSub(IPubsubRouter, Service):
             for observer_peer in observers:
                 if observer_peer not in pubsub.peers:
                     continue
-                await self.emit_ihave(topic, [msg_id_str], observer_peer)
+                await self.emit_ihave(topic, [msg_id], observer_peer)
                 logger.debug(
                     "Topic Observation: sent IHAVE(topic='%s', msg_id=%s) "
                     "to observer %s.",
                     topic,
-                    msg_id_str,
+                    msg_id.hex(),
                     observer_peer,
                 )
 
@@ -2920,6 +3015,7 @@ class GossipSub(IPubsubRouter, Service):
 
             if score > scorer.params.graylist_threshold:
                 self.mesh[topic].add(peer)
+                self._notify_mesh_peer_added(peer, topic)
                 peers_to_graft.append(peer)
                 # Notify scorer about the new mesh peer
                 if self.scorer is not None:
@@ -3004,6 +3100,7 @@ class GossipSub(IPubsubRouter, Service):
             grafted_count = 0
             for candidate in selected_candidates:
                 self.mesh[topic].add(candidate)
+                self._notify_mesh_peer_added(candidate, topic)
                 peers_to_graft[candidate].append(topic)
                 if self.scorer is not None:
                     self.scorer.on_join_mesh(candidate, topic)
@@ -3365,6 +3462,7 @@ class GossipSub(IPubsubRouter, Service):
         # Perform replacement: mutate mesh and emit PRUNE/GRAFT
         self.mesh[topic].discard(worst_peer)
         self.mesh[topic].add(best_replacement)
+        self._notify_mesh_peer_added(best_replacement, topic)
 
         if self.scorer is not None:
             self.scorer.on_leave_mesh(worst_peer, topic)
@@ -3392,6 +3490,7 @@ class GossipSub(IPubsubRouter, Service):
             logger.warning("Failed to emit PRUNE/GRAFT during peer replacement: %s", e)
             # Revert mesh and scorer on failure
             self.mesh[topic].add(worst_peer)
+            self._notify_mesh_peer_added(worst_peer, topic)
             self.mesh[topic].discard(best_replacement)
             if self.scorer is not None:
                 self.scorer.on_join_mesh(worst_peer, topic)

@@ -369,10 +369,13 @@ async def test_circuit_v2_transport_message_routing_through_relay():
         # Step 1: Destination connects to Relay
         with trio.fail_after(CONNECT_TIMEOUT):
             await connect(target_host, relay_host)
-            assert relay_host.get_id() in target_host.get_network().connections
-            assert target_host.get_id() in relay_host.get_network().connections
-
-        await trio.sleep(SLEEP_TIME)
+            # Poll until the connection is visible in both swarms rather than
+            # sleeping a fixed amount and hoping it settled.
+            while not (
+                relay_host.get_id() in target_host.get_network().connections
+                and target_host.get_id() in relay_host.get_network().connections
+            ):
+                await trio.sleep(SLEEP_TIME)
 
         # Step 2: Destination makes a reservation on the relay.
         with trio.fail_after(CONNECT_TIMEOUT):
@@ -389,15 +392,25 @@ async def test_circuit_v2_transport_message_routing_through_relay():
             # Read and discard the STATUS response from the relay
             await dest_relay_stream.read(1024)
 
-        await trio.sleep(SLEEP_TIME)
+        # Wait until the relay has actually registered the reservation before the
+        # source dials through it (the circuit dial fails without it).
+        with trio.fail_after(CONNECT_TIMEOUT):
+            while not relay_protocol.resource_manager.has_reservation(
+                target_host.get_id()
+            ):
+                await trio.sleep(SLEEP_TIME)
 
         # Step 3: Source connects to Relay
         with trio.fail_after(CONNECT_TIMEOUT):
             await connect(client_host, relay_host)
-            assert relay_host.get_id() in client_host.get_network().connections
-            assert client_host.get_id() in relay_host.get_network().connections
+            # Poll until the connection is visible in both swarms rather than
+            # sleeping a fixed amount and hoping it settled.
+            while not (
+                relay_host.get_id() in client_host.get_network().connections
+                and client_host.get_id() in relay_host.get_network().connections
+            ):
+                await trio.sleep(SLEEP_TIME)
 
-        await trio.sleep(SLEEP_TIME)
         relay_id = relay_host.get_id()
         client_discovery.get_relay = lambda: relay_id
 
@@ -1675,8 +1688,8 @@ async def test_dial_peer_info_includes_reservation_proof(protocol):
     dest_peer_id = ID.from_pubkey(dest_key.public_key)
     dest_info = PeerInfo(dest_peer_id, [])
 
-    peerstore.addrs.side_effect = (
-        lambda pid: [] if pid == dest_peer_id else [relay_addr]
+    peerstore.addrs.side_effect = lambda pid: (
+        [] if pid == dest_peer_id else [relay_addr]
     )
     peerstore.peer_info.return_value = relay_info
 

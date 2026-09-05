@@ -209,7 +209,7 @@ class TestSplitRpc:
         ihave = rpc.control.ihave.add()
         ihave.topicID = "test"
         for i in range(20):
-            ihave.messageIDs.append("msg-%d" % i)
+            ihave.messageIDs.append(("msg-%d" % i).encode())
         q = RpcQueue(max_message_size=80)
         parts = q.split_rpc(rpc)
         assert len(parts) >= 1
@@ -225,7 +225,7 @@ class TestSplitRpc:
         rpc = rpc_pb2.RPC()
         iwant = rpc.control.iwant.add()
         for i in range(20):
-            iwant.messageIDs.append("x" * 50)
+            iwant.messageIDs.append(b"x" * 50)
         q = RpcQueue(max_message_size=100)
         parts = q.split_rpc(rpc)
         all_ids = []
@@ -300,11 +300,11 @@ class TestSplitRpc:
         rpc = rpc_pb2.RPC()
         ihave = rpc.control.ihave.add()
         ihave.topicID = "t" * 200
-        ihave.messageIDs.append("a")
-        ihave.messageIDs.append("b")
+        ihave.messageIDs.append(b"a")
+        ihave.messageIDs.append(b"b")
         q = RpcQueue(max_message_size=50)
         parts = q.split_rpc(rpc)
-        all_ids: list[str] = []
+        all_ids: list[bytes] = []
         for p in parts:
             if p.HasField("control"):
                 for ih in p.control.ihave:
@@ -321,10 +321,10 @@ class TestSplitRpc:
         rpc = rpc_pb2.RPC()
         ihave = rpc.control.ihave.add()
         ihave.topicID = "topic"
-        ihave.messageIDs.append("x" * 200)
+        ihave.messageIDs.append(b"x" * 200)
         q = RpcQueue(max_message_size=50)
         parts = q.split_rpc(rpc)
-        all_ids: list[str] = []
+        all_ids: list[bytes] = []
         for p in parts:
             if p.HasField("control"):
                 for ih in p.control.ihave:
@@ -336,10 +336,10 @@ class TestSplitRpc:
         """A single oversized IWant messageID is emitted as a solo RPC."""
         rpc = rpc_pb2.RPC()
         iwant = rpc.control.iwant.add()
-        iwant.messageIDs.append("x" * 200)
+        iwant.messageIDs.append(b"x" * 200)
         q = RpcQueue(max_message_size=50)
         parts = q.split_rpc(rpc)
-        all_ids: list[str] = []
+        all_ids: list[bytes] = []
         for p in parts:
             if p.HasField("control"):
                 for iw in p.control.iwant:
@@ -367,9 +367,9 @@ class TestSplitRpc:
         rpc = rpc_pb2.RPC()
         ihave = rpc.control.ihave.add()
         ihave.topicID = "t" * 200
-        ihave.messageIDs.append("mid")
+        ihave.messageIDs.append(b"mid")
         iwant = rpc.control.iwant.add()
-        iwant.messageIDs.append("x" * 200)
+        iwant.messageIDs.append(b"x" * 200)
         q = RpcQueue(max_message_size=50)
         parts = q.split_rpc(rpc)
         for p in parts:
@@ -606,7 +606,7 @@ async def test_split_rpc_actually_splits_in_send_rpc():
         for i in range(20):
             ihave = ctrl.ihave.add()
             ihave.topicID = f"topic-{i}"
-            ihave.messageIDs.extend([f"mid-{i}-{j}" for j in range(5)])
+            ihave.messageIDs.extend([f"mid-{i}-{j}".encode() for j in range(5)])
 
         rpc = rpc_pb2.RPC()
         rpc.control.CopyFrom(ctrl)
@@ -808,7 +808,7 @@ async def test_push_control_retry_ignores_non_retriable_control() -> None:
         peer_id = IDFactory()
         control = rpc_pb2.ControlMessage()
         control.ihave.add().topicID = "topic-a"
-        control.iwant.add().messageIDs.extend(["mid-a"])
+        control.iwant.add().messageIDs.extend([b"mid-a"])
         control.idontwant.add().messageIDs.extend([b"mid-b"])
 
         router0._push_control_retry(peer_id, control)

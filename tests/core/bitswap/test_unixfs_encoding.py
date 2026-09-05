@@ -86,6 +86,7 @@ def test_balanced_layout_two_leaves():
         leaves.append((cid, leaf, len(data)))
 
     root_cid, root_block, _ = balanced_layout(leaves)
+    assert root_block is not None
 
     # Root must be a dag-pb file node with 2 links
     assert is_file_node(root_block)
@@ -110,6 +111,7 @@ def test_balanced_layout_two_levels():
         leaves.append((cid, leaf, chunk_size))
 
     root_cid, root_block, _ = balanced_layout(leaves)
+    assert root_block is not None
     links, unixfs = decode_dag_pb(root_block)
 
     # Root should link to 2 internal nodes (174 + 1)
@@ -124,7 +126,7 @@ def test_balanced_layout_two_levels():
 def test_balanced_layout_flat():
     print("\n[5] balanced_layout — exactly 174 leaves stays flat (1 level)")
     n = MAX_LINKS_PER_NODE  # 174
-    leaves = []
+    leaves: list[tuple[bytes, bytes | None, int]] = []
     for i in range(n):
         data = bytes([i % 256]) * 50
         leaf = create_leaf_node(data)
@@ -132,6 +134,7 @@ def test_balanced_layout_flat():
         leaves.append((cid, leaf, 50))
 
     root_cid, root_block, _ = balanced_layout(leaves)
+    assert root_block is not None
     links, unixfs = decode_dag_pb(root_block)
 
     assert len(links) == 174, f"expected 174 direct links, got {len(links)}"
