@@ -31,6 +31,12 @@ from libp2p.utils.address_validation import find_free_port
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
+EXPECTED_GOSSIPSUB_FAILURE_MODES = [
+    "peer-specific gossipsub stream negotiation may fail or reset",
+    "malformed control-message IDs are logged and skipped",
+    "publish path intentionally disabled",
+]
+
 
 @dataclass
 class ObserverState:
@@ -114,6 +120,12 @@ def _build_snapshot(
         "listen_addr": f"/ip4/0.0.0.0/tcp/{listen_port}",
         "max_messages": max_messages,
         "gossipsub_compatibility": compatibility,
+        "interop": {
+            "case": "filecoin_read_only_gossipsub_observer",
+            "workflow": "runtime_bootstrap_smoke",
+            "result": "partial",
+            "expected_failure_modes": EXPECTED_GOSSIPSUB_FAILURE_MODES,
+        },
     }
 
 
