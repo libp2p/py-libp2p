@@ -114,6 +114,36 @@ def test_pubsub_demo_json_payload_shape() -> None:
         "/fil/msgs/testnetnet",
     ]
     assert payload["max_messages"] == 25
+    assert set(payload["gossipsub_compatibility"].keys()) == {
+        "protocols",
+        "strict_signing",
+        "message_id_strategy",
+        "mesh_parameters",
+        "score_mode",
+        "observer_mode_limitation",
+        "limitations",
+    }
+    assert payload["gossipsub_compatibility"]["strict_signing"] is True
+    assert payload["gossipsub_compatibility"]["message_id_strategy"] == (
+        "blake2b-256(data)"
+    )
+    assert payload["gossipsub_compatibility"]["score_mode"] == "thresholds_only"
+    assert payload["gossipsub_compatibility"]["observer_mode_limitation"] == (
+        "publishing disabled; inbound observation only"
+    )
+    assert payload["gossipsub_compatibility"]["mesh_parameters"] == {
+        "degree": 8,
+        "degree_low": 6,
+        "degree_high": 12,
+        "gossip_history": 10,
+    }
+    assert payload["gossipsub_compatibility"]["limitations"] == [
+        "no full topic-scoring parity",
+        "no peer gater or subscription allowlist parity",
+        "no drand/F3 topic support",
+        "no publish path",
+        "no block/message semantic validation beyond observation",
+    ]
 
 
 def test_pubsub_observer_demo_has_no_publish_call_path() -> None:
