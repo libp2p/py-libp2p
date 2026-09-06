@@ -1,0 +1,3 @@
+Document Filecoin protocol support and gaps with a machine-readable
+support matrix, and expose a gossipsub compatibility snapshot from the
+read-only Filecoin pubsub observer demo.

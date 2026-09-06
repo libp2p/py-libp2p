@@ -11,6 +11,9 @@ How py-libp2p fits in Filecoin architecture today
 libp2p layer, and this package provides a Filecoin-focused DX layer for protocol
 IDs, topic formats, bootstrap presets, and practical examples.
 
+For protocol-by-protocol implementation status and prioritized gaps, see
+:doc:`filecoin_protocol_support_matrix`.
+
 Normative references:
 
 - `Filecoin Network Interface <https://spec.filecoin.io/systems/filecoin_nodes/network/>`_
