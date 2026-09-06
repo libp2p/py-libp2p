@@ -45,25 +45,55 @@ async def _spawn(harness: Path, *args: str) -> trio.Process:
     )
 
 
-async def _read_lines(proc: trio.Process, prefix: str, count: int = 1) -> list[str]:
-    """Read stdout until *count* lines start with *prefix* (or the process ends)."""
+async def _read_lines(
+    proc: trio.Process,
+    prefix: str,
+    *,
+    count: int = 1,
+    settle: float = 0.0,
+    timeout: float = 45.0,
+) -> list[str]:
+    """
+    Read stdout until at least *count* lines start with *prefix*.
+
+    If *settle* > 0, after the first match keep draining for that many seconds
+    so a multi-line burst (e.g. one LISTEN per interface) is collected in one
+    call. Without this, a second wait-for-N call either loses siblings already
+    sitting in the pipe or burns the full *timeout* when no further lines come.
+    """
     stdout = proc.stdout
     assert stdout is not None  # opened with stdout=PIPE above
     found: list[str] = []
-    buf = b""
-    with trio.move_on_after(45):
+    # Mutable cell so the nested drain helper can update the incomplete-line
+    # remainder without a `nonlocal` (pyrefly rejects that pattern here).
+    buf: list[bytes] = [b""]
+
+    def _consume(chunk: bytes) -> None:
+        buf[0] += chunk
+        while b"\n" in buf[0]:
+            line, buf[0] = buf[0].split(b"\n", 1)
+            text = line.decode(errors="replace").strip()
+            if text:
+                logger.debug("go: %s", text)
+            if text.startswith(prefix):
+                found.append(text)
+
+    with trio.move_on_after(timeout):
         while len(found) < count:
             chunk = await stdout.receive_some(4096)
             if not chunk:
-                break
-            buf += chunk
-            while b"\n" in buf:
-                line, buf = buf.split(b"\n", 1)
-                text = line.decode(errors="replace").strip()
-                if text:
-                    logger.debug("go: %s", text)
-                if text.startswith(prefix):
-                    found.append(text)
+                return found
+            _consume(chunk)
+
+    if settle > 0.0 and found:
+        # Drain siblings from the same burst / near-simultaneous prints.
+        with trio.move_on_after(settle):
+            while True:
+                chunk = await stdout.receive_some(4096)
+                if not chunk:
+                    break
+                _consume(chunk)
+
     return found
 
 
@@ -84,11 +114,11 @@ async def test_py_dials_go(go_harness: Path, version: int) -> None:
     """Py dialer (v1/v2) connects to a go-libp2p listener."""
     proc = await _spawn(go_harness, "listen")
     try:
-        lines = await _read_lines(proc, "LISTEN", count=1)
+        # One call: wait for the first LISTEN, then briefly settle for siblings
+        # (go prints one LISTEN per interface back-to-back).
+        lines = await _read_lines(proc, "LISTEN", count=1, settle=0.25)
         assert lines, "go harness never printed a LISTEN address"
-        # go emits one LISTEN line per interface back-to-back; collect the rest.
-        more = await _read_lines(proc, "LISTEN", count=3)
-        addr = _lan_addr(lines + more)
+        addr = _lan_addr(lines)
         go_id = addr.rsplit("/p2p/", 1)[1]
 
         dialer = _transport(webrtc_direct_dial_version=version)
