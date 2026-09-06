@@ -5,6 +5,7 @@ Read this first:
 
 - :doc:`filecoin_architecture_positioning`
 - :doc:`filecoin_protocol_support_matrix`
+- :doc:`filecoin_network_parity_and_interop`
 
 These examples show practical Filecoin-focused workflows using
 ``libp2p.filecoin``.
