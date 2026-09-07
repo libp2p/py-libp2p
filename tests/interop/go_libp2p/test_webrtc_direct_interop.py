@@ -3,10 +3,6 @@ go-libp2p ↔ py-libp2p WebRTC-Direct interop.
 
 Runs the pinned go-libp2p v0.49 harness (built by conftest) against our
 transport in both directions and both protocol versions.
-
-py → go is exercised for real. go → py is currently xfail: the inbound
-listener path tears the peer connection down right after ICE completes
-(libp2p/py-libp2p#1470); the go dialer just times out.
 """
 
 from __future__ import annotations
@@ -135,7 +131,6 @@ async def test_py_dials_go(go_harness: Path, version: int) -> None:
             await proc.wait()
 
 
-@pytest.mark.xfail(reason="go->py inbound stalls after ICE; see #1470", strict=True)
 @pytest.mark.parametrize("version", [1, 2])
 async def test_go_dials_py(go_harness: Path, version: int) -> None:
     """go-libp2p dialer (v1/v2) connects to our listener."""
