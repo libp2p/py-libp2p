@@ -139,10 +139,14 @@ class Mplex(IMuxedConn):
         """
         Close the stream muxer and underlying secured connection.
         """
-        if self.event_shutting_down.is_set():
-            return
-        # Set the `event_shutting_down`, to allow graceful shutdown.
-        self.event_shutting_down.set()
+        # Always close the underlying connection, even when the mux is already
+        # shutting down. The read loop's _cleanup() sets event_shutting_down on
+        # a peer-initiated EOF *without* closing our socket, so returning early
+        # here would leak it (#1487). secured_conn.close() is idempotent; this
+        # mirrors Yamux.close(), which closes the secured conn unconditionally.
+        if not self.event_shutting_down.is_set():
+            # Set the `event_shutting_down`, to allow graceful shutdown.
+            self.event_shutting_down.set()
         await self.secured_conn.close()
         # Blocked until `close` is finally set.
         await self.event_closed.wait()
