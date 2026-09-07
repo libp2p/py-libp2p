@@ -68,6 +68,7 @@ health-demo = ["rich>=13.0"]
 
 [project.scripts]
 chat-demo = "examples.chat.chat:main"
+dht-chat-demo = "examples.dht_chat.dht_chat:main"
 echo-demo = "examples.echo.echo:main"
 echo-quic-demo = "examples.echo.echo_quic:main"
 ping-demo = "examples.ping.ping:main"
