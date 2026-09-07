@@ -552,7 +552,8 @@ async def run_signaling_server(
     Start a minimal HTTP server that accepts SDP offers via ``POST /sdp``.
 
     :param host: Bind address.
-    :param port: Bind port (TCP).
+    :param port: Bind port (TCP). Use ``0`` to let the OS pick an ephemeral
+        port; read the bound port from ``server.sockets[0].getsockname()``.
     :param on_offer: Async callback ``(offer_sdp) -> answer_sdp``.
     :returns: The running :class:`asyncio.Server`.
     """
@@ -640,7 +641,8 @@ async def run_signaling_server(
             writer.close()
 
     server = await asyncio.start_server(_handle, host, port)
-    logger.info("WebRTC signaling HTTP server listening on %s:%d", host, port)
+    bound = server.sockets[0].getsockname()[1] if server.sockets else port
+    logger.info("WebRTC signaling HTTP server listening on %s:%d", host, bound)
     return server
 
 
