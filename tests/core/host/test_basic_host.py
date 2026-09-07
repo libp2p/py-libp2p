@@ -91,13 +91,67 @@ async def test_swarm_stream_handler_no_protocol_selected(monkeypatch):
     monkeypatch.setattr(host.multiselect, "negotiate", fake_negotiate)
 
     # Now run the handler and expect StreamFailure
-    with pytest.raises(
-        StreamFailure, match="Failed to negotiate protocol: no protocol selected"
-    ):
-        await host._swarm_stream_handler(net_stream)
+    try:
+        with pytest.raises(
+            StreamFailure, match="Failed to negotiate protocol: no protocol selected"
+        ):
+            await host._swarm_stream_handler(net_stream)
+    finally:
+        await host.close()
 
     # Ensure reset was called since negotiation failed
     net_stream.reset.assert_awaited()
+
+
+@pytest.mark.trio
+async def test_host_close_is_idempotent():
+    key_pair = create_new_key_pair()
+    swarm = new_swarm(key_pair)
+    swarm.close = AsyncMock(wraps=swarm.close)
+    host = BasicHost(swarm)
+
+    await host.close()
+    await host.close()
+
+    assert host._closed is True
+    swarm.close.assert_awaited_once()
+
+
+@pytest.mark.trio
+async def test_host_close_stops_background_services():
+    key_pair = create_new_key_pair()
+    swarm = new_swarm(key_pair)
+    swarm.close = AsyncMock()
+    host = BasicHost(swarm)
+
+    mdns = MagicMock()
+    bootstrap = MagicMock()
+    upnp = MagicMock()
+    upnp.get_external_ip.return_value = "1.2.3.4"
+    upnp.remove_port_mapping = AsyncMock()
+
+    host.mDNS = mdns
+    host.bootstrap = bootstrap
+    host.upnp = upnp
+
+    mock_listener = MagicMock()
+    mock_listener.get_addrs.return_value = [Multiaddr("/ip4/127.0.0.1/tcp/8000")]
+    swarm.listeners = {"tcp": mock_listener}
+
+    await host.close()
+
+    mdns.stop.assert_called_once()
+    bootstrap.stop.assert_called_once()
+    upnp.remove_port_mapping.assert_awaited_once_with(8000, "TCP")
+    assert host.mDNS is None
+    assert host.bootstrap is None
+    assert host.upnp is None
+
+    # Second close must not re-invoke service teardown.
+    await host.close()
+    mdns.stop.assert_called_once()
+    bootstrap.stop.assert_called_once()
+    upnp.remove_port_mapping.assert_awaited_once()
 
 
 def test_get_addrs_and_transport_addrs():

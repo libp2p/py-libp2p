@@ -360,6 +360,7 @@ class BasicHost(IHost):
         self._identified_peers: dict[ID, str] = {}
         self._identify_tasks: set[trio.CancelScope] = set()
         self._network.register_notifee(_IdentifyNotifee(self))
+        self._closed = False
 
         # Metrics
         self.metric_recv_channel = metric_recv_channel
@@ -578,18 +579,44 @@ class BasicHost(IHost):
                         yield
                     finally:
                         nursery.cancel_scope.cancel()
-                        if self.mDNS is not None:
-                            self.mDNS.stop()
-                    if self.upnp and self.upnp.get_external_ip():
-                        upnp_manager = self.upnp
-                        logger.debug("Removing UPnP port mappings")
-                        for addr in self.get_transport_addrs():
-                            if port := addr.value_for_protocol("tcp"):
-                                await upnp_manager.remove_port_mapping(int(port), "TCP")
-                    if self.bootstrap is not None:
-                        self.bootstrap.stop()
+                await self._shutdown_background_services()
 
         return _run()
+
+    async def _shutdown_background_services(self) -> None:
+        """
+        Best-effort stop of mDNS, UPnP, and bootstrap.
+
+        Safe to call multiple times: service references are cleared after stop
+        so a second call is a no-op (avoids double ``zeroconf.close()``).
+        """
+        if self.mDNS is not None:
+            try:
+                logger.debug("Stopping mDNS Discovery")
+                self.mDNS.stop()
+            except Exception as e:
+                logger.warning(f"Error stopping mDNS during shutdown: {e}")
+            self.mDNS = None
+
+        upnp_manager = self.upnp
+        if upnp_manager is not None:
+            self.upnp = None
+            try:
+                if upnp_manager.get_external_ip():
+                    logger.debug("Removing UPnP port mappings")
+                    for addr in self.get_transport_addrs():
+                        if port := addr.value_for_protocol("tcp"):
+                            await upnp_manager.remove_port_mapping(int(port), "TCP")
+            except Exception as e:
+                logger.warning(f"Error removing UPnP mappings during shutdown: {e}")
+
+        if self.bootstrap is not None:
+            try:
+                logger.debug("Stopping Bootstrap Discovery")
+                self.bootstrap.stop()
+            except Exception as e:
+                logger.warning(f"Error stopping bootstrap during shutdown: {e}")
+            self.bootstrap = None
 
     def set_stream_handler(
         self, protocol_id: TProtocol, stream_handler: StreamHandlerFn
@@ -1107,6 +1134,18 @@ class BasicHost(IHost):
         await self._network.close_peer(peer_id)
 
     async def close(self) -> None:
+        """
+        Close the host and its underlying network service.
+
+        Cleanup order is intentional: stop background services, cancel
+        inflight identify tasks, then close the network. Idempotent.
+        """
+        if self._closed:
+            return
+        self._closed = True
+
+        await self._shutdown_background_services()
+
         for cs in self._identify_tasks:
             cs.cancel()
         self._identify_tasks.clear()
