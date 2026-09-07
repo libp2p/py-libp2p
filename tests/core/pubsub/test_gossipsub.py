@@ -1,4 +1,5 @@
 import random
+from typing import cast
 from unittest.mock import (
     AsyncMock,
     MagicMock,
@@ -30,6 +31,10 @@ from tests.utils.pubsub.utils import (
     one_to_all_connect,
     sparse_connect,
 )
+from tests.utils.pubsub.wait import (
+    wait_for,
+    wait_for_pubsub_payload,
+)
 
 
 @pytest.mark.trio
@@ -59,15 +64,24 @@ async def test_join():
         # Connect central host to all other hosts
         await one_to_all_connect(hosts, central_node_index)
 
-        # Wait 1 seconds for heartbeat to allow mesh to connect
-        await trio.sleep(1)
+        # Wait for pubsub streams and subscriptions from subscribed peers
+        for i in subscribed_peer_indices:
+            await pubsubs_gsub[central_node_index].wait_for_peer(hosts[i].get_id())
+            await pubsubs_gsub[i].wait_for_peer(hosts[central_node_index].get_id())
+            await pubsubs_gsub[central_node_index].wait_for_subscription(
+                hosts[i].get_id(), topic
+            )
 
         # Central node publish to the topic so that this topic
         # is added to central node's fanout
         # publish from the randomly chosen host
         await pubsubs_gsub[central_node_index].publish(topic, b"data")
         await pubsubs_gsub[central_node_index].publish(to_drop_topic, b"data")
-        await trio.sleep(0.5)
+        await wait_for(
+            lambda: topic in gossipsubs[central_node_index].fanout,
+            timeout=10.0,
+            fail_msg="Fanout entry for subscribed topic not created after publish",
+        )
         # Check that the gossipsub of central node has fanout for the topics
         assert topic, to_drop_topic in gossipsubs[central_node_index].fanout
         # Check that the gossipsub of central node does not have a mesh for the topics
@@ -77,13 +91,20 @@ async def test_join():
         assert topic in gossipsubs[central_node_index].time_since_last_publish
         assert to_drop_topic in gossipsubs[central_node_index].time_since_last_publish
 
+        # Explicit TTL expiry: time_to_live=1 on the gossipsub batch
         await trio.sleep(1)
         # Check that after ttl the to_drop_topic is no more in fanout of central node
         assert to_drop_topic not in gossipsubs[central_node_index].fanout
         # Central node subscribes the topic
         await pubsubs_gsub[central_node_index].subscribe(topic)
 
-        await trio.sleep(1)
+        for i in subscribed_peer_indices:
+            await pubsubs_gsub[central_node_index].wait_for_mesh(
+                hosts[i].get_id(), topic
+            )
+            await pubsubs_gsub[i].wait_for_mesh(
+                hosts[central_node_index].get_id(), topic
+            )
 
         # Check that the gossipsub of central node no longer has fanout for the topic
         assert topic not in gossipsubs[central_node_index].fanout
@@ -134,8 +155,8 @@ async def test_handle_graft(monkeypatch):
         id_bob = pubsubs_gsub[index_bob].my_id
         await connect(pubsubs_gsub[index_alice].host, pubsubs_gsub[index_bob].host)
 
-        # Wait 2 seconds for heartbeat to allow mesh to connect
-        await trio.sleep(2)
+        await pubsubs_gsub[index_alice].wait_for_peer(id_bob)
+        await pubsubs_gsub[index_bob].wait_for_peer(id_alice)
 
         topic = "test_handle_graft"
         # Only lice subscribe to the topic
@@ -167,7 +188,7 @@ async def test_handle_graft(monkeypatch):
 
         await gossipsubs[index_bob].emit_graft(topic, id_alice)
 
-        await trio.sleep(1)
+        await pubsubs_gsub[index_alice].wait_for_mesh(id_bob, topic)
 
         # Check that bob is now alice's mesh peer
         assert id_bob in gossipsubs[index_alice].mesh[topic]
@@ -195,9 +216,13 @@ async def test_handle_prune():
 
         await connect(pubsubs_gsub[index_alice].host, pubsubs_gsub[index_bob].host)
 
-        # Wait for heartbeat to allow mesh to connect
-        # With heartbeat_interval=3, we need to wait longer for mesh establishment
-        await trio.sleep(3.5)
+        # Wait for mesh to form (heartbeat_interval=3; event wait replaces fixed sleep)
+        await pubsubs_gsub[index_alice].wait_for_peer(id_bob, timeout=10)
+        await pubsubs_gsub[index_bob].wait_for_peer(id_alice, timeout=10)
+        await pubsubs_gsub[index_alice].wait_for_subscription(id_bob, topic, timeout=10)
+        await pubsubs_gsub[index_bob].wait_for_subscription(id_alice, topic, timeout=10)
+        await pubsubs_gsub[index_alice].wait_for_mesh(id_bob, topic, timeout=10)
+        await pubsubs_gsub[index_bob].wait_for_mesh(id_alice, topic, timeout=10)
 
         # Check that they are each other's mesh peer
         assert id_alice in gossipsubs[index_bob].mesh[topic]
@@ -211,8 +236,12 @@ async def test_handle_prune():
 
         # NOTE: We increase `heartbeat_interval` to 3 seconds so that bob will not
         # add alice back to his mesh after heartbeat.
-        # Wait for bob to `handle_prune` - increased wait time for Windows compatibility
-        await trio.sleep(0.5)
+        # Wait for bob to `handle_prune`
+        await wait_for(
+            lambda: id_alice not in gossipsubs[index_bob].mesh[topic],
+            timeout=10.0,
+            fail_msg="Alice was not pruned from Bob's mesh",
+        )
 
         # Check that alice is no longer bob's mesh peer
         assert id_alice not in gossipsubs[index_bob].mesh[topic]
@@ -223,15 +252,28 @@ async def test_dense():
     async with PubsubFactory.create_batch_with_gossipsub(10) as pubsubs_gsub:
         hosts = [pubsub.host for pubsub in pubsubs_gsub]
         num_msgs = 5
+        topic = "foobar"
+        routers = [cast(GossipSub, pubsub.router) for pubsub in pubsubs_gsub]
 
         # All pubsub subscribe to foobar
-        queues = [await pubsub.subscribe("foobar") for pubsub in pubsubs_gsub]
+        queues = [await pubsub.subscribe(topic) for pubsub in pubsubs_gsub]
 
         # Densely connect libp2p hosts in a random way
         await dense_connect(hosts)
 
-        # Wait 2 seconds for heartbeat to allow mesh to connect
-        await trio.sleep(2)
+        await wait_for(
+            lambda: all(len(ps.peers) == len(hosts) - 1 for ps in pubsubs_gsub),
+            timeout=10.0,
+            fail_msg="Dense connect did not establish all peer streams",
+        )
+        await wait_for(
+            lambda: all(
+                topic in router.mesh and len(router.mesh[topic]) > 0
+                for router in routers
+            ),
+            timeout=10.0,
+            fail_msg="Dense mesh did not form",
+        )
 
         for i in range(num_msgs):
             msg_content = b"foo " + i.to_bytes(1, "big")
@@ -240,12 +282,11 @@ async def test_dense():
             origin_idx = random.randint(0, len(hosts) - 1)
 
             # publish from the randomly chosen host
-            await pubsubs_gsub[origin_idx].publish("foobar", msg_content)
+            await pubsubs_gsub[origin_idx].publish(topic, msg_content)
 
-            await trio.sleep(0.5)
             # Assert that all blocking queues receive the message
             for queue in queues:
-                msg = await queue.get()
+                msg = await wait_for_pubsub_payload(queue, msg_content)
                 assert msg.data == msg_content
 
 
@@ -254,17 +295,29 @@ async def test_fanout():
     async with PubsubFactory.create_batch_with_gossipsub(10) as pubsubs_gsub:
         hosts = [pubsub.host for pubsub in pubsubs_gsub]
         num_msgs = 5
+        topic = "foobar"
+        routers = [cast(GossipSub, pubsub.router) for pubsub in pubsubs_gsub[1:]]
 
         # All pubsub subscribe to foobar except for `pubsubs_gsub[0]`
-        subs = [await pubsub.subscribe("foobar") for pubsub in pubsubs_gsub[1:]]
+        subs = [await pubsub.subscribe(topic) for pubsub in pubsubs_gsub[1:]]
 
-        # Sparsely connect libp2p hosts in random way
+        # Densely connect libp2p hosts in random way
         await dense_connect(hosts)
 
-        # Wait 2 seconds for heartbeat to allow mesh to connect
-        await trio.sleep(2)
+        await wait_for(
+            lambda: all(len(ps.peers) == len(hosts) - 1 for ps in pubsubs_gsub),
+            timeout=10.0,
+            fail_msg="Fanout dense connect did not establish all peer streams",
+        )
+        await wait_for(
+            lambda: all(
+                topic in router.mesh and len(router.mesh[topic]) > 0
+                for router in routers
+            ),
+            timeout=10.0,
+            fail_msg="Fanout mesh did not form on subscribed peers",
+        )
 
-        topic = "foobar"
         # Send messages with origin not subscribed
         for i in range(num_msgs):
             msg_content = b"foo " + i.to_bytes(1, "big")
@@ -275,14 +328,19 @@ async def test_fanout():
             # publish from the randomly chosen host
             await pubsubs_gsub[origin_idx].publish(topic, msg_content)
 
-            await trio.sleep(0.5)
             # Assert that all blocking queues receive the message
             for sub in subs:
-                msg = await sub.get()
+                msg = await wait_for_pubsub_payload(sub, msg_content)
                 assert msg.data == msg_content
 
         # Subscribe message origin
         subs.insert(0, await pubsubs_gsub[0].subscribe(topic))
+        await wait_for(
+            lambda: topic in cast(GossipSub, pubsubs_gsub[0].router).mesh
+            and len(cast(GossipSub, pubsubs_gsub[0].router).mesh[topic]) > 0,
+            timeout=10.0,
+            fail_msg="Origin peer mesh did not form after subscribe",
+        )
 
         # Send messages again
         for i in range(num_msgs):
@@ -294,10 +352,9 @@ async def test_fanout():
             # publish from the randomly chosen host
             await pubsubs_gsub[origin_idx].publish(topic, msg_content)
 
-            await trio.sleep(0.5)
             # Assert that all blocking queues receive the message
             for sub in subs:
-                msg = await sub.get()
+                msg = await wait_for_pubsub_payload(sub, msg_content)
                 assert msg.data == msg_content
 
 
@@ -313,17 +370,29 @@ async def test_fanout_maintenance():
         # All pubsub subscribe to foobar
         queues = []
         topic = "foobar"
+        routers = [cast(GossipSub, pubsub.router) for pubsub in pubsubs_gsub]
         for i in range(1, len(pubsubs_gsub)):
             q = await pubsubs_gsub[i].subscribe(topic)
 
             # Add each blocking queue to an array of blocking queues
             queues.append(q)
 
-        # Sparsely connect libp2p hosts in random way
+        # Densely connect libp2p hosts in random way
         await dense_connect(hosts)
 
-        # Wait 2 seconds for heartbeat to allow mesh to connect
-        await trio.sleep(2)
+        await wait_for(
+            lambda: all(len(ps.peers) == len(hosts) - 1 for ps in pubsubs_gsub),
+            timeout=10.0,
+            fail_msg="Fanout maintenance dense connect incomplete",
+        )
+        await wait_for(
+            lambda: all(
+                topic in routers[i].mesh and len(routers[i].mesh[topic]) > 0
+                for i in range(1, len(routers))
+            ),
+            timeout=10.0,
+            fail_msg="Fanout maintenance mesh did not form",
+        )
 
         # Send messages with origin not subscribed
         for i in range(num_msgs):
@@ -335,10 +404,9 @@ async def test_fanout_maintenance():
             # publish from the randomly chosen host
             await pubsubs_gsub[origin_idx].publish(topic, msg_content)
 
-            await trio.sleep(0.5)
             # Assert that all blocking queues receive the message
             for queue in queues:
-                msg = await queue.get()
+                msg = await wait_for_pubsub_payload(queue, msg_content)
                 assert msg.data == msg_content
 
         for sub in pubsubs_gsub:
@@ -346,7 +414,14 @@ async def test_fanout_maintenance():
 
         queues = []
 
-        await trio.sleep(2)
+        # Wait until meshes are cleared after unsubscribe
+        await wait_for(
+            lambda: all(topic not in router.mesh for router in routers),
+            timeout=10.0,
+            fail_msg="Meshes not cleared after unsubscribe",
+        )
+        # unsubscribe_back_off=1: allow backoff window to expire before resubscribe
+        await trio.sleep(1)
 
         # Resub and repeat
         for i in range(1, len(pubsubs_gsub)):
@@ -355,7 +430,14 @@ async def test_fanout_maintenance():
             # Add each blocking queue to an array of blocking queues
             queues.append(q)
 
-        await trio.sleep(2)
+        await wait_for(
+            lambda: all(
+                topic in routers[i].mesh and len(routers[i].mesh[topic]) > 0
+                for i in range(1, len(routers))
+            ),
+            timeout=10.0,
+            fail_msg="Fanout maintenance mesh did not reform after resubscribe",
+        )
 
         # Check messages can still be sent
         for i in range(num_msgs):
@@ -367,10 +449,9 @@ async def test_fanout_maintenance():
             # publish from the randomly chosen host
             await pubsubs_gsub[origin_idx].publish(topic, msg_content)
 
-            await trio.sleep(0.5)
             # Assert that all blocking queues receive the message
             for queue in queues:
-                msg = await queue.get()
+                msg = await wait_for_pubsub_payload(queue, msg_content)
                 assert msg.data == msg_content
 
 
@@ -388,9 +469,8 @@ async def test_gossip_propagation():
         # publish from the randomly chosen host
         await pubsubs_gsub[0].publish(topic, msg_content)
 
-        await trio.sleep(0.5)
         # Assert that the blocking queues receive the message
-        msg = await queue_0.get()
+        msg = await wait_for_pubsub_payload(queue_0, msg_content)
         assert msg.data == msg_content
 
 
@@ -540,7 +620,11 @@ async def test_dense_connect_fallback():
         await sparse_connect(hosts, degree)
 
         # Wait for connections to be established
-        await trio.sleep(2)
+        await wait_for(
+            lambda: all(len(ps.peers) == len(hosts) - 1 for ps in pubsubs_gsub),
+            timeout=10.0,
+            fail_msg="Dense-fallback connections incomplete",
+        )
 
         # Verify dense topology (all nodes connected to each other)
         for i, pubsub in enumerate(pubsubs_gsub):
@@ -564,7 +648,13 @@ async def test_sparse_connect():
         await sparse_connect(hosts, degree)
 
         # Wait for connections to be established
-        await trio.sleep(2)
+        await wait_for(
+            lambda: all(
+                degree <= len(ps.peers) < len(hosts) - 1 for ps in pubsubs_gsub
+            ),
+            timeout=10.0,
+            fail_msg="Sparse connect topology not established",
+        )
 
         # Verify sparse topology
         for i, pubsub in enumerate(pubsubs_gsub):
@@ -575,39 +665,73 @@ async def test_sparse_connect():
             )
 
         # Test message propagation
-        queues = [await pubsub.subscribe(topic) for pubsub in pubsubs_gsub]
-        await trio.sleep(2)
+        received_messages: list[list] = [[] for _ in pubsubs_gsub]
+        routers = [cast(GossipSub, pubsub.router) for pubsub in pubsubs_gsub]
 
-        # Publish and verify message propagation
-        msg_content = b"test_msg"
-        await pubsubs_gsub[0].publish(topic, msg_content)
-        await trio.sleep(2)
+        async with trio.open_nursery() as nursery:
+            for i, pubsub in enumerate(pubsubs_gsub):
+                queue = await pubsub.subscribe(topic)
 
-        # Verify message propagation - ideally all nodes should receive it
-        received_count = 0
-        for queue in queues:
-            try:
-                msg = await queue.get()
-                if msg.data == msg_content:
-                    received_count += 1
-            except Exception:
-                continue
+                async def collect(idx: int, sub) -> None:
+                    try:
+                        async for message in sub:
+                            received_messages[idx].append(message)
+                    except trio.Cancelled:
+                        pass
 
-        total_nodes = len(pubsubs_gsub)
+                nursery.start_soon(collect, i, queue)
 
-        # Ideally all nodes should receive the message for optimal scalability
-        if received_count == total_nodes:
-            # Perfect propagation achieved
-            pass
-        else:
-            # require more than half for acceptable scalability
-            min_required = (total_nodes + 1) // 2
-            assert received_count >= min_required, (
-                f"Message propagation insufficient: "
-                f"{received_count}/{total_nodes} nodes "
-                f"received the message. Ideally all nodes should receive it, but at "
-                f"minimum {min_required} required for sparse network scalability."
+            await wait_for(
+                lambda: all(
+                    topic in router.mesh and len(router.mesh[topic]) > 0
+                    for router in routers
+                ),
+                timeout=10.0,
+                fail_msg="Sparse mesh did not form",
             )
+
+            # Publish and verify message propagation
+            msg_content = b"test_msg"
+            await pubsubs_gsub[0].publish(topic, msg_content)
+
+            total_nodes = len(pubsubs_gsub)
+            min_required = (total_nodes + 1) // 2
+            await wait_for(
+                lambda: sum(
+                    1
+                    for msgs in received_messages
+                    if any(msg.data == msg_content for msg in msgs)
+                )
+                >= min_required,
+                timeout=10.0,
+                fail_msg=(
+                    f"Sparse propagation below minimum {min_required}/{total_nodes}"
+                ),
+            )
+
+            received_count = sum(
+                1
+                for msgs in received_messages
+                if any(msg.data == msg_content for msg in msgs)
+            )
+
+            # Ideally all nodes should receive the message for optimal scalability
+            if received_count == total_nodes:
+                # Perfect propagation achieved
+                pass
+            else:
+                # require more than half for acceptable scalability
+                assert received_count >= min_required, (
+                    f"Message propagation insufficient: "
+                    f"{received_count}/{total_nodes} nodes "
+                    f"received the message. Ideally all nodes should receive it, "
+                    f"but at minimum {min_required} required for sparse network "
+                    f"scalability."
+                )
+
+            for pubsub in pubsubs_gsub:
+                await pubsub.unsubscribe(topic)
+            nursery.cancel_scope.cancel()
 
 
 @pytest.mark.trio
@@ -619,7 +743,11 @@ async def test_connect_some_with_fewer_hosts_than_degree():
         degree = 5
 
         await connect_some(hosts, degree)
-        await trio.sleep(0.1)  # Allow connections to establish
+        await wait_for(
+            lambda: all(len(ps.peers) == len(hosts) - 1 for ps in pubsubs_fsub),
+            timeout=10.0,
+            fail_msg="connect_some did not connect all peers when n < degree",
+        )
 
         # Each host should connect to all other hosts (since there are only 2 others)
         for i, pubsub in enumerate(pubsubs_fsub):
@@ -640,7 +768,11 @@ async def test_connect_some_degree_limit_enforced():
         degree = 2
 
         await connect_some(hosts, degree)
-        await trio.sleep(0.1)
+        await wait_for(
+            lambda: len(pubsubs_fsub[0].peers) == degree,
+            timeout=10.0,
+            fail_msg="connect_some degree limit not reflected in peer map",
+        )
 
         # With 6 hosts and degree=2, expected connections:
         # Host 0 → connects to hosts 1,2 (2 peers total)
@@ -688,7 +820,12 @@ async def test_connect_some_degree_zero():
         degree = 0
 
         await connect_some(hosts, degree)
-        await trio.sleep(0.1)  # Allow any potential connections to establish
+        # degree=0 should leave peer maps empty (no readiness sleep needed)
+        await wait_for(
+            lambda: all(len(ps.peers) == 0 for ps in pubsubs_fsub),
+            timeout=5.0,
+            fail_msg="Unexpected peers after degree=0 connect_some",
+        )
 
         # Verify no connections were made
         for i, pubsub in enumerate(pubsubs_fsub):
@@ -708,7 +845,11 @@ async def test_connect_some_negative_degree():
         degree = -1
 
         await connect_some(hosts, degree)
-        await trio.sleep(0.1)  # Allow any potential connections to establish
+        await wait_for(
+            lambda: all(len(ps.peers) == 0 for ps in pubsubs_fsub),
+            timeout=5.0,
+            fail_msg="Unexpected peers after negative-degree connect_some",
+        )
 
         # Verify no connections were made (negative degree should behave like 0)
         for i, pubsub in enumerate(pubsubs_fsub):
@@ -727,7 +868,12 @@ async def test_sparse_connect_degree_zero():
         degree = 0
 
         await sparse_connect(hosts, degree)
-        await trio.sleep(0.1)  # Allow connections to establish
+        expected_neighbors = 2  # previous and next in ring
+        await wait_for(
+            lambda: all(len(ps.peers) >= expected_neighbors for ps in pubsubs_fsub),
+            timeout=10.0,
+            fail_msg="sparse_connect degree=0 neighbor links missing",
+        )
 
         # With degree=0, sparse_connect should still create neighbor connections
         # for connectivity (this is part of the algorithm design)
@@ -735,7 +881,6 @@ async def test_sparse_connect_degree_zero():
             connected_peers = len(pubsub.peers)
             # Should have some connections due to neighbor connectivity
             # (each node connects to immediate neighbors)
-            expected_neighbors = 2  # previous and next in ring
             assert connected_peers >= expected_neighbors, (
                 f"Host {i} has {connected_peers} connections, "
                 f"expected at least {expected_neighbors} neighbor connections"
@@ -788,7 +933,8 @@ async def test_handle_ihave(monkeypatch):
 
         # Connect Alice and Bob
         await connect(pubsubs_gsub[index_alice].host, pubsubs_gsub[index_bob].host)
-        await trio.sleep(0.1)  # Allow connections to establish
+        await pubsubs_gsub[index_alice].wait_for_peer(id_bob)
+        await pubsubs_gsub[index_bob].wait_for_peer(pubsubs_gsub[index_alice].my_id)
 
         # Mock emit_iwant to capture calls
         mock_emit_iwant = AsyncMock()
@@ -851,13 +997,8 @@ async def test_handle_iwant(monkeypatch):
         # Connect Alice and Bob
         await connect(pubsubs_gsub[index_alice].host, pubsubs_gsub[index_bob].host)
 
-        # Test stability fix: use wait_until_ready() and poll for peer
-        # registration instead of a fixed sleep to avoid flaky failures.
-        await pubsubs_gsub[index_bob].wait_until_ready()
-
-        with trio.fail_after(2.0):
-            while id_alice not in pubsubs_gsub[index_bob].peers:
-                await trio.sleep(0.01)
+        # Wait for peer registration (event-driven; replaces fixed sleep / poll loop)
+        await pubsubs_gsub[index_bob].wait_for_peer(id_alice)
 
         # Mock mcache.get to return a message
         test_message = rpc_pb2.Message(data=b"test_data")
@@ -919,7 +1060,7 @@ async def test_handle_iwant_invalid_msg_id(monkeypatch):
         id_alice = pubsubs_gsub[index_alice].my_id
 
         await connect(pubsubs_gsub[index_alice].host, pubsubs_gsub[index_bob].host)
-        await trio.sleep(0.1)
+        await pubsubs_gsub[index_bob].wait_for_peer(id_alice)
 
         mock_send_rpc = MagicMock()
         monkeypatch.setattr(gossipsubs[index_bob], "send_rpc", mock_send_rpc)
@@ -969,11 +1110,7 @@ async def test_handle_iwant_mixed_valid_and_invalid_msg_ids(monkeypatch):
         id_alice = pubsubs_gsub[index_alice].my_id
 
         await connect(pubsubs_gsub[index_alice].host, pubsubs_gsub[index_bob].host)
-        await pubsubs_gsub[index_bob].wait_until_ready()
-
-        with trio.fail_after(2.0):
-            while id_alice not in pubsubs_gsub[index_bob].peers:
-                await trio.sleep(0.01)
+        await pubsubs_gsub[index_bob].wait_for_peer(id_alice)
 
         test_message = rpc_pb2.Message(data=b"test_data")
         test_seqno = b"1234"
@@ -1023,7 +1160,8 @@ async def test_handle_ihave_empty_message_ids(monkeypatch):
 
         # Connect Alice and Bob
         await connect(pubsubs_gsub[index_alice].host, pubsubs_gsub[index_bob].host)
-        await trio.sleep(0.1)  # Allow connections to establish
+        await pubsubs_gsub[index_alice].wait_for_peer(id_bob)
+        await pubsubs_gsub[index_bob].wait_for_peer(pubsubs_gsub[index_alice].my_id)
 
         # Mock emit_iwant to capture calls
         mock_emit_iwant = AsyncMock()
