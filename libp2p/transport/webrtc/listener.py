@@ -14,7 +14,9 @@ handshake over data-channel 0 as the Noise *initiator* and hands the
 authenticated :class:`WebRTCConnection` to the handler on the trio side.
 
 Experimental harness (``config.enable_sdp_http_harness``): additionally
-serves ``POST /sdp`` on TCP (same port number) for py↔py debugging. Not
+serves ``POST /sdp`` on TCP (same port number) for py↔py debugging. For
+ephemeral listen ports the harness binds TCP first, then UDP on that port,
+so Windows excluded-port ranges do not strand a UDP-only binding. Not
 interoperable with other implementations.
 
 Published multiaddr format::
@@ -67,6 +69,10 @@ if TYPE_CHECKING:
     from ._udp_mux import UdpMux
 
 logger = logging.getLogger(__name__)
+
+# Ephemeral harness binds TCP first, then UDP on the same port. Windows
+# Hyper-V excluded ranges can still make the UDP half fail occasionally.
+_HARNESS_EPHEMERAL_BIND_ATTEMPTS = 16
 
 
 def _resolve_candidate_host(listen_host: str) -> str:
@@ -196,8 +202,12 @@ class WebRTCDirectListener(IListener):
         Binds one shared UDP socket and dispatches inbound STUN by ufrag (spec
         path). If ``config.enable_sdp_http_harness`` is set, also starts the
         experimental HTTP ``POST /sdp`` signaling server on TCP with the same
-        port number. The published multiaddr advertises the UDP port and the
-        DTLS certificate hash.
+        port number. For an OS-chosen port (``udp/0``), the harness binds TCP
+        first so the shared port is known to accept TCP (Windows Hyper-V
+        excluded ranges often allow UDP but reject TCP on the same number);
+        UDP is then bound to that port, with retries if UDP collides. The
+        published multiaddr advertises the UDP port and the DTLS certificate
+        hash.
 
         :param maddr: A ``/webrtc-direct`` multiaddr.
         :raises WebRTCConnectionError: If binding fails.
@@ -213,41 +223,11 @@ class WebRTCDirectListener(IListener):
             )
         self._rtc_cert = rtc_cert
 
-        from ._udp_mux import UdpMux
-
         # Shared UDP socket + STUN dispatch (runs on the asyncio thread).
         # Bind before spawning anything so a bind failure leaves no orphans.
-        # The experimental harness also binds TCP on the *same* port number
-        # (one multiaddr describes both); with an OS-chosen port that TCP
-        # bind can collide (Windows reserves port ranges per protocol), so
-        # retry with a fresh UDP port a few times.
-        for attempt in range(5):
-            try:
-                mux, bound_port = await bridge.run_coro(UdpMux.create(host, port))
-            except OSError as e:
-                raise WebRTCConnectionError(
-                    f"Failed to bind WebRTC Direct listener on {host}:{port}: {e}"
-                ) from e
-            if not self._config.enable_sdp_http_harness:
-                break
-            from ._aiortc_helpers import run_signaling_server
-
-            try:
-                self._signaling_server = await bridge.run_coro(
-                    run_signaling_server(
-                        host=host,
-                        port=bound_port,
-                        on_offer=self._make_offer_handler(bridge, rtc_cert),
-                    )
-                )
-                break
-            except OSError as e:
-                await bridge.run_coro(mux.close())
-                if port != 0 or attempt == 4:
-                    raise WebRTCConnectionError(
-                        f"Failed to bind /sdp harness on {host}:{bound_port}: {e}"
-                    ) from e
-                logger.debug("harness TCP port %d busy, retrying", bound_port)
+        mux, bound_port = await self._bind_listener_sockets(
+            bridge, host, port, rtc_cert
+        )
         self._mux = mux
         await self._start_trio_nursery()
         self._candidate_host = _resolve_candidate_host(host)
@@ -264,6 +244,89 @@ class WebRTCDirectListener(IListener):
             )
             self._listening_addrs.append(advertised)
             logger.info("WebRTC Direct listener on %s", advertised)
+
+    async def _bind_listener_sockets(
+        self,
+        bridge: AsyncioBridge,
+        host: str,
+        port: int,
+        rtc_cert: Any,
+    ) -> tuple[UdpMux, int]:
+        """
+        Bind the shared UDP mux and, when enabled, the /sdp harness TCP server.
+
+        Both must share the same port number (dialer ``post_sdp`` uses the
+        multiaddr UDP port). For ephemeral ports with the harness, bind TCP
+        first so the chosen port is known to accept TCP on Windows.
+        """
+        from ._udp_mux import UdpMux
+
+        if not self._config.enable_sdp_http_harness:
+            try:
+                return await bridge.run_coro(UdpMux.create(host, port))
+            except OSError as e:
+                raise WebRTCConnectionError(
+                    f"Failed to bind WebRTC Direct listener on {host}:{port}: {e}"
+                ) from e
+
+        from ._aiortc_helpers import run_signaling_server
+
+        on_offer = self._make_offer_handler(bridge, rtc_cert)
+
+        if port != 0:
+            # Fixed port: caller asked for this number; UDP then TCP.
+            try:
+                mux, bound_port = await bridge.run_coro(UdpMux.create(host, port))
+            except OSError as e:
+                raise WebRTCConnectionError(
+                    f"Failed to bind WebRTC Direct listener on {host}:{port}: {e}"
+                ) from e
+            try:
+                self._signaling_server = await bridge.run_coro(
+                    run_signaling_server(host=host, port=bound_port, on_offer=on_offer)
+                )
+            except OSError as e:
+                await bridge.run_coro(mux.close())
+                raise WebRTCConnectionError(
+                    f"Failed to bind /sdp harness on {host}:{bound_port}: {e}"
+                ) from e
+            return mux, bound_port
+
+        # Ephemeral: TCP-first so we sample from TCP-allowed ports (WinError
+        # 10013), then bind UDP to that same number.
+        last_error: OSError | None = None
+        for attempt in range(_HARNESS_EPHEMERAL_BIND_ATTEMPTS):
+            try:
+                server = await bridge.run_coro(
+                    run_signaling_server(host=host, port=0, on_offer=on_offer)
+                )
+            except OSError as e:
+                raise WebRTCConnectionError(
+                    f"Failed to bind /sdp harness on {host}:0: {e}"
+                ) from e
+
+            bound_port = await bridge.run_coro(_signaling_bound_port(server))
+            try:
+                mux, mux_port = await bridge.run_coro(UdpMux.create(host, bound_port))
+            except OSError as e:
+                last_error = e
+                await bridge.run_coro(_close_server(server))
+                logger.debug(
+                    "harness TCP port %d UDP bind failed (attempt %d/%d): %s; retrying",
+                    bound_port,
+                    attempt + 1,
+                    _HARNESS_EPHEMERAL_BIND_ATTEMPTS,
+                    e,
+                )
+                continue
+
+            self._signaling_server = server
+            return mux, mux_port
+
+        raise WebRTCConnectionError(
+            f"Failed to bind WebRTC Direct listener+harness on {host} "
+            f"after {_HARNESS_EPHEMERAL_BIND_ATTEMPTS} TCP-first attempts: {last_error}"
+        ) from last_error
 
     # ------------------------------------------------------------------
     # Spec path: STUN first contact -> inferred offer -> muxed PC
@@ -634,3 +697,11 @@ async def _close_server(server: asyncio.Server) -> None:
     """Close an asyncio.Server (runs on asyncio thread)."""
     server.close()
     await server.wait_closed()
+
+
+async def _signaling_bound_port(server: asyncio.Server) -> int:
+    """Return the TCP port an ``asyncio.Server`` is bound to (asyncio thread)."""
+    sockets = server.sockets
+    if not sockets:
+        raise WebRTCConnectionError("signaling server has no bound sockets")
+    return int(sockets[0].getsockname()[1])
