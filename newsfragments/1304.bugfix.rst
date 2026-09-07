@@ -1,0 +1,1 @@
+Circuit Relay v2 clients open a new HOP stream for CONNECT after RESERVE so relays that finish the substream after one exchange (for example rust-libp2p) work for hole-punch and interop.

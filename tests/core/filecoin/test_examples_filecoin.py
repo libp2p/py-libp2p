@@ -1,10 +1,16 @@
 import ast
 import inspect
 
+from multiaddr import Multiaddr
+
 from examples.filecoin import (
     filecoin_connect_demo as connect_demo,
     filecoin_ping_identify_demo as ping_identify_demo,
     filecoin_pubsub_demo as pubsub_demo,
+)
+from libp2p.filecoin.interop import (
+    classify_probe_result,
+    transport_family_for_addrs,
 )
 
 
@@ -49,6 +55,17 @@ def test_connect_demo_json_payload_shape() -> None:
         connected=True,
         address="/ip4/127.0.0.1/tcp/1234/p2p/12D3KooW...",
         peer_id="12D3KooW...",
+        connection={
+            "transport_family": "tcp",
+            "security_protocol": "/noise",
+            "muxer_protocol": "/yamux/1.0.0",
+        },
+        interop={
+            "case": "public_filecoin_bootstrap_connect",
+            "workflow": "runtime_bootstrap_smoke",
+            "result": "pass",
+            "failure_mode": None,
+        },
         error=None,
     )
     assert set(payload.keys()) == {
@@ -58,7 +75,15 @@ def test_connect_demo_json_payload_shape() -> None:
         "connected",
         "address",
         "peer_id",
+        "connection",
+        "interop",
         "error",
+    }
+    assert set(payload["interop"].keys()) == {
+        "case",
+        "workflow",
+        "result",
+        "failure_mode",
     }
 
 
@@ -69,6 +94,11 @@ def test_ping_identify_demo_json_payload_shape() -> None:
         connected=True,
         address="/ip4/127.0.0.1/tcp/9999/p2p/12D3KooW...",
         peer_id="12D3KooW...",
+        connection={
+            "transport_family": "tcp",
+            "security_protocol": "/noise",
+            "muxer_protocol": "/yamux/1.0.0",
+        },
         identify={
             "agent_version": "lotus/1.35.0",
             "protocol_version": "ipfs/0.1.0",
@@ -77,6 +107,12 @@ def test_ping_identify_demo_json_payload_shape() -> None:
             "supports_filecoin_chain_exchange": True,
         },
         ping={"count": 3, "rtts_us": [100, 110, 120], "avg_rtt_us": 110},
+        interop={
+            "case": "public_filecoin_ping_identify",
+            "workflow": "runtime_bootstrap_smoke",
+            "result": "pass",
+            "failure_mode": None,
+        },
         error=None,
     )
     assert set(payload.keys()) == {
@@ -85,8 +121,10 @@ def test_ping_identify_demo_json_payload_shape() -> None:
         "connected",
         "address",
         "peer_id",
+        "connection",
         "identify",
         "ping",
+        "interop",
         "error",
     }
     assert set(payload["identify"].keys()) == {
@@ -97,6 +135,12 @@ def test_ping_identify_demo_json_payload_shape() -> None:
         "supports_filecoin_chain_exchange",
     }
     assert set(payload["ping"].keys()) == {"count", "rtts_us", "avg_rtt_us"}
+    assert set(payload["interop"].keys()) == {
+        "case",
+        "workflow",
+        "result",
+        "failure_mode",
+    }
 
 
 def test_pubsub_demo_json_payload_shape() -> None:
@@ -144,6 +188,16 @@ def test_pubsub_demo_json_payload_shape() -> None:
         "no publish path",
         "no block/message semantic validation beyond observation",
     ]
+    assert set(payload["interop"].keys()) == {
+        "case",
+        "workflow",
+        "result",
+        "expected_failure_modes",
+    }
+    assert payload["interop"]["result"] == "partial"
+    assert payload["interop"]["expected_failure_modes"] == (
+        pubsub_demo.EXPECTED_GOSSIPSUB_FAILURE_MODES
+    )
 
 
 def test_pubsub_observer_demo_has_no_publish_call_path() -> None:
@@ -152,3 +206,39 @@ def test_pubsub_observer_demo_has_no_publish_call_path() -> None:
     for node in ast.walk(module_ast):
         if isinstance(node, ast.Attribute) and node.attr == "publish":
             raise AssertionError("pubsub observer demo must not call publish")
+
+
+def test_transport_family_for_addrs() -> None:
+    assert transport_family_for_addrs([Multiaddr("/ip4/127.0.0.1/tcp/4001")]) == "tcp"
+    assert (
+        transport_family_for_addrs([Multiaddr("/ip4/127.0.0.1/udp/4001/quic-v1")])
+        == "quic-v1"
+    )
+    assert transport_family_for_addrs([]) == "unknown"
+
+
+def test_classify_probe_result() -> None:
+    assert (
+        classify_probe_result(
+            connected=False,
+            metadata_captured=False,
+            checks_satisfied=False,
+        )
+        == "fail"
+    )
+    assert (
+        classify_probe_result(
+            connected=True,
+            metadata_captured=True,
+            checks_satisfied=True,
+        )
+        == "pass"
+    )
+    assert (
+        classify_probe_result(
+            connected=True,
+            metadata_captured=False,
+            checks_satisfied=True,
+        )
+        == "partial"
+    )
