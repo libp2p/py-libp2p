@@ -258,6 +258,14 @@ async def raw_conn_factory(
         assert conn_0 is not None and conn_1 is not None
         yield conn_0, conn_1
     finally:
+        # Close both ends: conn_0 is the dial side, conn_1 the accepted server
+        # side. Closing the listener cancels the handler task but does not
+        # release conn_1's accepted socket, so close it explicitly too.
+        if conn_0 is not None:
+            await conn_0.close()
+        if conn_1 is not None:
+            await conn_1.close()
+
         await listener.close()
 
 
@@ -491,7 +499,14 @@ class SwarmFactory(factory.Factory):
         swarm = cls(**optional_kwargs)
         async with background_trio_service(swarm):
             await swarm.listen(LISTEN_MADDR)
-            yield swarm
+            try:
+                yield swarm
+            finally:
+                # Deterministic teardown: close the swarm (and its live
+                # connections + listeners) instead of relying on the service
+                # manager cancelling tasks, which leaves dialed sockets open
+                # (#1485). Idempotent with the manager stop that follows.
+                await swarm.close()
 
     @classmethod
     @asynccontextmanager
