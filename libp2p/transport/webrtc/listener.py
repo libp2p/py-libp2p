@@ -303,6 +303,20 @@ class WebRTCDirectListener(IListener):
             logger.debug("WebRTC Direct: rejected first contact from %s", addr)
             return
 
+        # aiortc sets the remote ICE credentials only when it processes our
+        # inferred offer (below, on the _accept task). But a full-ICE dialer
+        # like go-libp2p blasts connectivity checks from *every* host candidate
+        # the instant it starts — before that offer is processed. A check
+        # triggered for a second (peer-reflexive) candidate then runs aioice's
+        # check_start with remote_password still None, raising AttributeError in
+        # a fire-and-forget task; the pair is left stuck IN_PROGRESS and is
+        # never retried, so when the dialer nominates *that* candidate ICE never
+        # completes and DTLS never starts (libp2p/py-libp2p#1470). We build the
+        # offer, so we already know the dialer's creds (client ufrag == our
+        # local ufrag == pwd): set them up front so no check runs credentialless.
+        conn.remote_username = client_ufrag
+        conn.remote_password = client_pwd
+
         self._in_flight += 1
         # Re-dispatch: the ufrag is registered now, so this reaches the aioice
         # protocol (which answers the check and queues it) and teaches the
