@@ -17,10 +17,17 @@ Typical 3-terminal flow:
 from __future__ import annotations
 
 import argparse
+from contextlib import (
+    AsyncExitStack,
+)
 import logging
 import sys
+import time
 
 import multiaddr
+from multiaddr import (
+    Multiaddr,
+)
 import trio
 
 from libp2p import (
@@ -316,13 +323,145 @@ async def run(port: int, bootstrap: str | None) -> None:
             await command_loop(host, dht, nursery)
 
 
+async def run_network_size(network_size: int) -> None:
+    """
+    Spin up ``network_size`` in-process DHT chat peers and exercise Peer-ID lookup.
+
+    Topology: peer 0 is the intro node; peers 1..N-1 dial peer 0 once. Then peer 1
+    resolves peer N-1 via ``KadDHT.find_peer`` (no multiaddr) and sends a chat
+    message.
+    """
+    if network_size < 2:
+        raise ValueError("--network-size must be >= 2")
+
+    print(f"=== DHT network-size experiment: N={network_size} ===")
+    t0 = time.perf_counter()
+
+    async with AsyncExitStack() as stack:
+        hosts = []
+        dhts: list[KadDHT] = []
+        ports: list[int] = []
+
+        for i in range(network_size):
+            port = find_free_port()
+            ports.append(port)
+            host = new_host()
+            # Loopback-only keeps large-N demos lightweight.
+            listen = [Multiaddr(f"/ip4/127.0.0.1/tcp/{port}")]
+            await stack.enter_async_context(host.run(listen_addrs=listen))
+            hosts.append(host)
+
+        received = trio.Event()
+        got: dict[str, bytes | None] = {"data": None}
+        target_idx = network_size - 1
+
+        async def target_handler(stream: INetStream) -> None:
+            data = await stream.read(MAX_READ_LEN)
+            got["data"] = data
+            received.set()
+            await stream.close()
+
+        hosts[target_idx].set_stream_handler(PROTOCOL_ID, target_handler)
+
+        for host in hosts:
+            dht = KadDHT(host, DHTMode.SERVER)
+            await stack.enter_async_context(background_trio_service(dht))
+            dhts.append(dht)
+
+        intro = PeerInfo(hosts[0].get_id(), hosts[0].get_addrs())
+        join_limiter = trio.CapacityLimiter(min(32, network_size))
+
+        async def join_peer(i: int) -> None:
+            async with join_limiter:
+                await hosts[i].connect(intro)
+                await dhts[i].add_peer(hosts[0].get_id())
+
+        t_join = time.perf_counter()
+        async with trio.open_nursery() as nursery:
+            for i in range(1, network_size):
+                nursery.start_soon(join_peer, i)
+        join_s = time.perf_counter() - t_join
+        print(
+            f"Joined {network_size - 1} peers to intro in {join_s:.2f}s "
+            f"(intro connected={len(hosts[0].get_connected_peers())})"
+        )
+
+        # Seed intro RT with everyone currently connected.
+        for peer_id in hosts[0].get_connected_peers():
+            await dhts[0].add_peer(peer_id)
+
+        # Give routing tables a moment to settle under load.
+        settle_deadline = time.perf_counter() + min(30.0, 2.0 + network_size * 0.05)
+        while time.perf_counter() < settle_deadline:
+            for peer_id in hosts[0].get_connected_peers():
+                await dhts[0].add_peer(peer_id)
+            if dhts[0].get_routing_table_size() >= min(network_size - 1, 20):
+                break
+            await trio.sleep(0.2)
+
+        rt_sizes = [d.get_routing_table_size() for d in dhts]
+        median_rt = sorted(rt_sizes)[len(rt_sizes) // 2]
+        print(
+            "Routing table sizes: "
+            f"intro={rt_sizes[0]} "
+            f"source(peer1)={rt_sizes[1]} "
+            f"target(peer{target_idx})={rt_sizes[target_idx]} "
+            f"min={min(rt_sizes)} max={max(rt_sizes)} median={median_rt}"
+        )
+
+        source_host, source_dht = hosts[1], dhts[1]
+        target_id = hosts[target_idx].get_id()
+
+        t_lookup = time.perf_counter()
+        found: PeerInfo | None = None
+        attempts = 0
+        with trio.fail_after(60):
+            while True:
+                attempts += 1
+                found = await source_dht.find_peer(target_id)
+                if found is not None and found.addrs:
+                    break
+                await trio.sleep(0.2)
+        lookup_s = time.perf_counter() - t_lookup
+        assert found is not None
+        print(
+            f"Peer 1 looked up peer {target_idx} via DHT in {lookup_s:.2f}s "
+            f"({attempts} attempt(s), {len(found.addrs)} addr(s))"
+        )
+
+        t_msg = time.perf_counter()
+        await source_host.connect(found)
+        stream = await source_host.new_stream(target_id, [PROTOCOL_ID])
+        payload = f"hello-from-N{network_size}\n".encode()
+        try:
+            await stream.write(payload)
+        finally:
+            await stream.close()
+
+        with trio.fail_after(30):
+            await received.wait()
+        msg_s = time.perf_counter() - t_msg
+
+        ok = got["data"] == payload
+        total_s = time.perf_counter() - t0
+        print(f"Chat delivery {'OK' if ok else 'FAIL'} in {msg_s:.2f}s")
+        print(
+            f"TOTAL N={network_size}: join={join_s:.2f}s lookup={lookup_s:.2f}s "
+            f"msg={msg_s:.2f}s wall={total_s:.2f}s"
+        )
+        if not ok:
+            raise RuntimeError(f"Unexpected payload: {got['data']!r}")
+
+
 def main() -> None:
     description = """
     DHT Peer-ID chat demo (issue #880).
 
-    Start one intro peer, then join others with --bootstrap <multiaddr>.
-    Subsequent dials use KadDHT.find_peer(peer_id) instead of pasting multiaddrs.
-    An empty routing table cannot discover peers — the intro step is required.
+    Interactive mode: start one intro peer, then join others with
+    --bootstrap <multiaddr>. Subsequent dials use KadDHT.find_peer(peer_id).
+
+    Automated mode: --network-size N spins up N in-process peers, joins them
+    through one intro peer, then has peer 1 look up peer N-1 by Peer ID and chat.
     """
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument(
@@ -330,7 +469,7 @@ def main() -> None:
         "--port",
         default=0,
         type=int,
-        help="TCP listen port (0 = ephemeral)",
+        help="TCP listen port (0 = ephemeral); ignored with --network-size",
     )
     parser.add_argument(
         "-b",
@@ -339,10 +478,20 @@ def main() -> None:
         default=None,
         help="Intro peer multiaddr (e.g. /ip4/127.0.0.1/tcp/8000/p2p/<PeerID>)",
     )
+    parser.add_argument(
+        "-n",
+        "--network-size",
+        type=int,
+        default=None,
+        help="Run automated N-peer DHT overlay experiment (N >= 2) and exit",
+    )
     args = parser.parse_args()
 
     try:
-        trio.run(run, args.port, args.bootstrap)
+        if args.network_size is not None:
+            trio.run(run_network_size, args.network_size)
+        else:
+            trio.run(run, args.port, args.bootstrap)
     except KeyboardInterrupt:
         pass
 

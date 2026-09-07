@@ -37,7 +37,15 @@ def test_dht_chat_example_imports() -> None:
 
     assert hasattr(dht_chat, "main")
     assert hasattr(dht_chat, "run")
+    assert hasattr(dht_chat, "run_network_size")
     assert dht_chat.PROTOCOL_ID == PROTOCOL_ID
+
+
+@pytest.mark.trio
+async def test_dht_chat_network_size_small() -> None:
+    from examples.dht_chat.dht_chat import run_network_size
+
+    await run_network_size(4)
 
 
 async def _seed_connected(dht: KadDHT) -> None:

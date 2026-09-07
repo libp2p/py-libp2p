@@ -149,6 +149,7 @@ CLI flags:
 
 - ``-p`` / ``--port`` — TCP listen port (``0`` = ephemeral)
 - ``-b`` / ``--bootstrap`` — intro peer multiaddr
+- ``-n`` / ``--network-size N`` — automated in-process experiment with ``N`` peers
 
 Interactive commands:
 
@@ -159,6 +160,26 @@ Interactive commands:
 - ``connect <peer_id>`` — lookup (if needed) then dial
 - ``msg <peer_id> <text>`` — send a chat line
 - ``help`` / ``quit``
+
+Automated network-size mode
+---------------------------
+
+For scaling checks, spin up ``N`` loopback peers in one process. Peer 0 is the
+intro node; peers ``1..N-1`` join it; peer 1 looks up peer ``N-1`` by Peer ID
+and sends a chat message::
+
+    $ python -m examples.dht_chat.dht_chat --network-size 10
+    === DHT network-size experiment: N=10 ===
+    Joined 9 peers to intro in 0.25s (intro connected=9)
+    Routing table sizes: intro=9 source(peer1)=1 target(peer9)=1 min=1 max=9 median=1
+    Peer 1 looked up peer 9 via DHT in 0.29s (1 attempt(s), 1 addr(s))
+    Chat delivery OK in 0.00s
+    TOTAL N=10: join=0.25s lookup=0.29s msg=0.00s wall=0.56s
+
+On the same machine, ``N=100`` completed successfully as well (join ~1s,
+lookup ~0.3s, chat OK). Joiners typically keep a small routing table (often
+just the intro) while the intro accumulates everyone; ``find_peer`` still
+succeeds because peer 1 queries the intro, which knows the target.
 
 Notes
 -----
