@@ -42,7 +42,7 @@ Network parity audit
      - Document Filecoin-specific listen-address recommendations instead of changing the global default in this module.
    * - Transport and security stack order
      - Lotus offers Noise and TLS, with configurable preference; Forest composes TCP/QUIC with Noise and identify/discovery services.
-     - ``py-libp2p`` currently prefers Noise, keeps TLS as fallback. Capturing negotiated transport/security/muxer metadata in Filecoin demo JSON is tracked as a follow-up.
+     - ``py-libp2p`` currently prefers Noise, keeps TLS as fallback. Filecoin connect and ping/identify demo JSON now include negotiated transport/security/muxer metadata via ``libp2p.filecoin.interop``.
      - partial
      - Core interoperability works, but the stack breadth and ordering differ from Filecoin node defaults.
      - Keep defaults stable and publish the recommended Filecoin-oriented transport/security settings.
@@ -51,7 +51,7 @@ Network parity audit
      - ``py-libp2p`` prefers Yamux and retains Mplex fallback.
      - partial
      - TCP interop is fine, but generic fallback behavior still differs from narrower Filecoin defaults.
-     - Keep Yamux-first; record negotiated muxer metadata in interop outputs once the follow-up metadata wiring lands.
+     - Keep Yamux-first; Filecoin demo JSON records the negotiated muxer (or ``n/a`` for QUIC) when a connection is live.
    * - Connection manager thresholds and grace period
      - Lotus defaults to ``low=150``, ``high=180``, ``grace=20s``; Forest defaults to ``target_peer_count=75``.
      - ``py-libp2p`` defaults to ``min=50``, ``low=100``, ``high=550``, ``max=600``, ``grace=20s``.
@@ -117,8 +117,9 @@ node whose multiaddr you control.
       $ filecoin-pubsub-demo --network mainnet --seconds 20 --json
 
 The controlled workflow is preferred because it gives stable evidence for
-connectivity, advertised Filecoin protocol support, and (once follow-up metadata
-wiring lands) negotiated transport/security/muxer details.
+connectivity, advertised Filecoin protocol support, and negotiated
+transport/security/muxer details in the demo JSON ``connection`` / ``interop``
+fields.
 
 Normative references:
 

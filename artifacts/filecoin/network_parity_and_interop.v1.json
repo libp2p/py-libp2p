@@ -163,10 +163,12 @@
       "priority": "P1",
       "pylibp2p_evidence": [
         "libp2p/__init__.py:434",
-        "libp2p/transport/quic/transport.py"
+        "libp2p/transport/quic/transport.py",
+        "libp2p/filecoin/interop.py",
+        "examples/filecoin/filecoin_connect_demo.py"
       ],
       "status": "partial",
-      "suggested_change": "Keep the transport metadata visible in interop probe outputs and document the Filecoin-oriented transport settings."
+      "suggested_change": "Keep documenting Filecoin-oriented transport settings; probe JSON already surfaces transport family from live connections."
     },
     {
       "concern": "Security stack ordering",
@@ -181,10 +183,12 @@
       "priority": "P1",
       "pylibp2p_evidence": [
         "libp2p/__init__.py:532",
-        "libp2p/security/security_multistream.py"
+        "libp2p/security/security_multistream.py",
+        "libp2p/filecoin/interop.py",
+        "examples/filecoin/filecoin_connect_demo.py"
       ],
       "status": "partial",
-      "suggested_change": "Expose negotiated security protocol in probe output and recommend Filecoin-specific security choices in docs."
+      "suggested_change": "Recommend Filecoin-specific security choices in docs; negotiated security protocol is already included in probe JSON."
     },
     {
       "concern": "Muxer defaults",
@@ -199,10 +203,12 @@
       "priority": "P2",
       "pylibp2p_evidence": [
         "libp2p/__init__.py:223",
-        "libp2p/stream_muxer/muxer_multistream.py"
+        "libp2p/stream_muxer/muxer_multistream.py",
+        "libp2p/filecoin/interop.py",
+        "examples/filecoin/filecoin_connect_demo.py"
       ],
       "status": "partial",
-      "suggested_change": "Keep Yamux-first and capture the negotiated muxer during probes."
+      "suggested_change": "Keep Yamux-first; negotiated muxer is captured in probe JSON (n/a for QUIC)."
     },
     {
       "concern": "Ping and identify host defaults",

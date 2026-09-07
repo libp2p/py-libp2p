@@ -9,13 +9,13 @@ from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-import trio
 
 from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.pb import rpc_pb2
 from libp2p.pubsub.score import PeerScorer, ScoreParams, TopicScoreParams
 from libp2p.tools.utils import connect
 from tests.utils.factories import IDFactory, PubsubFactory
+from tests.utils.pubsub.wait import wait_for
 
 
 class TestScoreGates:
@@ -37,12 +37,16 @@ class TestScoreGates:
 
             # Connect hosts
             await connect(host0, host1)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_peer(host1.get_id())
+            await pubsubs[1].wait_for_peer(host0.get_id())
 
             topic = "test_publish_gate"
             await pubsubs[0].subscribe(topic)
             await pubsubs[1].subscribe(topic)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_subscription(host1.get_id(), topic)
+            await pubsubs[1].wait_for_subscription(host0.get_id(), topic)
+            await pubsubs[0].wait_for_mesh(host1.get_id(), topic)
+            await pubsubs[1].wait_for_mesh(host0.get_id(), topic)
 
             # Mock send_rpc to capture sent messages
             mock_send_rpc = MagicMock()
@@ -127,7 +131,8 @@ class TestScoreGates:
             for i in range(len(hosts)):
                 for j in range(i + 1, len(hosts)):
                     await connect(hosts[i], hosts[j])
-            await trio.sleep(0.2)
+                    await pubsubs[i].wait_for_peer(hosts[j].get_id())
+                    await pubsubs[j].wait_for_peer(hosts[i].get_id())
 
             topic = "test_gossip_gate"
             for pubsub in pubsubs:
@@ -199,12 +204,14 @@ class TestScoreGates:
 
             # Connect hosts
             await connect(host0, host1)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_peer(host1.get_id())
+            await pubsubs[1].wait_for_peer(host0.get_id())
 
             topic = "test_graylist_gate"
             await pubsubs[0].subscribe(topic)
             await pubsubs[1].subscribe(topic)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_subscription(host1.get_id(), topic)
+            await pubsubs[1].wait_for_subscription(host0.get_id(), topic)
 
             peer_id = host1.get_id()
 
@@ -239,12 +246,14 @@ class TestScoreGates:
 
             # Connect hosts
             await connect(host0, host1)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_peer(host1.get_id())
+            await pubsubs[1].wait_for_peer(host0.get_id())
 
             topic = "test_px_gate"
             await pubsubs[0].subscribe(topic)
             await pubsubs[1].subscribe(topic)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_subscription(host1.get_id(), topic)
+            await pubsubs[1].wait_for_subscription(host0.get_id(), topic)
 
             peer_id = host1.get_id()
 
@@ -300,12 +309,16 @@ class TestScoreGates:
 
             # Connect hosts
             await connect(host0, host1)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_peer(host1.get_id())
+            await pubsubs[1].wait_for_peer(host0.get_id())
 
             topic = "test_graft_gate"
             await pubsubs[0].subscribe(topic)
             await pubsubs[1].subscribe(topic)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_subscription(host1.get_id(), topic)
+            await pubsubs[1].wait_for_subscription(host0.get_id(), topic)
+            await pubsubs[0].wait_for_mesh(host1.get_id(), topic)
+            await pubsubs[1].wait_for_mesh(host0.get_id(), topic)
 
             peer_id = host1.get_id()
 
@@ -350,13 +363,15 @@ class TestScoreGates:
 
             # Connect hosts
             await connect(host0, host1)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_peer(host1.get_id())
+            await pubsubs[1].wait_for_peer(host0.get_id())
 
             topics = ["topic1", "topic2"]
             for topic in topics:
                 await pubsubs[0].subscribe(topic)
                 await pubsubs[1].subscribe(topic)
-            await trio.sleep(0.2)
+                await pubsubs[0].wait_for_subscription(host1.get_id(), topic)
+                await pubsubs[1].wait_for_subscription(host0.get_id(), topic)
 
             peer_id = host1.get_id()
 
@@ -437,12 +452,14 @@ class TestScoreGates:
 
             # Connect hosts
             await connect(host0, host1)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_peer(host1.get_id())
+            await pubsubs[1].wait_for_peer(host0.get_id())
 
             topic = "test_behavior_penalty_gates"
             await pubsubs[0].subscribe(topic)
             await pubsubs[1].subscribe(topic)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_subscription(host1.get_id(), topic)
+            await pubsubs[1].wait_for_subscription(host0.get_id(), topic)
 
             peer_id = host1.get_id()
             topics = [topic]
@@ -483,12 +500,14 @@ class TestScoreGates:
 
             # Connect hosts
             await connect(host0, host1)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_peer(host1.get_id())
+            await pubsubs[1].wait_for_peer(host0.get_id())
 
             topic = "test_edge_cases"
             await pubsubs[0].subscribe(topic)
             await pubsubs[1].subscribe(topic)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_subscription(host1.get_id(), topic)
+            await pubsubs[1].wait_for_subscription(host0.get_id(), topic)
 
             peer_id = host1.get_id()
             topics = [topic]
@@ -531,12 +550,14 @@ class TestScoreGates:
 
             # Connect hosts
             await connect(host0, host1)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_peer(host1.get_id())
+            await pubsubs[1].wait_for_peer(host0.get_id())
 
             topic = "test_zero_weights"
             await pubsubs[0].subscribe(topic)
             await pubsubs[1].subscribe(topic)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_subscription(host1.get_id(), topic)
+            await pubsubs[1].wait_for_subscription(host0.get_id(), topic)
 
             peer_id = host1.get_id()
             topics = [topic]
@@ -577,12 +598,20 @@ class TestScoreGates:
             for i in range(len(hosts)):
                 for j in range(i + 1, len(hosts)):
                     await connect(hosts[i], hosts[j])
-            await trio.sleep(0.2)
+                    await pubsubs[i].wait_for_peer(hosts[j].get_id())
+                    await pubsubs[j].wait_for_peer(hosts[i].get_id())
 
             topic = "test_mesh_integration"
             for pubsub in pubsubs:
                 await pubsub.subscribe(topic)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_subscription(hosts[1].get_id(), topic)
+            await pubsubs[0].wait_for_subscription(hosts[2].get_id(), topic)
+            # degree=2 with 3 peers: mesh need not contain every peer. Wait until
+            # mesh has formed with at least one neighbour.
+            await wait_for(
+                lambda: len(gsubs[0].mesh.get(topic, set())) >= 1,
+                fail_msg="mesh should form before mesh_heartbeat checks",
+            )
 
             # Test that graylisted peers are excluded from mesh management
             gsub0 = gsubs[0]
@@ -632,12 +661,14 @@ class TestScoreGates:
 
             # Connect hosts
             await connect(host0, host1)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_peer(host1.get_id())
+            await pubsubs[1].wait_for_peer(host0.get_id())
 
             topic = "test_decay_gates"
             await pubsubs[0].subscribe(topic)
             await pubsubs[1].subscribe(topic)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_subscription(host1.get_id(), topic)
+            await pubsubs[1].wait_for_subscription(host0.get_id(), topic)
 
             peer_id = host1.get_id()
             topics = [topic]

@@ -569,7 +569,14 @@ async def test_publish_reaches_peer_through_split():
         sub1 = await pubsubs[1].subscribe(topic)
 
         await connect(pubsubs[0].host, pubsubs[1].host)
-        await trio.sleep(2)
+        peer0 = pubsubs[0].host.get_id()
+        peer1 = pubsubs[1].host.get_id()
+        await pubsubs[0].wait_for_peer(peer1)
+        await pubsubs[1].wait_for_peer(peer0)
+        await pubsubs[0].wait_for_subscription(peer1, topic)
+        await pubsubs[1].wait_for_subscription(peer0, topic)
+        await pubsubs[0].wait_for_mesh(peer1, topic)
+        await pubsubs[1].wait_for_mesh(peer0, topic)
 
         payload = b"A" * 100
         await pubsubs[0].publish(topic, payload)
@@ -592,7 +599,14 @@ async def test_split_rpc_actually_splits_in_send_rpc():
         await pubsubs[1].subscribe(topic)
 
         await connect(pubsubs[0].host, pubsubs[1].host)
-        await trio.sleep(2)
+        peer0 = pubsubs[0].host.get_id()
+        peer1 = pubsubs[1].host.get_id()
+        await pubsubs[0].wait_for_peer(peer1)
+        await pubsubs[1].wait_for_peer(peer0)
+        await pubsubs[0].wait_for_subscription(peer1, topic)
+        await pubsubs[1].wait_for_subscription(peer0, topic)
+        await pubsubs[0].wait_for_mesh(peer1, topic)
+        await pubsubs[1].wait_for_mesh(peer0, topic)
 
         # Shrink queues on node 0.
         _shrink_queues(pubsubs[0], 200)
@@ -653,7 +667,14 @@ async def test_sender_record_reaches_peer():
         sub1 = await pubsubs[1].subscribe(topic)
 
         await connect(pubsubs[0].host, pubsubs[1].host)
-        await trio.sleep(2)
+        peer0 = pubsubs[0].host.get_id()
+        peer1 = pubsubs[1].host.get_id()
+        await pubsubs[0].wait_for_peer(peer1)
+        await pubsubs[1].wait_for_peer(peer0)
+        await pubsubs[0].wait_for_subscription(peer1, topic)
+        await pubsubs[1].wait_for_subscription(peer0, topic)
+        await pubsubs[0].wait_for_mesh(peer1, topic)
+        await pubsubs[1].wait_for_mesh(peer0, topic)
 
         import libp2p.pubsub.pubsub as pubsub_mod
 
