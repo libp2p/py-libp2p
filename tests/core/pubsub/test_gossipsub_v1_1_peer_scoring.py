@@ -284,12 +284,16 @@ class TestGossipSubScoringIntegration:
 
             # Connect hosts
             await connect(host0, host1)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_peer(host1.get_id())
+            await pubsubs[1].wait_for_peer(host0.get_id())
 
             topic = "test_publish_gate"
             await pubsubs[0].subscribe(topic)
             await pubsubs[1].subscribe(topic)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_subscription(host1.get_id(), topic)
+            await pubsubs[1].wait_for_subscription(host0.get_id(), topic)
+            await pubsubs[0].wait_for_mesh(host1.get_id(), topic)
+            await pubsubs[1].wait_for_mesh(host0.get_id(), topic)
 
             # Ensure scorer exists
             assert isinstance(gsub0, GossipSub)
@@ -351,12 +355,14 @@ class TestGossipSubScoringIntegration:
             for i in range(len(hosts)):
                 for j in range(i + 1, len(hosts)):
                     await connect(hosts[i], hosts[j])
-            await trio.sleep(0.2)
+                    await pubsubs[i].wait_for_peer(hosts[j].get_id())
+                    await pubsubs[j].wait_for_peer(hosts[i].get_id())
 
             topic = "test_gossip_gate"
             for pubsub in pubsubs:
                 await pubsub.subscribe(topic)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_subscription(hosts[1].get_id(), topic)
+            await pubsubs[0].wait_for_subscription(hosts[2].get_id(), topic)
 
             # Test gossip filtering
             gsub0 = cast(GossipSub, gsubs[0])
@@ -404,12 +410,14 @@ class TestGossipSubScoringIntegration:
 
             # Connect hosts
             await connect(host0, host1)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_peer(host1.get_id())
+            await pubsubs[1].wait_for_peer(host0.get_id())
 
             topic = "test_graylist_gate"
             await pubsubs[0].subscribe(topic)
             await pubsubs[1].subscribe(topic)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_subscription(host1.get_id(), topic)
+            await pubsubs[1].wait_for_subscription(host0.get_id(), topic)
 
             peer_id = host1.get_id()
 
@@ -441,12 +449,14 @@ class TestGossipSubScoringIntegration:
 
             # Connect hosts
             await connect(host0, host1)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_peer(host1.get_id())
+            await pubsubs[1].wait_for_peer(host0.get_id())
 
             topic = "test_px_gate"
             await pubsubs[0].subscribe(topic)
             await pubsubs[1].subscribe(topic)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_subscription(host1.get_id(), topic)
+            await pubsubs[1].wait_for_subscription(host0.get_id(), topic)
 
             peer_id = host1.get_id()
 
@@ -494,12 +504,14 @@ class TestGossipSubScoringIntegration:
             for i in range(len(hosts)):
                 for j in range(i + 1, len(hosts)):
                     await connect(hosts[i], hosts[j])
-            await trio.sleep(0.2)
+                    await pubsubs[i].wait_for_peer(hosts[j].get_id())
+                    await pubsubs[j].wait_for_peer(hosts[i].get_id())
 
             topic = "test_opportunistic_grafting"
             for pubsub in pubsubs:
                 await pubsub.subscribe(topic)
-            await trio.sleep(0.2)
+            for i in range(1, len(hosts)):
+                await pubsubs[0].wait_for_subscription(hosts[i].get_id(), topic)
 
             # Manually set up mesh with some peers having higher scores
             gsub0 = gsubs[0]
@@ -574,12 +586,16 @@ class TestGossipSubScoringIntegration:
 
             # Connect hosts
             await connect(host0, host1)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_peer(host1.get_id())
+            await pubsubs[1].wait_for_peer(host0.get_id())
 
             topic = "test_mesh_hooks"
             await pubsubs[0].subscribe(topic)
             await pubsubs[1].subscribe(topic)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_subscription(host1.get_id(), topic)
+            await pubsubs[1].wait_for_subscription(host0.get_id(), topic)
+            await pubsubs[0].wait_for_mesh(host1.get_id(), topic)
+            await pubsubs[1].wait_for_mesh(host0.get_id(), topic)
 
             peer_id = host1.get_id()
 
@@ -620,12 +636,14 @@ class TestGossipSubScoringIntegration:
 
             # Connect hosts
             await connect(host0, host1)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_peer(host1.get_id())
+            await pubsubs[1].wait_for_peer(host0.get_id())
 
             topic = "test_delivery_hooks"
             await pubsubs[0].subscribe(topic)
             await pubsubs[1].subscribe(topic)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_subscription(host1.get_id(), topic)
+            await pubsubs[1].wait_for_subscription(host0.get_id(), topic)
 
             peer_id = host1.get_id()
 
@@ -658,12 +676,14 @@ class TestGossipSubScoringIntegration:
 
             # Connect hosts
             await connect(host0, host1)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_peer(host1.get_id())
+            await pubsubs[1].wait_for_peer(host0.get_id())
 
             topic = "test_invalid_hook"
             await pubsubs[0].subscribe(topic)
             await pubsubs[1].subscribe(topic)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_subscription(host1.get_id(), topic)
+            await pubsubs[1].wait_for_subscription(host0.get_id(), topic)
 
             peer_id = host1.get_id()
 
@@ -693,12 +713,14 @@ class TestGossipSubScoringIntegration:
 
             # Connect hosts
             await connect(host0, host1)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_peer(host1.get_id())
+            await pubsubs[1].wait_for_peer(host0.get_id())
 
             topic = "test_behavior_penalty"
             await pubsubs[0].subscribe(topic)
             await pubsubs[1].subscribe(topic)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_subscription(host1.get_id(), topic)
+            await pubsubs[1].wait_for_subscription(host0.get_id(), topic)
 
             peer_id = host1.get_id()
             topics = [topic]
@@ -728,7 +750,8 @@ class TestGossipSubScoringIntegration:
 
             # Connect hosts
             await connect(host0, host1)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_peer(host1.get_id())
+            await pubsubs[1].wait_for_peer(host0.get_id())
 
             peer_id = host1.get_id()
 
@@ -739,7 +762,8 @@ class TestGossipSubScoringIntegration:
             topic = "test_protocol_detection"
             await pubsubs[0].subscribe(topic)
             await pubsubs[1].subscribe(topic)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_subscription(host1.get_id(), topic)
+            await pubsubs[1].wait_for_subscription(host0.get_id(), topic)
 
             # After subscription, peer should be in peer_protocol mapping
             # The exact protocol depends on the factory implementation

@@ -113,12 +113,15 @@ async def test_write_msg_stream_reset():
                         await pubsub_a.subscribe("test")
                         await pubsub_b.subscribe("test")
 
-                        # Allow some time for subscriptions to propagate
-                        await trio.sleep(1.0)
+                        peer_b_id = host_b.get_id()
+                        peer_a_id = host_a.get_id()
+                        await pubsub_a.wait_for_peer(peer_b_id)
+                        await pubsub_b.wait_for_peer(peer_a_id)
+                        await pubsub_a.wait_for_subscription(peer_b_id, "test")
+                        await pubsub_b.wait_for_subscription(peer_a_id, "test")
 
                         # Get the stream
-                        peer_a_id = host_b.get_id()
-                        stream = pubsub_a.peers[peer_a_id]
+                        stream = pubsub_a.peers[peer_b_id]
 
                         await stream.reset()
 

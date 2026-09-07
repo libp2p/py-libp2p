@@ -20,6 +20,7 @@ from libp2p.pubsub.gossipsub import (
 from libp2p.pubsub.pb import rpc_pb2
 from libp2p.tools.utils import connect
 from tests.utils.factories import IDFactory, PubsubFactory
+from tests.utils.pubsub.wait import wait_for
 
 
 @pytest.mark.trio
@@ -157,24 +158,46 @@ async def test_iwant_rate_limiting_integration():
 
         # Connect peers
         await connect(pubsubs[0].host, pubsubs[1].host)
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(pubsubs[1].my_id)
+        await pubsubs[1].wait_for_peer(pubsubs[0].my_id)
 
         # Subscribe to topic
         topic = "rate-limit-test"
         await pubsubs[0].subscribe(topic)
         await pubsubs[1].subscribe(topic)
-        await trio.sleep(1.0)
+        await pubsubs[0].wait_for_subscription(pubsubs[1].my_id, topic)
+        await pubsubs[1].wait_for_subscription(pubsubs[0].my_id, topic)
+        await pubsubs[0].wait_for_mesh(pubsubs[1].my_id, topic)
+        await pubsubs[1].wait_for_mesh(pubsubs[0].my_id, topic)
 
         # Publish several messages quickly to trigger IWANT requests
         for i in range(5):
             await pubsubs[0].publish(topic, f"message {i}".encode())
+            # Rate-limit pacing window under test
             await trio.sleep(0.1)
 
-        # Wait for processing
-        await trio.sleep(1.0)
+        peer0_id = pubsubs[0].host.get_id()
+
+        # Wait for IWANT rate-limit tracking to observe requests (if any)
+        # Mesh delivery may not always produce IWANTs; preserve original
+        # conditional assert by only waiting briefly then checking.
+        iwant_limits = router1.iwant_request_limits
+
+        def _iwant_tracked() -> bool:
+            return (
+                peer0_id in iwant_limits and len(iwant_limits[peer0_id]["requests"]) > 0
+            )
+
+        try:
+            await wait_for(
+                _iwant_tracked,
+                timeout=3.0,
+                fail_msg="IWANT rate-limit tracking not observed",
+            )
+        except TimeoutError:
+            pass
 
         # Check if rate limiting was applied
-        peer0_id = pubsubs[0].host.get_id()
         if peer0_id in router1.iwant_request_limits:
             # Some requests should have been made
             assert len(router1.iwant_request_limits[peer0_id]["requests"]) > 0
@@ -196,21 +219,38 @@ async def test_ihave_rate_limiting_integration():
         # Connect in a line: 0 -- 1 -- 2
         await connect(pubsubs[0].host, pubsubs[1].host)
         await connect(pubsubs[1].host, pubsubs[2].host)
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(pubsubs[1].my_id)
+        await pubsubs[1].wait_for_peer(pubsubs[0].my_id)
+        await pubsubs[1].wait_for_peer(pubsubs[2].my_id)
+        await pubsubs[2].wait_for_peer(pubsubs[1].my_id)
 
-        # Subscribe to topic
+        # Subscribe to topic (peer 1 stays unsubscribed to force gossip)
         topic = "ihave-rate-test"
         await pubsubs[0].subscribe(topic)
-        await pubsubs[2].subscribe(topic)  # Don't subscribe peer 1 to force gossip
-        await trio.sleep(1.0)
+        await pubsubs[2].subscribe(topic)
 
         # Publish several messages to trigger IHAVE gossip
         for i in range(5):
             await pubsubs[0].publish(topic, f"gossip message {i}".encode())
+            # Rate-limit pacing window under test
             await trio.sleep(0.2)
 
-        # Wait for gossip processing
-        await trio.sleep(2.0)
+        # Wait for gossip / IHAVE rate-limit bookkeeping if it appears
+        def _any_ihave_tracked() -> bool:
+            for router in routers:
+                assert isinstance(router, GossipSub)
+                if router.ihave_message_limits:
+                    return True
+            return False
+
+        try:
+            await wait_for(
+                _any_ihave_tracked,
+                timeout=5.0,
+                fail_msg="IHAVE rate-limit tracking not observed",
+            )
+        except TimeoutError:
+            pass
 
         # Rate limiting should have been applied during gossip
         # (Exact verification depends on gossip timing)
@@ -232,13 +272,17 @@ async def test_graft_flood_protection_integration():
 
         # Connect peers
         await connect(pubsubs[0].host, pubsubs[1].host)
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(pubsubs[1].my_id)
+        await pubsubs[1].wait_for_peer(pubsubs[0].my_id)
 
         # Subscribe and form mesh
         topic = "graft-flood-test"
         await pubsubs[0].subscribe(topic)
         await pubsubs[1].subscribe(topic)
-        await trio.sleep(1.0)
+        await pubsubs[0].wait_for_subscription(pubsubs[1].my_id, topic)
+        await pubsubs[1].wait_for_subscription(pubsubs[0].my_id, topic)
+        await pubsubs[0].wait_for_mesh(pubsubs[1].my_id, topic)
+        await pubsubs[1].wait_for_mesh(pubsubs[0].my_id, topic)
 
         # Manually trigger PRUNE to set up flood protection
         peer0_id = pubsubs[0].host.get_id()

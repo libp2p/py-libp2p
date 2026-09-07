@@ -1,0 +1,2 @@
+De-flaked pubsub tests by replacing fixed ``trio.sleep`` readiness waits with
+``wait_for_peer`` / ``wait_for_subscription`` / ``wait_for_mesh`` / payload helpers.
