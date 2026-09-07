@@ -2154,8 +2154,11 @@ class Swarm(Service, INetworkService):
         Active connections are closed explicitly (best-effort) BEFORE the
         manager is stopped, so resource scopes are released and sockets are
         torn down deterministically instead of relying on task cancellation
-        (Bug 9).
+        (Bug 9). Idempotent: a second call is a no-op.
         """
+        if self._closing:
+            logger.debug("swarm close() called again; already closing/closed")
+            return
         self._closing = True
 
         # Close all connections manually first.
