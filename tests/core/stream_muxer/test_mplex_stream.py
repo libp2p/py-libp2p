@@ -109,11 +109,29 @@ async def test_mplex_stream_read_after_remote_reset(mplex_stream_pair):
     stream_0, stream_1 = mplex_stream_pair
     await stream_0.write(DATA)
     await stream_0.reset()
-    # Sleep to let `stream_1` receive the message.
+    # Sleep to let `stream_1` receive the message and reset.
     await trio.sleep(0.1)
     await wait_all_tasks_blocked()
+    # Buffered data that arrived before RESET must still be readable.
+    assert (await stream_1.read(MAX_READ_LEN)) == DATA
     with pytest.raises(MplexStreamReset):
         await stream_1.read(MAX_READ_LEN)
+
+
+@pytest.mark.trio
+async def test_mplex_stream_read_ping_payload_before_remote_reset(
+    mplex_stream_pair,
+):
+    """Ping-shaped: 32-byte payload then RESET must still return the payload."""
+    stream_0, stream_1 = mplex_stream_pair
+    ping_payload = b"\x01" * 32
+    await stream_0.write(ping_payload)
+    await stream_0.reset()
+    await trio.sleep(0.1)
+    await wait_all_tasks_blocked()
+    assert (await stream_1.read(32)) == ping_payload
+    with pytest.raises(MplexStreamReset):
+        await stream_1.read(32)
 
 
 @pytest.mark.trio

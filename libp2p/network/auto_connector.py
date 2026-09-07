@@ -8,18 +8,130 @@ matching go-libp2p behavior.
 Reference: https://github.com/libp2p/go-libp2p/blob/master/p2p/net/connmgr/connmgr.go
 """
 
+from collections.abc import (
+    Awaitable,
+    Callable,
+)
+import ipaddress
 import logging
 import random
 import time
 from typing import TYPE_CHECKING
 
+from multiaddr import Multiaddr
 import trio
 
 from libp2p.network.config import AUTO_CONNECT_INTERVAL
 from libp2p.peer.id import ID
+from libp2p.utils.address_validation import is_relay_address
 
 if TYPE_CHECKING:
     from libp2p.network.swarm import Swarm
+
+
+def _ip_is_routable(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """
+    Return True if ``ip`` (an ipaddress address) is publicly routable.
+
+    Rejects loopback, link-local, unspecified, multicast, reserved and
+    private ranges.  CGNAT (100.64.0.0/10) is treated as routable because
+    it is used by Tailscale/WireGuard networks that peers may legitimately
+    reach (``ipaddress`` only classifies it as private on Python 3.13+).
+    """
+    if ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_multicast:
+        return False
+    if getattr(ip, "is_reserved", False):
+        return False
+    if ip.is_private:
+        if (
+            isinstance(ip, ipaddress.IPv4Address)
+            and (int(ip) & 0xFFC00000) == 0x64400000
+        ):  # 100.64.0.0/10
+            return True
+        return False
+    return True
+
+
+def _addr_is_routable(addr: Multiaddr) -> bool:
+    """
+    Return True if the multiaddr is dialable from a public node.
+
+    DNS addresses resolve to public IPs and are considered dialable.  For
+    IP addresses, only public (non-private, non-loopback) addresses count,
+    and *any* public IP component makes the address dialable (multiaddrs
+    may embed several IPs, e.g. relay paths).  This prevents the
+    auto-connector from wasting dial attempts on Docker-internal peers
+    (172.x/10.x) that can never be reached from outside the network.
+    """
+    try:
+        for part in addr.split():
+            protos = part.protocols()
+            if not protos:
+                continue
+            proto = protos[0]
+            name = getattr(proto, "name", "")
+            if name.startswith("dns"):
+                return True
+            if name not in ("ip4", "ip6"):
+                continue
+            try:
+                ip_str = part.value_for_protocol(name)
+            except Exception:
+                continue
+            if not ip_str:
+                continue
+            try:
+                ip = ipaddress.ip_address(ip_str)
+            except Exception:
+                continue
+            if _ip_is_routable(ip):
+                return True
+    except Exception:
+        return False
+
+    # No IP/DNS component (e.g. relay-only addrs), or only private IPs.
+    return False
+
+
+def _addr_is_direct(addr: Multiaddr) -> bool:
+    """
+    Return True if ``addr`` is a directly-dialable public address.
+
+    A direct address must be routable (see :func:`_addr_is_routable`) and
+    must NOT traverse a relay (``/p2p-circuit``).  Relay paths are only
+    usable when a relay client is configured; this node does not use one,
+    so dialing them is pure waste — the QUIC transport cannot even derive
+    a peer id from a ``/p2p-circuit`` address and fails every attempt.
+    """
+    if not _addr_is_routable(addr):
+        return False
+    return not is_relay_address(addr)
+
+
+def _node_has_public_addr(swarm: "Swarm") -> bool:
+    """
+    Return True if this node itself announces a public address.
+
+    The check uses the local signed peer record, which reflects the host's
+    announced addresses (``announce_addrs`` if configured, otherwise the
+    transport addrs plus confirmed observed addresses).  This gates the
+    private-address candidate filter: a node that only has private
+    addresses (LAN/mDNS deployment) keeps private candidates dialable,
+    while a public node skips peers that are only reachable via
+    Docker-internal private addresses.
+    """
+    try:
+        local_record = swarm.peerstore.get_local_record()
+    except Exception:
+        return False
+    if local_record is None:
+        return False
+    try:
+        addrs = local_record.record().addrs
+    except Exception:
+        return False
+    return any(_addr_is_routable(a) for a in addrs)
+
 
 logger = logging.getLogger("libp2p.network.auto_connector")
 logger.setLevel(logging.INFO)
@@ -53,13 +165,32 @@ class AutoConnector:
         """
         self.swarm = swarm
         self.auto_connect_interval = auto_connect_interval
-
         self._started = False
         self._shutdown_event = trio.Event()
+        self._is_connecting = False
+        self._in_flight_dials: set[ID] = set()
         self._last_connect_attempt: dict[ID, float] = {}
         self._failure_counts: dict[ID, int] = {}
-        self._base_cooldown = 300.0  # base retry interval (seconds)
-        self._max_cooldown = 3600.0  # cap at 1 hour for persistent failures
+        self._base_cooldown = 5.0  # base retry interval (seconds, matches go-libp2p)
+        self._max_cooldown = 300.0  # cap at 5 minutes for persistent failures
+        self._discovery_callback: Callable[[], Awaitable[None]] | None = None
+        # Peers that recently disconnected: we back off from immediately
+        # re-dialing them (event-driven auto-connect on disconnect would
+        # otherwise reconnect to the peer we just closed in a tight loop).
+        self._recent_disconnects: dict[ID, float] = {}
+        self._disconnect_backoff = 60.0  # seconds
+        # Critical poll interval: when the connection count falls below
+        # min_connections we poll at _critical_check_interval so the node
+        # recovers steadily without overwhelming the CPU (Bug 15).
+        self._critical_check_interval = 10.0
+
+    def set_discovery_callback(
+        self, callback: Callable[[], Awaitable[None]] | None
+    ) -> None:
+        """
+        Set callback to trigger on-demand DHT discovery when candidates are low.
+        """
+        self._discovery_callback = callback
 
     async def start(self) -> None:
         """Start the auto-connector background task."""
@@ -96,9 +227,37 @@ class AutoConnector:
             except Exception as e:
                 logger.error(f"Error in auto-connect: {e}", exc_info=e)
 
-            # Wait for the next interval or shutdown
-            with trio.move_on_after(self.auto_connect_interval):
+            # Wait for the next interval or shutdown.  When the connection
+            # count is critically below min_connections, poll much more
+            # frequently so the node recovers promptly (Bug 15).
+            if self._below_min_connections():
+                interval = self._critical_check_interval
+            else:
+                interval = self.auto_connect_interval
+            with trio.move_on_after(interval):
                 await self._shutdown_event.wait()
+
+    def _below_min_connections(self) -> bool:
+        """
+        Whether the connection count is below the critical floor.
+
+        ``min_connections`` is the absolute minimum the connection manager
+        tries to keep open; when the count drops below it, the periodic task
+        polls at ``_critical_check_interval`` instead of
+        ``auto_connect_interval``.
+
+        Returns
+        -------
+        bool
+            True if the current connection count is below min_connections
+
+        """
+        try:
+            num_connections = self.swarm.get_total_connections()
+            min_connections = self.swarm.connection_config.min_connections
+            return num_connections < min_connections
+        except Exception:
+            return False
 
     async def maybe_connect(self) -> None:
         """
@@ -110,103 +269,198 @@ class AutoConnector:
         if not self._started:
             return
 
-        num_connections = self.swarm.get_total_connections()
-        low_watermark = self.swarm.connection_config.low_watermark
-        min_connections = self.swarm.connection_config.min_connections
-
-        logger.info(
-            "AUTO_CONNECTOR_STATE: num_connections=%s, "
-            "low_watermark=%s, min_connections=%s",
-            num_connections,
-            low_watermark,
-            min_connections,
-        )
-
-        # Only connect if below low watermark
-        if num_connections >= low_watermark:
+        if self._is_connecting:
+            logger.debug("Auto-connect cycle already in progress, skipping")
             return
 
-        # Calculate how many connections we need
-        target = low_watermark
-        needed = target - num_connections
-
-        if needed <= 0:
-            return
-
-        logger.info(
-            "the connection (%s) is less the low limit (%s) "
-            "so connection manager is initiating %s number of new connections",
-            num_connections,
-            low_watermark,
-            needed,
-        )
-
-        # Get candidate peers from peerstore
-        candidates = await self._get_candidate_peers()
-
-        if not candidates:
-            logger.debug("No candidate peers available for auto-connection")
-            return
-
-        # Shuffle to randomize connection order
-        random.shuffle(candidates)
-
-        # Try to connect to candidates
-        # We need to limit concurrency to avoid OS "Too many open files" errors
-        # (Kubo default is 160 concurrent outbound dials)
-        dial_limiter = trio.CapacityLimiter(160)
-
-        async def _dial_candidate(peer_id: ID) -> None:
-            async with dial_limiter:
-                connected = False
-                try:
-                    logger.debug(f"Auto-connecting to peer {peer_id}")
-                    with trio.move_on_after(
-                        self.swarm.connection_config.dial_timeout
-                    ) as cancel_scope:
-                        await self.swarm.dial_peer(peer_id)
-                        connected = True  # only set if dial completes before timeout
-                    if cancel_scope.cancelled_caught:
-                        # Dial timed out — treat as failure, apply backoff
-                        logger.debug(f"Dial to {peer_id} timed out")
-                        self._failure_counts[peer_id] = (
-                            self._failure_counts.get(peer_id, 0) + 1
-                        )
-                        self._last_connect_attempt[peer_id] = time.time()
-                    elif connected:
-                        logger.info(f"Auto-connected to peer {peer_id}")
-                        # Success — clear cooldown so peer is immediately
-                        # re-dialable if it disconnects later
-                        self._last_connect_attempt.pop(peer_id, None)
-                        self._failure_counts.pop(peer_id, None)
-                except Exception as e:
-                    logger.debug(f"Failed to auto-connect to {peer_id}: {e}")
-                    self._failure_counts[peer_id] = (
-                        self._failure_counts.get(peer_id, 0) + 1
-                    )
-                    self._last_connect_attempt[peer_id] = time.time()
-
+        self._is_connecting = True
         try:
-            async with trio.open_nursery() as dial_nursery:
-                dialed = 0
-                # We overdial (needed * 2) because in a P2P network, most dials will
-                # fail due to offline peers, NAT traversal issues, or obsolete addresses.  # noqa: E501
-                dial_target = needed * 2
+            num_connections = self.swarm.get_total_connections()
+            low_watermark = self.swarm.connection_config.low_watermark
+            min_connections = self.swarm.connection_config.min_connections
+            in_flight = len(self._in_flight_dials)
 
-                for peer_id in candidates:
-                    if dialed >= dial_target:
-                        break
+            logger.info(
+                "AUTO_CONNECTOR_STATE: num_connections=%s (in_flight=%s), "
+                "low_watermark=%s, min_connections=%s",
+                num_connections,
+                in_flight,
+                low_watermark,
+                min_connections,
+            )
 
-                    if self._should_skip_peer(peer_id):
-                        continue
+            # Calculate target connections within [low_watermark, high_watermark].
+            # Aim for midpoint between low and high watermarks (e.g. 400 for 300-500)
+            # so connections stay comfortably above the floor without hitting the
+            # pruning ceiling.
+            high_watermark = getattr(
+                self.swarm.connection_config, "high_watermark", low_watermark
+            )
+            if high_watermark > low_watermark:
+                target = int((low_watermark + high_watermark) / 2)
+            else:
+                target = low_watermark
 
-                    dial_nursery.start_soon(_dial_candidate, peer_id)
-                    dialed += 1
-        except Exception as e:
-            logger.error(f"Error in auto_connect dial nursery: {e}")
+            # Only connect if below target (counting in-flight dials)
+            if num_connections + in_flight >= target:
+                return
 
-        if dialed > 0:
-            logger.info(f"Auto-connected to {dialed} new peers")
+            needed = target - (num_connections + in_flight)
+
+            if needed <= 0:
+                return
+
+            logger.info(
+                "Connections (%s, in_flight=%s) below target (%s, "
+                "low_water=%s, high_water=%s); initiating %s new dials",
+                num_connections,
+                in_flight,
+                target,
+                low_watermark,
+                high_watermark,
+                needed,
+            )
+
+            # Get candidate peers from peerstore
+            candidates = await self._get_candidate_peers()
+
+            # Filter candidates that are not currently in cooldown
+            dialable_candidates = [
+                p for p in candidates if not self._should_skip_peer(p)
+            ]
+
+            # Auto-trigger DHT peer discovery when available candidates are low
+            if (
+                len(dialable_candidates) < 20
+                and needed > 0
+                and self._discovery_callback is not None
+            ):
+                logger.info(
+                    "AutoConnector candidate pool low (%d available, needed=%d); "
+                    "triggering on-demand DHT discovery",
+                    len(dialable_candidates),
+                    needed,
+                )
+                try:
+                    await self._discovery_callback()
+                except Exception as e:
+                    logger.debug("Discovery callback error (non-fatal): %s", e)
+
+            if not candidates:
+                logger.debug("No candidate peers available for auto-connection")
+                return
+
+            # Shuffle to randomize connection order
+            random.shuffle(candidates)
+
+            # Concurrency limiter and dial batch sizing (matches go-libp2p: 16-32)
+            CONN_MGR_BATCH_SIZE = 32 if needed > 32 else 16
+            dial_limiter = trio.CapacityLimiter(CONN_MGR_BATCH_SIZE)
+            max_dials_per_cycle = CONN_MGR_BATCH_SIZE
+
+            # Skip peers whose dial attempts have failed too recently (cooldown).
+            # This also bounds per-cycle work when the peerstore is dominated by
+            # stale/unreachable peers.
+
+            async def _dial_candidate(peer_id: ID) -> None:
+                self._in_flight_dials.add(peer_id)
+                try:
+                    async with dial_limiter:
+                        connected = False
+                        try:
+                            logger.debug(f"Auto-connecting to peer {peer_id}")
+                            with trio.move_on_after(
+                                self.swarm.connection_config.dial_timeout
+                            ) as cancel_scope:
+                                await self.swarm.dial_peer(peer_id)
+                                # only set if dial completes before timeout
+                                connected = True
+                            if cancel_scope.cancelled_caught:
+                                # Dial deadline fired.  The connection may STILL have
+                                # been established and registered — Swarm shields
+                                # add_conn() registration from this deadline, so a
+                                # handshake that completed just before the timeout
+                                # lands in the swarm's connection table even though
+                                # dial_peer() raised Cancelled.  In that case treat
+                                # the dial as a success instead of piling on a
+                                # failure cooldown (which would eventually put every
+                                # peer in 3600s backoff and strand the node at 0
+                                # connections).
+                                if self.swarm.get_connections(peer_id):
+                                    connected = True
+                                    logger.info(
+                                        f"Auto-connected to peer {peer_id} "
+                                        "(registered despite dial deadline)"
+                                    )
+                                    self._last_connect_attempt.pop(peer_id, None)
+                                    self._failure_counts.pop(peer_id, None)
+                                else:
+                                    logger.debug(f"Dial to {peer_id} timed out")
+                                    self._failure_counts[peer_id] = (
+                                        self._failure_counts.get(peer_id, 0) + 1
+                                    )
+                                    self._last_connect_attempt[peer_id] = time.time()
+                            elif connected:
+                                logger.info(f"Auto-connected to peer {peer_id}")
+                                # Success — clear cooldown so peer is immediately
+                                # re-dialable if it disconnects later
+                                self._last_connect_attempt.pop(peer_id, None)
+                                self._failure_counts.pop(peer_id, None)
+                        except Exception as e:
+                            logger.debug(f"Failed to auto-connect to {peer_id}: {e}")
+                            self._failure_counts[peer_id] = (
+                                self._failure_counts.get(peer_id, 0) + 1
+                            )
+                            self._last_connect_attempt[peer_id] = time.time()
+                finally:
+                    self._in_flight_dials.discard(peer_id)
+
+            try:
+                async with trio.open_nursery() as dial_nursery:
+                    dialed = 0
+                    dial_target = min(needed, max_dials_per_cycle)
+
+                    for peer_id in candidates:
+                        if dialed >= dial_target:
+                            break
+
+                        if self._should_skip_peer(peer_id):
+                            continue
+
+                        dial_nursery.start_soon(_dial_candidate, peer_id)
+                        dialed += 1
+                        # 50ms stagger between dispatches to eliminate CPU spikes
+                        await trio.sleep(0.05)
+            except Exception as e:
+                logger.error(f"Error in auto_connect dial nursery: {e}")
+
+            if dialed > 0:
+                logger.info(f"Auto-connected to {dialed} new peers")
+            self._prune_tracking_caches()
+        finally:
+            self._is_connecting = False
+
+    def _prune_tracking_caches(self) -> None:
+        """Prune tracking dictionaries to prevent memory accumulation."""
+        now = time.time()
+        if len(self._last_connect_attempt) > 500:
+            stale_keys = [
+                pid
+                for pid, ts in self._last_connect_attempt.items()
+                if now - ts > self._max_cooldown
+            ]
+            for pid in stale_keys:
+                self._last_connect_attempt.pop(pid, None)
+                self._failure_counts.pop(pid, None)
+
+        if len(self._recent_disconnects) > 500:
+            stale_disc = [
+                pid
+                for pid, ts in self._recent_disconnects.items()
+                if now - ts > self._disconnect_backoff * 2
+            ]
+            for pid in stale_disc:
+                self._recent_disconnects.pop(pid, None)
 
     async def _get_candidate_peers(self) -> list[ID]:
         """
@@ -229,6 +483,11 @@ class AutoConnector:
         # Get currently connected peers
         connected_peers = set(self.swarm.connections.keys())
 
+        # Only apply the private-address filter when this node itself is a
+        # public node.  On a LAN/mDNS deployment (all-local addresses) peers
+        # with private addresses must stay dialable.
+        filter_private = _node_has_public_addr(self.swarm)
+
         for peer_id in all_peers:
             # Skip ourselves
             if peer_id == self.swarm.self_id:
@@ -241,8 +500,29 @@ class AutoConnector:
             # Check if peer has addresses
             try:
                 addrs = self.swarm.peerstore.addrs(peer_id)
-                if addrs:
-                    candidates.append(peer_id)
+                if not addrs:
+                    continue
+                if filter_private and not any(_addr_is_direct(a) for a in addrs):
+                    # Peers whose *only* addresses are unusable from a public
+                    # node are skipped instead of burning dial attempts:
+                    # private-only (Docker-internal 172.x/10.x, loopback,
+                    # etc.) or relay-only (``/p2p-circuit``) paths can never
+                    # be dialed directly.
+                    continue
+
+                # Filter out peers with no addresses supported by registered transports
+                if (
+                    hasattr(self.swarm, "transport_manager")
+                    and self.swarm.transport_manager is not None
+                    and not any(
+                        self.swarm.transport_manager.transport_for_dialing(a)
+                        is not None
+                        for a in addrs
+                    )
+                ):
+                    continue
+
+                candidates.append(peer_id)
             except Exception:
                 continue
 
@@ -250,10 +530,11 @@ class AutoConnector:
 
     def _get_cooldown(self, peer_id: ID) -> float:
         """
-        Calculate exponential backoff cooldown for a peer.
+        Calculate exponential backoff cooldown for a peer matching go-libp2p standards.
 
         Returns base_cooldown * 2^(failures-1), capped at max_cooldown.
-        First failure: 300s, second: 600s, third: 1200s … cap: 3600s.
+        First failure: 5s, second: 15s, third: 20s, fourth: 40s … cap: 300s.
+        When critically below min_connections floor, cap backoff at 60s.
 
         Parameters
         ----------
@@ -268,8 +549,17 @@ class AutoConnector:
         """
         n = self._failure_counts.get(peer_id, 0)
         if n <= 0:
-            return self._base_cooldown
-        return min(self._base_cooldown * (2 ** (n - 1)), self._max_cooldown)
+            return 0.0
+        if n == 1:
+            backoff = self._base_cooldown  # 5.0s
+        elif n == 2:
+            backoff = self._base_cooldown * 3.0  # 15.0s
+        else:
+            backoff = min(self._base_cooldown * (2 ** (n - 1)), self._max_cooldown)
+
+        if self._below_min_connections():
+            return min(backoff, 60.0)
+        return min(backoff, self._max_cooldown)
 
     def _should_skip_peer(self, peer_id: ID) -> bool:
         """
@@ -293,6 +583,13 @@ class AutoConnector:
             if time.time() - last_attempt < self._get_cooldown(peer_id):
                 return True
 
+        # Back off recently-disconnected peers so a disconnect-triggered
+        # auto-connect does not immediately re-dial the peer we just lost.
+        last_disconnect = self._recent_disconnects.get(peer_id)
+        if last_disconnect is not None:
+            if time.time() - last_disconnect < self._disconnect_backoff:
+                return True
+
         return False
 
     def record_successful_connection(self, peer_id: ID) -> None:
@@ -309,6 +606,23 @@ class AutoConnector:
         """
         self._last_connect_attempt.pop(peer_id, None)
         self._failure_counts.pop(peer_id, None)
+        self._recent_disconnects.pop(peer_id, None)
+
+    def record_disconnect(self, peer_id: ID) -> None:
+        """
+        Record that a connection to a peer closed.
+
+        The auto-connector will not attempt to re-dial this peer for
+        ``_disconnect_backoff`` seconds, avoiding immediate reconnect loops
+        when disconnects trigger auto-connect (Bug 6 fixup).
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer that disconnected
+
+        """
+        self._recent_disconnects[peer_id] = time.time()
 
     def record_failed_connection(self, peer_id: ID) -> None:
         """
@@ -337,8 +651,10 @@ class AutoConnector:
         """
         self._last_connect_attempt.pop(peer_id, None)
         self._failure_counts.pop(peer_id, None)
+        self._recent_disconnects.pop(peer_id, None)
 
     def clear_all_cooldowns(self) -> None:
         """Clear all peer cooldowns and failure counts."""
         self._last_connect_attempt.clear()
         self._failure_counts.clear()
+        self._recent_disconnects.clear()

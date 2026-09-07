@@ -180,7 +180,12 @@ class ID:
             return NotImplemented
 
     def __hash__(self) -> int:
-        return hash(self.to_base58())
+        # Hash the raw bytes (cheap, cached by CPython), NOT the base58 string.
+        # base58 encoding is pure-Python big-integer division — computing it
+        # on every hash made peer-ID hashing (dict/set lookups, peer_ids()
+        # scans over tens of thousands of peers) the dominant CPU cost on
+        # production nodes.  Consistent with __eq__ (which compares _bytes).
+        return hash(self._bytes)
 
     @classmethod
     def from_base58(cls, b58_encoded_peer_id_str: str) -> "ID":

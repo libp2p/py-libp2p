@@ -1,6 +1,3 @@
-from collections import (
-    defaultdict,
-)
 from collections.abc import (
     AsyncIterable,
     Sequence,
@@ -151,12 +148,14 @@ class PeerRecordState:
 class PeerStore(IPeerStore):
     peer_data_map: dict[ID, PeerData]
 
-    def __init__(self, max_records: int = 10000) -> None:
-        self.peer_data_map = defaultdict(PeerData)
+    def __init__(self, max_records: int = 2000, max_peers: int = 1000) -> None:
+        self.peer_data_map = {}
         self.addr_update_channels: dict[ID, MemorySendChannel[Multiaddr]] = {}
         self.peer_record_map: dict[ID, PeerRecordState] = {}
         self.local_peer_record: Envelope | None = None
         self.max_records = max_records
+        # Hard cap on peer_data_map size (covers routing table + active swarm).
+        self.max_peers = max_peers
 
     def get_local_record(self) -> Envelope | None:
         """Get the local-signed-record wrapped in Envelope"""
@@ -184,6 +183,10 @@ class PeerStore(IPeerStore):
         """
         return list(self.peer_data_map.keys())
 
+    def has_peer(self, peer_id: ID) -> bool:
+        """Return True if the peer is known to this store."""
+        return peer_id in self.peer_data_map
+
     def clear_peerdata(self, peer_id: ID) -> None:
         """Clears all data associated with the given peer_id."""
         if peer_id in self.peer_data_map:
@@ -194,6 +197,28 @@ class PeerStore(IPeerStore):
         # Clear the peer records
         if peer_id in self.peer_record_map:
             self.peer_record_map.pop(peer_id, None)
+
+    def _enforce_peer_limit(self) -> None:
+        """Evict oldest peers when peer_data_map exceeds max_peers."""
+        if len(self.peer_data_map) <= self.max_peers:
+            return
+        # Evict peers with no addresses first (empty/zombie entries), then
+        # expire-first (oldest TTL). This is O(n) but only runs during cleanup.
+        to_evict = len(self.peer_data_map) - self.max_peers
+
+        # Sort: empty entries first, then expired, then oldest TTL
+        def evict_priority(item: tuple[ID, PeerData]) -> tuple[bool, bool]:
+            pid, pd = item
+            has_addrs = bool(pd.get_addrs())
+            is_expired = pd.is_expired()
+            return (not has_addrs, is_expired)  # True sorts before False
+
+        candidates = sorted(
+            self.peer_data_map.items(), key=evict_priority, reverse=True
+        )
+        for peer_id, _ in candidates[:to_evict]:
+            self.peer_record_map.pop(peer_id, None)
+            del self.peer_data_map[peer_id]
 
     def valid_peer_ids(self) -> list[ID]:
         """
@@ -219,25 +244,36 @@ class PeerStore(IPeerStore):
                 self.maybe_delete_peer_record(peer_id)
                 del self.peer_record_map[peer_id]
 
-    async def start_cleanup_task(self, cleanup_interval: int = 3600) -> None:
-        """Start periodic cleanup of expired peer records and addresses."""
+    async def start_cleanup_task(self, cleanup_interval: int = 300) -> None:
+        """
+        Start periodic cleanup of expired peer records and addresses.
+
+        Runs every ``cleanup_interval`` seconds (default 300s / 5 minutes).
+        Previously defaulted to 3600s which meant peers with a 3600s TTL
+        accumulated for a full hour before any eviction — a memory leak.
+        """
         while True:
             await trio.sleep(cleanup_interval)
             self._cleanup_expired_records()
 
     def _cleanup_expired_records(self) -> None:
-        """Remove expired peer records and addresses"""
-        expired_peers = []
-
-        for peer_id, peer_data in self.peer_data_map.items():
-            if peer_data.is_expired():
-                expired_peers.append(peer_id)
-
+        """Remove expired peer records and addresses."""
+        expired_peers = [
+            peer_id
+            for peer_id, peer_data in self.peer_data_map.items()
+            if peer_data.is_expired()
+        ]
         for peer_id in expired_peers:
             self.maybe_delete_peer_record(peer_id)
             del self.peer_data_map[peer_id]
 
         self._enforce_record_limit()
+        self._enforce_peer_limit()
+        logger.debug(
+            "Peerstore cleanup: removed %d expired peers, %d remaining",
+            len(expired_peers),
+            len(self.peer_data_map),
+        )
 
     # --------PROTO-BOOK--------
 
@@ -256,7 +292,7 @@ class PeerStore(IPeerStore):
         :param peer_id: peer ID to add protocols for
         :param protocols: protocols to add
         """
-        peer_data = self.peer_data_map[peer_id]
+        peer_data = self.peer_data_map.setdefault(peer_id, PeerData())
         peer_data.add_protocols(list(protocols))
 
     def set_protocols(self, peer_id: ID, protocols: Sequence[str]) -> None:
@@ -264,7 +300,7 @@ class PeerStore(IPeerStore):
         :param peer_id: peer ID to set protocols for
         :param protocols: protocols to set
         """
-        peer_data = self.peer_data_map[peer_id]
+        peer_data = self.peer_data_map.setdefault(peer_id, PeerData())
         peer_data.set_protocols(list(protocols))
 
     def remove_protocols(self, peer_id: ID, protocols: Sequence[str]) -> None:
@@ -272,24 +308,27 @@ class PeerStore(IPeerStore):
         :param peer_id: peer ID to get info for
         :param protocols: unsupported protocols to remove
         """
-        peer_data = self.peer_data_map[peer_id]
-        peer_data.remove_protocols(protocols)
+        if peer_id not in self.peer_data_map:
+            return
+        self.peer_data_map[peer_id].remove_protocols(protocols)
 
     def supports_protocols(self, peer_id: ID, protocols: Sequence[str]) -> list[str]:
         """
         :return: all of the peer IDs stored in peer store
         """
-        peer_data = self.peer_data_map[peer_id]
-        return peer_data.supports_protocols(protocols)
+        if peer_id not in self.peer_data_map:
+            return []
+        return self.peer_data_map[peer_id].supports_protocols(protocols)
 
     def first_supported_protocol(self, peer_id: ID, protocols: Sequence[str]) -> str:
-        peer_data = self.peer_data_map[peer_id]
-        return peer_data.first_supported_protocol(protocols)
+        if peer_id not in self.peer_data_map:
+            return ""
+        return self.peer_data_map[peer_id].first_supported_protocol(protocols)
 
     def clear_protocol_data(self, peer_id: ID) -> None:
         """Clears prtocoldata"""
-        peer_data = self.peer_data_map[peer_id]
-        peer_data.clear_protocol_data()
+        if peer_id in self.peer_data_map:
+            self.peer_data_map[peer_id].clear_protocol_data()
 
     # ------METADATA---------
 
@@ -314,13 +353,13 @@ class PeerStore(IPeerStore):
         :param key:
         :param value:
         """
-        peer_data = self.peer_data_map[peer_id]
+        peer_data = self.peer_data_map.setdefault(peer_id, PeerData())
         peer_data.put_metadata(key, val)
 
     def clear_metadata(self, peer_id: ID) -> None:
         """Clears metadata"""
-        peer_data = self.peer_data_map[peer_id]
-        peer_data.clear_metadata()
+        if peer_id in self.peer_data_map:
+            self.peer_data_map[peer_id].clear_metadata()
 
     # -----CERT-ADDR-BOOK-----
 
@@ -366,7 +405,7 @@ class PeerStore(IPeerStore):
         new_addrs = set(record.addrs)
 
         self.peer_record_map[peer_id] = PeerRecordState(envelope, record.seq)
-        self.peer_data_map[peer_id].clear_addrs()
+        self.peer_data_map.setdefault(peer_id, PeerData()).clear_addrs()
         self.add_addrs(peer_id, list(new_addrs), ttl)
 
         return True
@@ -420,7 +459,7 @@ class PeerStore(IPeerStore):
         :param addrs:
         :param ttl: time-to-live for the this record
         """
-        peer_data = self.peer_data_map[peer_id]
+        peer_data = self.peer_data_map.setdefault(peer_id, PeerData())
         peer_data.add_addrs(list(addrs))
         peer_data.set_ttl(ttl)
         peer_data.update_last_identified()
@@ -433,6 +472,8 @@ class PeerStore(IPeerStore):
                     pass  # Or consider logging / dropping / replacing stream
 
         self.maybe_delete_peer_record(peer_id)
+        if len(self.peer_data_map) > self.max_peers:
+            self._enforce_peer_limit()
 
     def addrs(self, peer_id: ID) -> list[Multiaddr]:
         """
@@ -453,9 +494,11 @@ class PeerStore(IPeerStore):
         """
         :param peer_id: peer ID to clear addrs for
         """
-        # Only clear addresses if the peer is in peer map
-        if peer_id in self.peer_data_map:
-            self.peer_data_map[peer_id].clear_addrs()
+        if peer_id not in self.peer_data_map:
+            return
+
+        peer_data = self.peer_data_map[peer_id]
+        peer_data.clear_addrs()
 
         self.maybe_delete_peer_record(peer_id)
 
@@ -502,7 +545,7 @@ class PeerStore(IPeerStore):
         :param pubkey:
         :raise PeerStoreError: if peer ID and pubkey does not match
         """
-        peer_data = self.peer_data_map[peer_id]
+        peer_data = self.peer_data_map.setdefault(peer_id, PeerData())
         if ID.from_pubkey(pubkey) != peer_id:
             raise PeerStoreError("peer ID and pubkey does not match")
         peer_data.add_pubkey(pubkey)
@@ -528,7 +571,7 @@ class PeerStore(IPeerStore):
         :param privkey:
         :raise PeerStoreError: if peer ID or peer privkey not found
         """
-        peer_data = self.peer_data_map[peer_id]
+        peer_data = self.peer_data_map.setdefault(peer_id, PeerData())
         if ID.from_pubkey(privkey.get_public_key()) != peer_id:
             raise PeerStoreError("peer ID and privkey does not match")
         peer_data.add_privkey(privkey)
@@ -566,8 +609,8 @@ class PeerStore(IPeerStore):
 
     def clear_keydata(self, peer_id: ID) -> None:
         """Clears the keys of the peer"""
-        peer_data = self.peer_data_map[peer_id]
-        peer_data.clear_keydata()
+        if peer_id in self.peer_data_map:
+            self.peer_data_map[peer_id].clear_keydata()
 
     # --------METRICS--------
 
@@ -579,7 +622,7 @@ class PeerStore(IPeerStore):
         :param peer_id: peer ID to get private key for
         :param RTT: the new latency value (round trip time)
         """
-        peer_data = self.peer_data_map[peer_id]
+        peer_data = self.peer_data_map.setdefault(peer_id, PeerData())
         peer_data.record_latency(RTT)
 
     def latency_EWMA(self, peer_id: ID) -> float:
@@ -587,13 +630,14 @@ class PeerStore(IPeerStore):
         :param peer_id: peer ID to get private key for
         :return: The latency EWMA value for that peer
         """
-        peer_data = self.peer_data_map[peer_id]
-        return peer_data.latency_EWMA()
+        if peer_id in self.peer_data_map:
+            return self.peer_data_map[peer_id].latency_EWMA()
+        return 0.0
 
     def clear_metrics(self, peer_id: ID) -> None:
         """Clear the latency metrics"""
-        peer_data = self.peer_data_map[peer_id]
-        peer_data.clear_metrics()
+        if peer_id in self.peer_data_map:
+            self.peer_data_map[peer_id].clear_metrics()
 
 
 class PeerStoreError(KeyError):

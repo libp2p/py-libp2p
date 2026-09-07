@@ -99,7 +99,7 @@ class QUICTransportConfig(ConnectionConfig):
     MAX_INCOMING_STREAMS: int = 1000
     """Maximum number of incoming streams per connection."""
 
-    CONNECTION_HANDSHAKE_TIMEOUT: float = 60.0
+    CONNECTION_HANDSHAKE_TIMEOUT: float = 10.0
     """Timeout for connection handshake (seconds)."""
 
     MAX_OUTGOING_STREAMS: int = 1000

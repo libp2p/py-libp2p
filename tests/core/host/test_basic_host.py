@@ -134,11 +134,19 @@ def test_get_addrs_and_transport_addrs():
 
 def _make_host_with_listener(
     announce_addrs: Sequence[Multiaddr] | None = None,
+    *,
+    addrs_factory=None,
+    disable_identify_address_discovery: bool = False,
 ):
     """Helper: create a BasicHost with a mocked listener returning a known addr."""
     key_pair = create_new_key_pair()
     swarm = new_swarm(key_pair)
-    host = BasicHost(swarm, announce_addrs=announce_addrs)
+    host = BasicHost(
+        swarm,
+        announce_addrs=announce_addrs,
+        addrs_factory=addrs_factory,
+        disable_identify_address_discovery=disable_identify_address_discovery,
+    )
     mock_transport = MagicMock()
     mock_transport.get_addrs.return_value = [Multiaddr("/ip4/127.0.0.1/tcp/8000")]
     swarm.listeners = {"tcp": mock_transport}
@@ -270,7 +278,15 @@ def test_announce_addrs_with_correct_peer_id():
     peer_id_str = str(host.get_id())
 
     # Set announce addr that already includes the correct /p2p/ suffix
-    host._announce_addrs = [Multiaddr(f"/ip4/1.2.3.4/tcp/4001/p2p/{peer_id_str}")]
+    static = [Multiaddr(f"/ip4/1.2.3.4/tcp/4001/p2p/{peer_id_str}")]
+
+    def _static_factory(
+        _candidates: list[Multiaddr],
+        _addrs: list[Multiaddr] = static,
+    ) -> list[Multiaddr]:
+        return list(_addrs)
+
+    host._addrs_factory = _static_factory
 
     addrs = host.get_addrs()
 
@@ -312,8 +328,6 @@ def test_get_addrs_skips_observed_when_announce_set():
     assert len(addrs) == 1
     assert "/ip4/1.2.3.4/tcp/4001" in addr_strs[0]
     assert not any("5.6.7.8" in s for s in addr_strs)
-    # Observed manager's addrs() must not be consulted at all in this branch.
-    fake_manager.addrs.assert_not_called()
 
 
 def test_get_addrs_deduplicates_observed_matching_transport():
@@ -346,6 +360,143 @@ def test_get_nat_type_delegates_to_observed_addr_manager():
     fake_manager.get_nat_type.assert_called_once_with()
     assert tcp_nat == NATDeviceType.ENDPOINT_INDEPENDENT
     assert udp_nat == NATDeviceType.UNKNOWN
+
+
+def test_announce_addrs_and_addrs_factory_mutually_exclusive():
+    """Cannot set both announce_addrs and addrs_factory (#1311)."""
+    key_pair = create_new_key_pair()
+    swarm = new_swarm(key_pair)
+    with pytest.raises(ValueError, match="cannot specify both"):
+        BasicHost(
+            swarm,
+            announce_addrs=[Multiaddr("/ip4/1.2.3.4/tcp/4001")],
+            addrs_factory=lambda addrs: addrs,
+        )
+
+
+def test_addrs_factory_receives_live_list_including_observed():
+    """Callable addrs_factory sees transport + confirmed observed candidates."""
+    captured: list[list[Multiaddr]] = []
+
+    def factory(candidates: list[Multiaddr]) -> list[Multiaddr]:
+        captured.append(list(candidates))
+        # Keep listen + observed, append an extra public addr
+        return list(candidates) + [Multiaddr("/ip4/9.9.9.9/tcp/4001")]
+
+    host = _make_host_with_listener(addrs_factory=factory)
+    observed = Multiaddr("/ip4/5.6.7.8/tcp/4001")
+    fake_manager = MagicMock()
+    fake_manager.addrs.return_value = [observed]
+    host._observed_addr_manager = fake_manager
+
+    addrs = host.get_addrs()
+    peer_id_str = str(host.get_id())
+
+    # Factory also runs during BasicHost.__init__ (signed peer record) before
+    # listeners exist; assert on the call after the mock listener is attached.
+    assert len(captured) >= 1
+    assert [str(a) for a in captured[-1]] == [
+        "/ip4/127.0.0.1/tcp/8000",
+        "/ip4/5.6.7.8/tcp/4001",
+    ]
+    addr_strs = [str(a) for a in addrs]
+    assert f"/ip4/127.0.0.1/tcp/8000/p2p/{peer_id_str}" in addr_strs
+    assert f"/ip4/5.6.7.8/tcp/4001/p2p/{peer_id_str}" in addr_strs
+    assert f"/ip4/9.9.9.9/tcp/4001/p2p/{peer_id_str}" in addr_strs
+
+
+def test_addrs_factory_can_filter_candidates():
+    """Factory may return a subset of the live candidate list."""
+    host = _make_host_with_listener(
+        addrs_factory=lambda candidates: [a for a in candidates if "5.6.7.8" in str(a)]
+    )
+    fake_manager = MagicMock()
+    fake_manager.addrs.return_value = [Multiaddr("/ip4/5.6.7.8/tcp/4001")]
+    host._observed_addr_manager = fake_manager
+
+    addrs = host.get_addrs()
+    peer_id_str = str(host.get_id())
+    assert len(addrs) == 1
+    assert str(addrs[0]) == f"/ip4/5.6.7.8/tcp/4001/p2p/{peer_id_str}"
+
+
+def test_disable_identify_address_discovery_skips_manager():
+    """When disabled, no ObservedAddrManager is created (#1311)."""
+    from libp2p.host.observed_addr_manager import NATDeviceType
+
+    host = _make_host_with_listener(disable_identify_address_discovery=True)
+    assert host._observed_addr_manager is None
+    assert host._disable_identify_address_discovery is True
+    assert host.get_nat_type() == (NATDeviceType.UNKNOWN, NATDeviceType.UNKNOWN)
+
+    # get_addrs has no observed augmentation
+    addrs = host.get_addrs()
+    peer_id_str = str(host.get_id())
+    assert [str(a) for a in addrs] == [f"/ip4/127.0.0.1/tcp/8000/p2p/{peer_id_str}"]
+
+
+def test_addrs_factory_with_discovery_disabled_sees_only_transport():
+    """With discovery disabled, factory input is transport addrs only."""
+    captured: list[list[Multiaddr]] = []
+
+    def factory(candidates: list[Multiaddr]) -> list[Multiaddr]:
+        captured.append(list(candidates))
+        return list(candidates)
+
+    host = _make_host_with_listener(
+        addrs_factory=factory,
+        disable_identify_address_discovery=True,
+    )
+    addrs = host.get_addrs()
+    peer_id_str = str(host.get_id())
+
+    assert len(captured) >= 1
+    assert [str(a) for a in captured[-1]] == ["/ip4/127.0.0.1/tcp/8000"]
+    assert [str(a) for a in addrs] == [f"/ip4/127.0.0.1/tcp/8000/p2p/{peer_id_str}"]
+
+
+@pytest.mark.trio
+async def test_identify_peer_skips_record_when_discovery_disabled(monkeypatch):
+    """_identify_peer must not record observations when discovery is disabled."""
+    host = _make_host_with_listener(disable_identify_address_discovery=True)
+    peer_id = host.get_id()
+
+    swarm_conn = MagicMock()
+    swarm_conn.muxed_conn = MagicMock()
+    swarm_conn.muxed_conn.peer_id = peer_id
+    swarm_conn.muxed_conn.get_remote_address = MagicMock(
+        return_value=("10.0.0.1", 4001)
+    )
+    swarm_conn.is_closed = False
+    swarm_conn.event_started = None
+
+    monkeypatch.setattr(host._network, "get_connections", lambda pid: [swarm_conn])
+
+    fake_stream = MagicMock()
+    fake_stream.reset = AsyncMock()
+    fake_stream.close = AsyncMock()
+    host.new_stream = AsyncMock(return_value=fake_stream)
+
+    observed = Multiaddr("/ip4/5.6.7.8/tcp/4001")
+    msg = IdentifyMsg(observed_addr=observed.to_bytes())
+    msg_bytes = msg.SerializeToString()
+
+    async def fake_read(stream, use_varint_format=True):
+        return msg_bytes
+
+    async def fake_update(peerstore, peer_id_arg, identify_msg):
+        return None
+
+    monkeypatch.setattr(
+        "libp2p.host.basic_host.read_length_prefixed_protobuf", fake_read
+    )
+    monkeypatch.setattr(
+        "libp2p.host.basic_host.update_peerstore_from_identify", fake_update
+    )
+
+    await host._identify_peer(peer_id, reason="test")
+    assert host._observed_addr_manager is None
+    assert peer_id in host._identified_peers
 
 
 @pytest.mark.trio

@@ -326,6 +326,7 @@ class QUICStream(IMuxedStream):
 
             # Send data through QUIC connection
             self._connection._quic.send_stream_data(self._stream_id, data)
+            self._connection._signal_activity()
             await self._connection._transmit()
 
             self._timeline.record_first_data()
@@ -392,6 +393,7 @@ class QUICStream(IMuxedStream):
             self._connection._quic.send_stream_data(
                 self._stream_id, b"", end_stream=True
             )
+            self._connection._signal_activity()
             await self._connection._transmit()
 
             self._write_closed = True

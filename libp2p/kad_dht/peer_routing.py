@@ -6,7 +6,6 @@ to efficiently locate peers in a distributed network.
 """
 
 import logging
-import os
 
 import trio
 import varint
@@ -22,16 +21,22 @@ from libp2p.peer.peerinfo import (
     PeerInfo,
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
+from libp2p.utils.varint import read_varint_prefixed_bytes_limited
 
 from .common import (
     ALPHA,
+    BETA,
+    BUCKET_SIZE,
+    MAX_DHT_MESSAGE_SIZE,
     PROTOCOL_ID,
+    QUERY_TIMEOUT,
 )
 from .pb.kademlia_pb2 import (
     Message,
 )
 from .routing_table import (
     RoutingTable,
+    gen_random_key_in_bucket,
 )
 from .utils import (
     maybe_consume_signed_record,
@@ -113,6 +118,21 @@ class PeerRouting(IPeerRouting):
                             return PeerInfo(found_peer, addrs)
                     except Exception:
                         pass
+
+            # Re-check the peerstore after the network lookup. During the
+            # iterative lookup, the target peer's signed record may have
+            # been discovered and added to the peerstore (via
+            # maybe_consume_signed_record) even if it wasn't in the top
+            # 'count' closest peers. go-libp2p does the same.
+            try:
+                addrs = self.host.get_peerstore().addrs(peer_id)
+                if addrs:
+                    logger.debug(
+                        f"Found peer {peer_id} in peerstore after network lookup"
+                    )
+                    return PeerInfo(peer_id, addrs)
+            except Exception:
+                pass
 
         except Exception as e:
             logger.error(f"Error searching for peer {peer_id}: {e}")
@@ -213,6 +233,7 @@ class PeerRouting(IPeerRouting):
 
         queried_peers: set[ID] = set()
         rounds = 0
+        start_time = trio.current_time()
 
         # Return early if we have no peers to start with
         if not closest_peers:
@@ -239,15 +260,25 @@ class PeerRouting(IPeerRouting):
                 sem.release()
 
         while rounds < MAX_PEER_LOOKUP_ROUNDS:
+            # Check total timeout (30 seconds max per spec recommendation)
+            elapsed = trio.current_time() - start_time
+            if elapsed > 30:
+                logger.debug(
+                    f"Lookup timed out after {elapsed:.1f}s, completed {rounds} rounds"
+                )
+                break
+
             rounds += 1
             logger.debug(f"Lookup round {rounds}/{MAX_PEER_LOOKUP_ROUNDS}")
 
             # Admit at most ALPHA peers per round to preserve classic Kademlia
             # iterative refinement: after each small batch we re-sort with any
             # newly discovered peers before admitting the next batch.
-            peers_to_query = [p for p in closest_peers if p not in queried_peers][
-                :ALPHA
-            ]
+            # Exclude self - we can't query ourselves (Kubo does the same)
+            local_id = self.host.get_id()
+            peers_to_query = [
+                p for p in closest_peers if p not in queried_peers and p != local_id
+            ][:ALPHA]
             if not peers_to_query:
                 logger.debug("No more unqueried peers available, ending lookup")
                 break
@@ -261,9 +292,21 @@ class PeerRouting(IPeerRouting):
                     query_count += 1
                     nursery.start_soon(_guarded_query, peer)
 
-            # If we got no new peers, we're done
+            # If we got no new peers, check if there are still unqueried
+            # closest peers before terminating
             if not new_peers:
-                logger.debug("No new peers discovered in this round, ending lookup")
+                unqueried_in_topk = [
+                    p
+                    for p in closest_peers[:BUCKET_SIZE]
+                    if p not in queried_peers and p != local_id
+                ]
+                if unqueried_in_topk:
+                    logger.debug(
+                        f"No new peers discovered but {len(unqueried_in_topk)} "
+                        "unqueried closest peers remain, continuing"
+                    )
+                    continue
+                logger.debug("No new peers discovered and all closest queried")
                 break
 
             # Update our list of closest peers
@@ -279,6 +322,25 @@ class PeerRouting(IPeerRouting):
                 logger.debug("No improvement in closest peers, ending lookup")
                 break
 
+            # Beta resiliency: ensure at least BETA of the closest peers
+            # have been queried before terminating
+            queried_in_closest = sum(
+                1 for p in closest_peers[:BUCKET_SIZE] if p in queried_peers
+            )
+            if queried_in_closest < BETA and len(closest_peers) >= BETA:
+                # Not enough closest peers queried, continue if we have candidates
+                unqueried_closest = [
+                    p
+                    for p in closest_peers[:BUCKET_SIZE]
+                    if p not in queried_peers and p != local_id
+                ]
+                if unqueried_closest:
+                    logger.debug(
+                        f"Only {queried_in_closest}/{BETA} closest peers queried, "
+                        "continuing lookup"
+                    )
+                    continue
+
         logger.info(
             f"Network lookup completed after {rounds} rounds "
             f"({query_count} queries), found {len(closest_peers)} peers"
@@ -287,8 +349,9 @@ class PeerRouting(IPeerRouting):
 
     async def _query_peer_for_closest(self, peer: ID, target_key: bytes) -> list[ID]:
         """
-        Query a peer for their closest peers
-        to the target key using varint length prefix
+        Query a peer for their closest peers to the target key using varint
+        length prefix. Each operation has a timeout to prevent hanging on
+        unresponsive peers.
         """
         local_id = self.host.get_id()
         if peer == local_id:
@@ -298,121 +361,110 @@ class PeerRouting(IPeerRouting):
         stream = None
         results = []
         try:
-            # Add the peer to our routing table regardless of query outcome
-            try:
-                addrs = self.host.get_peerstore().addrs(peer)
-                if addrs:
-                    peer_info = PeerInfo(peer, addrs)
-                    await self.routing_table.add_peer(peer_info)
-            except Exception as e:
-                logger.debug(f"Failed to add peer {peer} to routing table: {e}")
+            with trio.move_on_after(QUERY_TIMEOUT):
+                # Add the peer to our routing table regardless of query outcome
+                try:
+                    addrs = self.host.get_peerstore().addrs(peer)
+                    if addrs:
+                        peer_info = PeerInfo(peer, addrs)
+                        await self.routing_table.add_peer(peer_info)
+                except Exception as e:
+                    logger.debug(f"Failed to add peer {peer} to routing table: {e}")
 
-            # Open a stream to the peer using the Kademlia protocol
-            logger.debug(f"Opening stream to {peer} for closest peers query")
-            try:
-                stream = await self.host.new_stream(peer, [PROTOCOL_ID])
-                logger.debug(f"Stream opened to {peer}")
-            except Exception as e:
-                logger.warning(f"Failed to open stream to {peer}: {e}")
-                return []
-
-            # Create and send FIND_NODE request using protobuf
-            find_node_msg = Message()
-            find_node_msg.type = Message.MessageType.FIND_NODE
-            find_node_msg.key = target_key  # Set target key directly as bytes
-
-            # Create sender_signed_peer_record
-            envelope_bytes, _ = env_to_send_in_RPC(self.host)
-            find_node_msg.senderRecord = envelope_bytes
-
-            # Serialize and send the protobuf message with varint length prefix
-            proto_bytes = find_node_msg.SerializeToString()
-            logger.debug(
-                f"Sending FIND_NODE: {proto_bytes.hex()} (len={len(proto_bytes)})"
-            )
-            await stream.write(varint.encode(len(proto_bytes)))
-            await stream.write(proto_bytes)
-
-            # Read varint-prefixed response length
-            length_bytes = b""
-            while True:
-                b = await stream.read(1)
-                if not b:
-                    logger.warning(
-                        "Error reading varint length from stream: connection closed"
-                    )
-                    return []
-                length_bytes += b
-                if b[0] & 0x80 == 0:
-                    break
-            response_length = varint.decode_bytes(length_bytes)
-
-            # Read response data
-            response_bytes = b""
-            remaining = response_length
-            while remaining > 0:
-                chunk = await stream.read(remaining)
-                if not chunk:
-                    logger.debug(f"Connection closed by peer {peer} while reading data")
-                    return []
-                response_bytes += chunk
-                remaining -= len(chunk)
-
-            # Parse the protobuf response
-            response_msg = Message()
-            response_msg.ParseFromString(response_bytes)
-            logger.debug(
-                "Received response from %s with %d peers",
-                peer,
-                len(response_msg.closerPeers),
-            )
-
-            # Process closest peers from response
-            if response_msg.type == Message.MessageType.FIND_NODE:
-                # Consume the sender_signed_peer_record
-                if not maybe_consume_signed_record(response_msg, self.host, peer):
-                    logger.error(
-                        "Received an invalid-signed-record,ignoring the response"
-                    )
+                # Open a stream to the peer using the Kademlia protocol
+                logger.debug(f"Opening stream to {peer} for closest peers query")
+                try:
+                    stream = await self.host.new_stream(peer, [PROTOCOL_ID])
+                    logger.debug(f"Stream opened to {peer}")
+                except Exception as e:
+                    logger.warning(f"Failed to open stream to {peer}: {e}")
+                    # Per spec: remove peer from routing table if connection fails
+                    self.routing_table.remove_peer(peer)
                     return []
 
-                for peer_data in response_msg.closerPeers:
-                    # Consume the received closer_peers signed-records, peer-id is
-                    # sent with the peer-data
-                    if not maybe_consume_signed_record(peer_data, self.host):
-                        logger.warning(
-                            "Received an invalid-signed-record, skipping peer"
+                # Create and send FIND_NODE request using protobuf
+                find_node_msg = Message()
+                find_node_msg.type = Message.MessageType.FIND_NODE
+                find_node_msg.key = target_key  # Set target key directly as bytes
+
+                # Create sender_signed_peer_record
+                envelope_bytes, _ = env_to_send_in_RPC(self.host)
+                find_node_msg.senderRecord = envelope_bytes
+
+                # Serialize and send the protobuf message with varint length prefix
+                proto_bytes = find_node_msg.SerializeToString()
+                logger.debug(
+                    f"Sending FIND_NODE: {proto_bytes.hex()} (len={len(proto_bytes)})"
+                )
+                await stream.write(varint.encode(len(proto_bytes)))
+                await stream.write(proto_bytes)
+
+                response_bytes = await read_varint_prefixed_bytes_limited(
+                    stream, MAX_DHT_MESSAGE_SIZE
+                )
+
+                # Parse the protobuf response
+                response_msg = Message()
+                response_msg.ParseFromString(response_bytes)
+                logger.debug(
+                    "Received response from %s with %d peers",
+                    peer,
+                    len(response_msg.closerPeers),
+                )
+
+                # Process closest peers from response
+                if response_msg.type == Message.MessageType.FIND_NODE:
+                    # Consume the sender_signed_peer_record
+                    if not maybe_consume_signed_record(response_msg, self.host, peer):
+                        logger.error(
+                            "Received an invalid-signed-record, ignoring the response"
                         )
-                        continue
+                        # Remove peer for sending invalid signed record
+                        self.routing_table.remove_peer(peer)
+                        return []
 
-                    new_peer_id = ID(peer_data.id)
-                    if new_peer_id == local_id:
-                        continue
-                    if new_peer_id not in results:
-                        results.append(new_peer_id)
-                    if peer_data.addrs:
-                        from multiaddr import (
-                            Multiaddr,
-                        )
-
-                        addrs = []
-                        for addr_bytes in peer_data.addrs:
-                            try:
-                                addrs.append(Multiaddr(addr_bytes))
-                            except Exception:
-                                pass  # Skip invalid addresses
-                        if addrs:
-                            self.host.get_peerstore().add_addrs(
-                                new_peer_id, addrs, 3600
+                    for peer_data in response_msg.closerPeers:
+                        # Consume the received closer_peers signed-records,
+                        # peer-id is sent with the peer-data
+                        if not maybe_consume_signed_record(peer_data, self.host):
+                            logger.warning(
+                                "Received an invalid-signed-record, skipping peer"
                             )
-                            try:
-                                await self.routing_table.add_peer(
-                                    PeerInfo(new_peer_id, addrs)
+                            continue
+
+                        if not peer_data.id:
+                            logger.debug("Skipping peer with empty ID in FIND_NODE")
+                            continue
+
+                        new_peer_id = ID(peer_data.id)
+                        if new_peer_id == local_id:
+                            continue
+                        if new_peer_id not in results:
+                            results.append(new_peer_id)
+                        if peer_data.addrs:
+                            from multiaddr import (
+                                Multiaddr,
+                            )
+
+                            addrs = []
+                            for addr_bytes in peer_data.addrs:
+                                try:
+                                    addrs.append(Multiaddr(addr_bytes))
+                                except Exception:
+                                    pass  # Skip invalid addresses
+                            if addrs:
+                                self.host.get_peerstore().add_addrs(
+                                    new_peer_id, addrs, 3600
                                 )
-                            except Exception as e:
-                                logger.debug(
-                                    f"Failed to add discovered peer {new_peer_id} to routing table: {e}"  # noqa: E501
-                                )
+                                try:
+                                    await self.routing_table.add_peer(
+                                        PeerInfo(new_peer_id, addrs)
+                                    )
+                                except Exception as e:
+                                    logger.debug(
+                                        f"Failed to add discovered peer "
+                                        f"{new_peer_id} to routing table: {e}"
+                                    )
 
         except Exception as e:
             logger.debug(f"Error querying peer {peer} for closest: {e}")
@@ -455,8 +507,7 @@ class PeerRouting(IPeerRouting):
         # and look it up to discover new peers
         for bucket in self.routing_table.buckets:
             if bucket.size() > 0:
-                # Generate a random peer ID that would fall in this bucket's range
-                random_key = os.urandom(32)
+                random_key = gen_random_key_in_bucket(bucket)
                 try:
                     random_peers = await self.find_closest_peers_network(random_key)
                     for peer_id in random_peers:

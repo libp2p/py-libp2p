@@ -11,7 +11,6 @@ This module tests the adaptive gossip dissemination features in v1.4, including:
 import time
 
 import pytest
-import trio
 
 from libp2p.pubsub.gossipsub import (
     PROTOCOL_ID_V14,
@@ -20,6 +19,7 @@ from libp2p.pubsub.gossipsub import (
 from libp2p.pubsub.score import ScoreParams
 from libp2p.tools.utils import connect
 from tests.utils.factories import PubsubFactory
+from tests.utils.pubsub.wait import wait_for
 
 
 @pytest.mark.trio
@@ -61,13 +61,23 @@ async def test_network_health_calculation():
         # Connect peers
         await connect(pubsubs[0].host, pubsubs[1].host)
         await connect(pubsubs[1].host, pubsubs[2].host)
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(pubsubs[1].my_id)
+        await pubsubs[1].wait_for_peer(pubsubs[0].my_id)
+        await pubsubs[1].wait_for_peer(pubsubs[2].my_id)
+        await pubsubs[2].wait_for_peer(pubsubs[1].my_id)
 
         # Subscribe to topic to form mesh
         topic = "health-test"
         for pubsub in pubsubs:
             await pubsub.subscribe(topic)
-        await trio.sleep(1.0)
+        await pubsubs[0].wait_for_subscription(pubsubs[1].my_id, topic)
+        await pubsubs[1].wait_for_subscription(pubsubs[0].my_id, topic)
+        await pubsubs[1].wait_for_subscription(pubsubs[2].my_id, topic)
+        await pubsubs[2].wait_for_subscription(pubsubs[1].my_id, topic)
+        await pubsubs[0].wait_for_mesh(pubsubs[1].my_id, topic)
+        await pubsubs[1].wait_for_mesh(pubsubs[0].my_id, topic)
+        await pubsubs[1].wait_for_mesh(pubsubs[2].my_id, topic)
+        await pubsubs[2].wait_for_mesh(pubsubs[1].my_id, topic)
 
         # Trigger health update
         router0 = routers[0]
@@ -92,13 +102,21 @@ async def test_connectivity_health_calculation():
         # Connect all peers
         for i in range(1, 10):
             await connect(pubsubs[0].host, pubsubs[i].host)
-        await trio.sleep(0.5)
+            await pubsubs[0].wait_for_peer(pubsubs[i].my_id)
+            await pubsubs[i].wait_for_peer(pubsubs[0].my_id)
 
         # Subscribe to topic
         topic = "connectivity-test"
         for pubsub in pubsubs:
             await pubsub.subscribe(topic)
-        await trio.sleep(1.0)
+        for i in range(1, 10):
+            await pubsubs[0].wait_for_subscription(pubsubs[i].my_id, topic)
+            await pubsubs[i].wait_for_subscription(pubsubs[0].my_id, topic)
+        # Mesh degree is bounded; wait until host0 has some mesh peers
+        await wait_for(
+            lambda: len(router.mesh.get(topic, set())) > 0,
+            fail_msg="mesh should form for connectivity health test",
+        )
 
         # Calculate health with good connectivity
         # Force health update by resetting the timer
@@ -137,13 +155,17 @@ async def test_peer_score_health_calculation():
 
         # Connect peers
         await connect(pubsubs[0].host, pubsubs[1].host)
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(pubsubs[1].my_id)
+        await pubsubs[1].wait_for_peer(pubsubs[0].my_id)
 
         # Subscribe to topic
         topic = "score-health-test"
         for pubsub in pubsubs:
             await pubsub.subscribe(topic)
-        await trio.sleep(1.0)
+        await pubsubs[0].wait_for_subscription(pubsubs[1].my_id, topic)
+        await pubsubs[1].wait_for_subscription(pubsubs[0].my_id, topic)
+        await pubsubs[0].wait_for_mesh(pubsubs[1].my_id, topic)
+        await pubsubs[1].wait_for_mesh(pubsubs[0].my_id, topic)
 
         # Calculate health with good scores
         router._update_network_health()
@@ -276,13 +298,26 @@ async def test_mesh_degree_adaptation_in_heartbeat():
         # Connect all peers
         for i in range(1, 5):
             await connect(pubsubs[0].host, pubsubs[i].host)
-        await trio.sleep(0.5)
+            await pubsubs[0].wait_for_peer(pubsubs[i].my_id)
+            await pubsubs[i].wait_for_peer(pubsubs[0].my_id)
 
         # Subscribe to topic
         topic = "adaptive-mesh-test"
         for pubsub in pubsubs:
             await pubsub.subscribe(topic)
-        await trio.sleep(1.0)
+        for i in range(1, 5):
+            await pubsubs[0].wait_for_subscription(pubsubs[i].my_id, topic)
+            await pubsubs[i].wait_for_subscription(pubsubs[0].my_id, topic)
+
+        degree_low = router.degree_low
+
+        def _mesh_at_degree_low() -> bool:
+            return len(router.mesh.get(topic, set())) >= degree_low
+
+        await wait_for(
+            _mesh_at_degree_low,
+            fail_msg="mesh should reach at least degree_low peers",
+        )
 
         # Set poor health to trigger adaptation
         router.network_health_score = 0.2
@@ -292,11 +327,22 @@ async def test_mesh_degree_adaptation_in_heartbeat():
         assert router.adaptive_degree_low > router.degree_low
         assert router.adaptive_degree_high > router.degree_high
 
-        # Let heartbeat run with adaptive parameters
-        await trio.sleep(2.0)
+        # Let heartbeat run with adaptive parameters; mesh should stay within
+        # the adapted high bound (or available peer count).
+        adaptive_high = router.adaptive_degree_high
 
-        # Mesh should adapt to use new parameters
-        # (Exact verification depends on peer availability and mesh formation)
+        def _mesh_within_adaptive_bounds() -> bool:
+            if topic not in router.mesh:
+                return False
+            mesh_size = len(router.mesh[topic])
+            return mesh_size <= adaptive_high and mesh_size >= min(
+                degree_low, mesh_size
+            )
+
+        await wait_for(
+            _mesh_within_adaptive_bounds,
+            fail_msg="mesh should settle under adaptive degree bounds",
+        )
 
 
 @pytest.mark.trio
@@ -310,18 +356,31 @@ async def test_message_delivery_tracking():
 
         # Connect peers
         await connect(pubsubs[0].host, pubsubs[1].host)
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(pubsubs[1].my_id)
+        await pubsubs[1].wait_for_peer(pubsubs[0].my_id)
 
         # Subscribe to topic
         topic = "delivery-tracking-test"
         for pubsub in pubsubs:
             await pubsub.subscribe(topic)
-        await trio.sleep(1.0)
+        await pubsubs[0].wait_for_subscription(pubsubs[1].my_id, topic)
+        await pubsubs[1].wait_for_subscription(pubsubs[0].my_id, topic)
+        await pubsubs[0].wait_for_mesh(pubsubs[1].my_id, topic)
+        await pubsubs[1].wait_for_mesh(pubsubs[0].my_id, topic)
 
         # Publish messages to track deliveries
         for i in range(3):
             await pubsubs[0].publish(topic, f"message {i}".encode())
-            await trio.sleep(0.2)
+
+        deliveries = router.recent_message_deliveries
+
+        def _deliveries_tracked() -> bool:
+            return len(deliveries.get(topic, [])) > 0
+
+        await wait_for(
+            _deliveries_tracked,
+            fail_msg="message deliveries should be tracked",
+        )
 
         # Verify delivery tracking
         assert topic in router.recent_message_deliveries

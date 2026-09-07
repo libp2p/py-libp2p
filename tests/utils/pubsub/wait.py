@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from functools import partial
 import inspect
 import logging
@@ -13,6 +13,8 @@ import trio
 from tests.utils.pubsub.dummy_account_node import CRYPTO_TOPIC
 
 if TYPE_CHECKING:
+    from libp2p.abc import ISubscriptionAPI
+    from libp2p.pubsub.pb import rpc_pb2
     from tests.utils.pubsub.dummy_account_node import DummyAccountNode
 
 logger = logging.getLogger(__name__)
@@ -55,6 +57,86 @@ async def wait_for(
             raise err
 
         await trio.sleep(poll_interval)
+
+
+def _resolve_fail_msg(fail_msg: str | Callable[[], str], default: str) -> str:
+    if callable(fail_msg):
+        rendered = fail_msg()
+        return rendered or default
+    return fail_msg or default
+
+
+async def wait_for_pubsub_payload(
+    subscription: ISubscriptionAPI,
+    expected: bytes,
+    *,
+    timeout: float = 10.0,
+    fail_msg: str | Callable[[], str] = "",
+) -> rpc_pb2.Message:
+    """
+    Wait until *subscription* yields a message whose ``data`` equals *expected*.
+
+    Uses ``trio.fail_after`` only as a safety cap; returns as soon as the
+    payload arrives.  On timeout or if the subscription ends first, raises
+    ``AssertionError``.
+    """
+    try:
+        with trio.fail_after(timeout):
+            async for msg in subscription:
+                if msg.data == expected:
+                    return msg
+    except trio.TooSlowError as exc:
+        raise AssertionError(
+            _resolve_fail_msg(
+                fail_msg,
+                f"Did not receive expected payload within {timeout}s",
+            )
+        ) from exc
+    raise AssertionError(
+        _resolve_fail_msg(
+            fail_msg,
+            "Subscription ended before expected payload arrived",
+        )
+    )
+
+
+async def wait_for_pubsub_payloads(
+    subscription: ISubscriptionAPI,
+    expected: Collection[bytes],
+    *,
+    timeout: float = 10.0,
+    fail_msg: str | Callable[[], str] = "",
+) -> set[bytes]:
+    """
+    Wait until *subscription* has yielded every payload in *expected*.
+
+    Extra messages are ignored.  ``trio.fail_after`` is only a safety cap.
+    """
+    remaining = set(expected)
+    received: set[bytes] = set()
+    try:
+        with trio.fail_after(timeout):
+            async for msg in subscription:
+                if msg.data in remaining:
+                    received.add(msg.data)
+                    remaining.discard(msg.data)
+                    if not remaining:
+                        return received
+    except trio.TooSlowError as exc:
+        raise AssertionError(
+            _resolve_fail_msg(
+                fail_msg,
+                f"Did not receive all expected payloads within {timeout}s. "
+                f"Missing: {remaining}",
+            )
+        ) from exc
+    raise AssertionError(
+        _resolve_fail_msg(
+            fail_msg,
+            "Subscription ended before all expected payloads arrived. "
+            f"Missing: {remaining}",
+        )
+    )
 
 
 async def _wait_for_adjacency_edge_ready(

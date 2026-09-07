@@ -8,7 +8,6 @@ This module tests the core functionality of GossipSub v1.4, including:
 """
 
 import pytest
-import trio
 
 from libp2p.pubsub.gossipsub import (
     PROTOCOL_ID_V13,
@@ -18,6 +17,7 @@ from libp2p.pubsub.gossipsub import (
 from libp2p.pubsub.score import ScoreParams
 from libp2p.tools.utils import connect
 from tests.utils.factories import PubsubFactory
+from tests.utils.pubsub.wait import wait_for_pubsub_payload
 
 
 @pytest.mark.trio
@@ -53,20 +53,21 @@ async def test_v14_protocol_feature_detection():
         router = pubsubs_gsub[0].router
         assert isinstance(router, GossipSub)
 
+        peer0_id = pubsubs_gsub[0].host.get_id()
+        peer1_id = pubsubs_gsub[1].host.get_id()
+
         # Connect peers
         await connect(pubsubs_gsub[0].host, pubsubs_gsub[1].host)
-        await trio.sleep(0.5)
-
-        # Get peer ID
-        peer_id = pubsubs_gsub[1].host.get_id()
+        await pubsubs_gsub[0].wait_for_peer(peer1_id, timeout=10)
+        await pubsubs_gsub[1].wait_for_peer(peer0_id, timeout=10)
 
         # Test v1.4 feature detection
-        assert router.supports_protocol_feature(peer_id, "extensions")
-        assert router.supports_protocol_feature(peer_id, "adaptive_gossip")
-        assert router.supports_protocol_feature(peer_id, "extended_scoring")
-        assert router.supports_protocol_feature(peer_id, "idontwant")
-        assert router.supports_protocol_feature(peer_id, "scoring")
-        assert router.supports_protocol_feature(peer_id, "px")
+        assert router.supports_protocol_feature(peer1_id, "extensions")
+        assert router.supports_protocol_feature(peer1_id, "adaptive_gossip")
+        assert router.supports_protocol_feature(peer1_id, "extended_scoring")
+        assert router.supports_protocol_feature(peer1_id, "idontwant")
+        assert router.supports_protocol_feature(peer1_id, "scoring")
+        assert router.supports_protocol_feature(peer1_id, "px")
 
 
 @pytest.mark.trio
@@ -78,20 +79,21 @@ async def test_v13_protocol_feature_detection():
         router = pubsubs_gsub[0].router
         assert isinstance(router, GossipSub)
 
+        peer0_id = pubsubs_gsub[0].host.get_id()
+        peer1_id = pubsubs_gsub[1].host.get_id()
+
         # Connect peers
         await connect(pubsubs_gsub[0].host, pubsubs_gsub[1].host)
-        await trio.sleep(0.5)
-
-        # Get peer ID
-        peer_id = pubsubs_gsub[1].host.get_id()
+        await pubsubs_gsub[0].wait_for_peer(peer1_id, timeout=10)
+        await pubsubs_gsub[1].wait_for_peer(peer0_id, timeout=10)
 
         # Test v1.3 feature detection
-        assert router.supports_protocol_feature(peer_id, "extensions")
-        assert not router.supports_protocol_feature(peer_id, "adaptive_gossip")
-        assert not router.supports_protocol_feature(peer_id, "extended_scoring")
-        assert router.supports_protocol_feature(peer_id, "idontwant")
-        assert router.supports_protocol_feature(peer_id, "scoring")
-        assert router.supports_protocol_feature(peer_id, "px")
+        assert router.supports_protocol_feature(peer1_id, "extensions")
+        assert not router.supports_protocol_feature(peer1_id, "adaptive_gossip")
+        assert not router.supports_protocol_feature(peer1_id, "extended_scoring")
+        assert router.supports_protocol_feature(peer1_id, "idontwant")
+        assert router.supports_protocol_feature(peer1_id, "scoring")
+        assert router.supports_protocol_feature(peer1_id, "px")
 
 
 @pytest.mark.trio
@@ -103,11 +105,14 @@ async def test_supports_scoring_includes_v13_v14():
         router = pubsubs_gsub[0].router
         assert isinstance(router, GossipSub)
 
-        await connect(pubsubs_gsub[0].host, pubsubs_gsub[1].host)
-        await trio.sleep(0.5)
+        peer0_id = pubsubs_gsub[0].host.get_id()
+        peer1_id = pubsubs_gsub[1].host.get_id()
 
-        peer_id = pubsubs_gsub[1].host.get_id()
-        assert router.supports_scoring(peer_id), "v1.3 peers must support scoring"
+        await connect(pubsubs_gsub[0].host, pubsubs_gsub[1].host)
+        await pubsubs_gsub[0].wait_for_peer(peer1_id, timeout=10)
+        await pubsubs_gsub[1].wait_for_peer(peer0_id, timeout=10)
+
+        assert router.supports_scoring(peer1_id), "v1.3 peers must support scoring"
 
     async with PubsubFactory.create_batch_with_gossipsub(
         2, protocols=[PROTOCOL_ID_V14]
@@ -115,11 +120,14 @@ async def test_supports_scoring_includes_v13_v14():
         router = pubsubs_gsub[0].router
         assert isinstance(router, GossipSub)
 
-        await connect(pubsubs_gsub[0].host, pubsubs_gsub[1].host)
-        await trio.sleep(0.5)
+        peer0_id = pubsubs_gsub[0].host.get_id()
+        peer1_id = pubsubs_gsub[1].host.get_id()
 
-        peer_id = pubsubs_gsub[1].host.get_id()
-        assert router.supports_scoring(peer_id), "v1.4 peers must support scoring"
+        await connect(pubsubs_gsub[0].host, pubsubs_gsub[1].host)
+        await pubsubs_gsub[0].wait_for_peer(peer1_id, timeout=10)
+        await pubsubs_gsub[1].wait_for_peer(peer0_id, timeout=10)
+
+        assert router.supports_scoring(peer1_id), "v1.4 peers must support scoring"
 
 
 @pytest.mark.trio
@@ -146,10 +154,17 @@ async def test_message_propagation_with_v14_features():
         for gsub in gsubs:
             assert isinstance(gsub, GossipSub)
 
+        peer0_id = hosts[0].get_id()
+        peer1_id = hosts[1].get_id()
+        peer2_id = hosts[2].get_id()
+
         # Connect hosts in a line: 0 -- 1 -- 2
         await connect(hosts[0], hosts[1])
         await connect(hosts[1], hosts[2])
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(peer1_id, timeout=10)
+        await pubsubs[1].wait_for_peer(peer0_id, timeout=10)
+        await pubsubs[1].wait_for_peer(peer2_id, timeout=10)
+        await pubsubs[2].wait_for_peer(peer1_id, timeout=10)
 
         # All hosts subscribe to the same topic
         topic = "test_v14_propagation"
@@ -157,7 +172,14 @@ async def test_message_propagation_with_v14_features():
         for pubsub in pubsubs:
             queue = await pubsub.subscribe(topic)
             queues.append(queue)
-        await trio.sleep(1.0)  # Allow time for mesh formation
+        await pubsubs[0].wait_for_subscription(peer1_id, topic, timeout=10)
+        await pubsubs[1].wait_for_subscription(peer0_id, topic, timeout=10)
+        await pubsubs[1].wait_for_subscription(peer2_id, topic, timeout=10)
+        await pubsubs[2].wait_for_subscription(peer1_id, topic, timeout=10)
+        await pubsubs[0].wait_for_mesh(peer1_id, topic, timeout=10)
+        await pubsubs[1].wait_for_mesh(peer0_id, topic, timeout=10)
+        await pubsubs[1].wait_for_mesh(peer2_id, topic, timeout=10)
+        await pubsubs[2].wait_for_mesh(peer1_id, topic, timeout=10)
 
         # Verify that mesh has been formed
         for i, gsub in enumerate(gsubs):
@@ -168,13 +190,9 @@ async def test_message_propagation_with_v14_features():
         test_message = b"test v1.4 message"
         await pubsubs[0].publish(topic, test_message)
 
-        # Wait for message propagation
-        await trio.sleep(1.0)
-
         # Verify all peers received the message
-        for i, queue in enumerate(queues):
-            msg = await queue.get()
-            assert msg.data == test_message
+        for queue in queues:
+            await wait_for_pubsub_payload(queue, test_message, timeout=10.0)
 
 
 @pytest.mark.trio
@@ -185,24 +203,29 @@ async def test_backward_compatibility_v14_to_v12():
     async with PubsubFactory.create_batch_with_gossipsub(
         2, protocols=[PROTOCOL_ID_V14, PROTOCOL_ID_V12]
     ) as pubsubs:
+        peer0_id = pubsubs[0].host.get_id()
+        peer1_id = pubsubs[1].host.get_id()
+
         # Connect the peers
         await connect(pubsubs[0].host, pubsubs[1].host)
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(peer1_id, timeout=10)
+        await pubsubs[1].wait_for_peer(peer0_id, timeout=10)
 
         # Subscribe to topic
         topic = "compatibility_test"
         queue1 = await pubsubs[1].subscribe(topic)
         await pubsubs[0].subscribe(topic)
-        await trio.sleep(1.0)
+        await pubsubs[0].wait_for_subscription(peer1_id, topic, timeout=10)
+        await pubsubs[1].wait_for_subscription(peer0_id, topic, timeout=10)
+        await pubsubs[0].wait_for_mesh(peer1_id, topic, timeout=10)
+        await pubsubs[1].wait_for_mesh(peer0_id, topic, timeout=10)
 
         # Publish message from v1.4 peer
         test_message = b"v1.4 to v1.2 message"
         await pubsubs[0].publish(topic, test_message)
-        await trio.sleep(0.5)
 
         # Verify v1.2 peer received the message
-        msg = await queue1.get()
-        assert msg.data == test_message
+        await wait_for_pubsub_payload(queue1, test_message, timeout=10.0)
 
 
 @pytest.mark.trio

@@ -31,6 +31,12 @@ from libp2p.utils.address_validation import find_free_port
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
+EXPECTED_GOSSIPSUB_FAILURE_MODES = [
+    "peer-specific gossipsub stream negotiation may fail or reset",
+    "malformed control-message IDs are logged and skipped",
+    "publish path intentionally disabled",
+]
+
 
 @dataclass
 class ObserverState:
@@ -66,7 +72,35 @@ def _build_snapshot(
     listen_port: int,
     topics: Sequence[str],
     max_messages: int | None,
+    *,
+    gossipsub: Any | None = None,
+    score_mode: str = "thresholds_only",
+    strict_signing: bool = True,
 ) -> dict[str, Any]:
+    compatibility_gossipsub = gossipsub or build_filecoin_gossipsub(
+        network_name=network_name,
+        score_mode=score_mode,
+    )
+    compatibility = {
+        "protocols": [str(protocol) for protocol in compatibility_gossipsub.protocols],
+        "strict_signing": strict_signing,
+        "message_id_strategy": "blake2b-256(data)",
+        "mesh_parameters": {
+            "degree": compatibility_gossipsub.degree,
+            "degree_low": compatibility_gossipsub.degree_low,
+            "degree_high": compatibility_gossipsub.degree_high,
+            "gossip_history": compatibility_gossipsub.mcache.history_size,
+        },
+        "score_mode": score_mode,
+        "observer_mode_limitation": "publishing disabled; inbound observation only",
+        "limitations": [
+            "no full topic-scoring parity",
+            "no peer gater or subscription allowlist parity",
+            "no drand/F3 topic support",
+            "no publish path",
+            "no block/message semantic validation beyond observation",
+        ],
+    }
     return {
         "network_alias": network_alias,
         "network_name": network_name,
@@ -85,6 +119,13 @@ def _build_snapshot(
         "bootstrap_addresses": list(bootstrap_addrs),
         "listen_addr": f"/ip4/0.0.0.0/tcp/{listen_port}",
         "max_messages": max_messages,
+        "gossipsub_compatibility": compatibility,
+        "interop": {
+            "case": "filecoin_read_only_gossipsub_observer",
+            "workflow": "runtime_bootstrap_smoke",
+            "result": "partial",
+            "expected_failure_modes": EXPECTED_GOSSIPSUB_FAILURE_MODES,
+        },
     }
 
 
@@ -185,6 +226,7 @@ async def run(
         listen_port=listen_port,
         topics=topics,
         max_messages=max_messages,
+        gossipsub=gossipsub,
     )
 
     if as_json:
@@ -201,6 +243,34 @@ async def run(
         logger.info("selected topics: %s", ", ".join(topics))
         logger.info("runtime bootstrap peers: %d", snapshot["bootstrap_count"])
         logger.info("observer mode: read-only (publishing disabled)")
+        logger.info(
+            "gossipsub protocols: %s",
+            ", ".join(snapshot["gossipsub_compatibility"]["protocols"]),
+        )
+        logger.info(
+            "strict signing: %s",
+            snapshot["gossipsub_compatibility"]["strict_signing"],
+        )
+        logger.info(
+            "message ID strategy: %s",
+            snapshot["gossipsub_compatibility"]["message_id_strategy"],
+        )
+        mesh = snapshot["gossipsub_compatibility"]["mesh_parameters"]
+        logger.info(
+            "mesh params: D=%d Dlo=%d Dhi=%d history=%d",
+            mesh["degree"],
+            mesh["degree_low"],
+            mesh["degree_high"],
+            mesh["gossip_history"],
+        )
+        logger.info(
+            "score mode: %s",
+            snapshot["gossipsub_compatibility"]["score_mode"],
+        )
+        logger.info(
+            "observer limitation: %s",
+            snapshot["gossipsub_compatibility"]["observer_mode_limitation"],
+        )
         for addr in runtime_bootstrap[:5]:
             logger.info("bootstrap: %s", addr)
 
