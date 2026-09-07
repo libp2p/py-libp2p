@@ -428,6 +428,27 @@ class Swarm(Service, INetworkService):
                         f"Error stopping connection management components: {e}"
                     )
 
+                # Close live connections so their sockets are released on
+                # shutdown. self.connections maps peer id -> list[INetConn].
+                # This service-manager stop path previously closed only the
+                # listeners and never the connections, so every dialed or
+                # accepted socket leaked whenever a swarm was stopped through
+                # the manager instead of an explicit Swarm.close() (#1485).
+                # Swarm.close() clears self.connections before stopping the
+                # manager, so this is a no-op on that path; SwarmConn.close()
+                # is idempotent.
+                for peer_id, conns in list(self.connections.items()):
+                    for conn in list(conns):
+                        try:
+                            await conn.close()
+                        except Exception as e:
+                            logger.warning(
+                                "Error closing connection to %s during shutdown: %s",
+                                peer_id,
+                                e,
+                            )
+                self.connections.clear()
+
                 # Close all listeners so their internal nurseries are
                 # cancelled and system tasks finish cleanly.
                 for listener in list(self.listeners.values()):
