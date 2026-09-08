@@ -28,12 +28,6 @@ import multiaddr
 import redis
 import trio
 
-# ExceptionGroup is built-in in Python 3.11+, import for older versions
-try:
-    ExceptionGroup  # noqa: B018
-except NameError:
-    from exceptiongroup import ExceptionGroup  # type: ignore[no-redef]
-
 from libp2p import create_mplex_muxer_option, create_yamux_muxer_option, new_host
 from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.crypto.x25519 import create_new_key_pair as create_new_x25519_key_pair
@@ -654,44 +648,6 @@ class PingTest:
             except (AttributeError, Exception):
                 return "unknown"
 
-    def _is_connection_closed_error(self, exc: BaseException) -> bool:
-        """
-        Check if an exception is an expected 'Connection closed' error.
-
-        These errors occur during graceful shutdown when the muxer is still
-        trying to read from a connection that has been closed by the other side.
-        """
-        if exc is None:
-            return False
-
-        # Check direct exception message (shutdown races with many implementations)
-        exc_str = str(exc).lower()
-        if any(
-            phrase in exc_str
-            for phrase in (
-                "connection closed",
-                "stream reset",
-                "connection reset",
-                "broken pipe",
-                "stream eof",
-                "end of file",
-            )
-        ):
-            return True
-
-        # Check cause chain
-        if hasattr(exc, "__cause__") and exc.__cause__:
-            if self._is_connection_closed_error(exc.__cause__):
-                return True
-
-        # Check nested ExceptionGroups
-        if isinstance(exc, ExceptionGroup):
-            return all(
-                self._is_connection_closed_error(inner) for inner in exc.exceptions
-            )
-
-        return False
-
     def _listener_post_ping_grace_secs(self) -> float:
         if not self.test_plans:
             return 0.2
@@ -901,12 +857,10 @@ class PingTest:
         self.host.set_stream_handler(PING_PROTOCOL_ID, self.handle_ping)
         self.log_protocols()
 
-        listener_success = False
-        try:
-            async with self.host.run(listen_addrs=listen_addrs):
-                all_addrs = self.host.get_addrs()
-                if not all_addrs:
-                    raise RuntimeError("No listen addresses available")
+        async with self.host.run(listen_addrs=listen_addrs):
+            all_addrs = self.host.get_addrs()
+            if not all_addrs:
+                raise RuntimeError("No listen addresses available")
 
                 actual_addr = self._get_publishable_address(all_addrs)
                 print(
@@ -948,7 +902,6 @@ class PingTest:
                             "Ping received and responded, listener exiting",
                             file=sys.stderr,
                         )
-                        listener_success = True
                         # Small muxer drain delay; in test-plans wait longer so the
                         # dialer container can exit before we do (see module note).
                         grace = self._listener_post_ping_grace_secs()
@@ -963,40 +916,6 @@ class PingTest:
                         file=sys.stderr,
                     )
                     sys.exit(1)
-
-        except ExceptionGroup as eg:
-            # Handle expected "Connection closed" errors during shutdown
-            if listener_success:
-                # Check if all errors are connection closed errors
-                all_conn_closed = True
-                for exc in eg.exceptions:
-                    if isinstance(exc, ExceptionGroup):
-                        for inner in exc.exceptions:
-                            if not self._is_connection_closed_error(inner):
-                                all_conn_closed = False
-                                break
-                    elif not self._is_connection_closed_error(exc):
-                        all_conn_closed = False
-                        break
-
-                if all_conn_closed:
-                    print(
-                        "Listener completed (connection closed during cleanup)",
-                        file=sys.stderr,
-                    )
-                    return
-            # Re-raise if we didn't succeed or if there are real errors
-            raise
-
-        except Exception as e:
-            # Check if it's a connection closed error after success
-            if listener_success and self._is_connection_closed_error(e):
-                print(
-                    "Listener completed (connection closed during cleanup)",
-                    file=sys.stderr,
-                )
-                return
-            raise
 
     async def _connect_redis_with_retry(
         self, max_retries: int = 10, retry_delay: float = 1.0
@@ -1419,43 +1338,12 @@ class PingTest:
                 # Small delay to allow muxer to drain
                 await trio.sleep(0.1)
 
-        except ExceptionGroup as eg:
-            # Handle expected "Connection closed" errors during shutdown
-            # These occur when the muxer is still reading while we close
-            non_connection_errors = []
-            for exc in eg.exceptions:
-                if isinstance(exc, ExceptionGroup):
-                    for inner in exc.exceptions:
-                        if not self._is_connection_closed_error(inner):
-                            non_connection_errors.append(inner)
-                elif not self._is_connection_closed_error(exc):
-                    non_connection_errors.append(exc)
-
-            if non_connection_errors:
-                print(f"Dialer error: {eg}", file=sys.stderr)
-                import traceback
-
-                traceback.print_exc(file=sys.stderr)
-                sys.exit(1)
-            else:
-                print(
-                    "Dialer completed (connection closed during cleanup)",
-                    file=sys.stderr,
-                )
-
         except Exception as e:
-            # Check if it's a connection closed error (expected during shutdown)
-            if self._is_connection_closed_error(e):
-                print(
-                    "Dialer completed (connection closed during cleanup)",
-                    file=sys.stderr,
-                )
-            else:
-                print(f"Dialer error: {e}", file=sys.stderr)
-                import traceback
+            print(f"Dialer error: {e}", file=sys.stderr)
+            import traceback
 
-                traceback.print_exc(file=sys.stderr)
-                sys.exit(1)
+            traceback.print_exc(file=sys.stderr)
+            sys.exit(1)
 
     async def run(self) -> None:
         """Main run method."""
@@ -1468,35 +1356,12 @@ class PingTest:
             else:
                 await self.run_listener()
 
-        except ExceptionGroup as eg:
-            # Check if all exceptions are "connection closed" (expected during cleanup)
-            all_conn_closed = True
-            for exc in eg.exceptions:
-                if isinstance(exc, ExceptionGroup):
-                    for inner in exc.exceptions:
-                        if not self._is_connection_closed_error(inner):
-                            all_conn_closed = False
-                            break
-                elif not self._is_connection_closed_error(exc):
-                    all_conn_closed = False
-                    break
-
-            if not all_conn_closed:
-                print(f"Error: {eg}", file=sys.stderr)
-                import traceback
-
-                traceback.print_exc(file=sys.stderr)
-                sys.exit(1)
-            # If all are connection closed, that's expected - exit normally
-
         except Exception as e:
-            # Check if it's a connection closed error (expected during shutdown)
-            if not self._is_connection_closed_error(e):
-                print(f"Error: {e}", file=sys.stderr)
-                import traceback
+            print(f"Error: {e}", file=sys.stderr)
+            import traceback
 
-                traceback.print_exc(file=sys.stderr)
-                sys.exit(1)
+            traceback.print_exc(file=sys.stderr)
+            sys.exit(1)
 
         finally:
             if self.redis_client:

@@ -30,11 +30,6 @@ import multiaddr
 import redis
 import trio
 
-try:
-    ExceptionGroup  # noqa: B018
-except NameError:
-    from exceptiongroup import ExceptionGroup  # type: ignore[no-redef]
-
 from libp2p import create_mplex_muxer_option, create_yamux_muxer_option, new_host
 from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.crypto.x25519 import create_new_key_pair as create_new_x25519_key_pair
@@ -179,22 +174,6 @@ def _percentile(sorted_values: list[float], p: float) -> float:
     return sorted_values[lower] * (1.0 - weight) + sorted_values[upper] * weight
 
 
-# Phrases when mplex/TLS read loops exit after peer disconnect (tcp+tls+mplex).
-_SHUTDOWN_ERROR_PHRASES = (
-    "connection closed",
-    "connection is closed",
-    "cannot read: tls connection is closed",
-    "tls connection is closed",
-    "broken pipe",
-    "connection reset",
-    "stream reset",
-    "stream eof",
-    "end of file",
-    "eof",
-    "closed resource",
-    "broken resource",
-)
-
 # Extra settle time so dialer can exit before listener during interop teardown.
 _LISTENER_POST_PERF_GRACE_TLS_MPLEX_SECS = 3.0
 _LISTENER_POST_PERF_GRACE_SECS = 0.5
@@ -210,45 +189,11 @@ _LISTENER_WS_MPLEX_TEARDOWN_IDLE_SECS = 30.0
 _PERF_LOOPBACK_DENY_LIST = ("127.0.0.0/8", "::1/128")
 
 
-def _is_connection_closed_error(exc: BaseException | None) -> bool:
-    """True if this is an expected connection-closed error during muxer/TLS shutdown."""
-    if exc is None:
-        return False
-
-    msg = str(exc).lower()
-    if any(phrase in msg for phrase in _SHUTDOWN_ERROR_PHRASES):
-        return True
-
-    if isinstance(exc, ExceptionGroup):
-        if not exc.exceptions:
-            return False
-        return all(_is_connection_closed_error(e) for e in exc.exceptions)
-
-    if exc.__cause__ is not None and _is_connection_closed_error(exc.__cause__):
-        return True
-    if (
-        exc.__context__ is not None
-        and exc.__context__ is not exc.__cause__
-        and _is_connection_closed_error(exc.__context__)
-    ):
-        return True
-
-    return False
-
-
 def _log_perf_phase(role: str, phase: str, **details: Any) -> None:
     extra = " ".join(f"{k}={v}" for k, v in details.items())
     msg = f"[PERF_PHASE] {role} {phase}" + (f" {extra}" if extra else "")
     print(msg, file=sys.stderr)
     logger.info(msg)
-
-
-def _log_ignored_shutdown_error(role: str, exc: BaseException) -> None:
-    print(
-        f"{role} completed (connection closed during cleanup)",
-        file=sys.stderr,
-    )
-    logger.info("Ignored shutdown error: %s", exc)
 
 
 def _compute_stats(samples: list[float], is_latency: bool = False) -> dict[str, Any]:
@@ -404,29 +349,6 @@ class PerfTest:
         if self.transport in ("ws", "wss") and self.muxer == "mplex":
             return _LISTENER_WS_MPLEX_TEARDOWN_IDLE_SECS
         return _LISTENER_EMPTY_PEER_POLLS_REQUIRED * _LISTENER_PEER_POLL_INTERVAL_SECS
-
-    def _should_ignore_shutdown_error(self, exc: BaseException) -> bool:
-        """Swallow connection-closed errors only during post-benchmark cleanup."""
-        if not _is_connection_closed_error(exc):
-            _log_perf_phase(
-                self._role_label(),
-                "shutdown_error_not_ignored",
-                reason="not_connection_closed",
-                exc=type(exc).__name__,
-            )
-            return False
-        if self.is_dialer:
-            ignore = self._benchmarks_complete
-        else:
-            ignore = self._listener_served_peer
-        _log_perf_phase(
-            self._role_label(),
-            "shutdown_ignore" if ignore else "shutdown_error_not_ignored",
-            benchmarks_complete=self._benchmarks_complete,
-            listener_served_peer=self._listener_served_peer,
-            exc=type(exc).__name__,
-        )
-        return ignore
 
     def _role_label(self) -> str:
         return "dialer" if self.is_dialer else "listener"
@@ -832,83 +754,70 @@ class PerfTest:
         self._install_listener_perf_lifecycle_handler()
         print(f"Perf service started (protocol {PROTOCOL_NAME})", file=sys.stderr)
 
-        listener_ready = False
-        try:
-            async with self.host.run(listen_addrs=listen_addrs):
-                all_addrs = self.host.get_addrs()
-                if not all_addrs:
-                    raise RuntimeError("No listen addresses available")
-                actual_addr = self._get_publishable_address(all_addrs)
-                print(f"Publishing address: {actual_addr}", file=sys.stderr)
-                if self.local_addr_file:
-                    Path(self.local_addr_file).write_text(actual_addr, encoding="utf-8")
-                else:
-                    redis_key = f"{self.test_key}_listener_multiaddr"
-                    assert self.redis_client is not None
-                    self.redis_client.set(redis_key, actual_addr)
-                print("Listener ready, waiting for dialer...", file=sys.stderr)
-                _log_perf_phase(
-                    "listener",
-                    "ready",
-                    test_timeout_seconds=self.test_timeout_seconds,
-                    muxer=self.muxer,
-                    security=self.security,
-                    transport=self.transport,
-                )
-                listener_ready = True
+        async with self.host.run(listen_addrs=listen_addrs):
+            all_addrs = self.host.get_addrs()
+            if not all_addrs:
+                raise RuntimeError("No listen addresses available")
+            actual_addr = self._get_publishable_address(all_addrs)
+            print(f"Publishing address: {actual_addr}", file=sys.stderr)
+            if self.local_addr_file:
+                Path(self.local_addr_file).write_text(actual_addr, encoding="utf-8")
+            else:
+                redis_key = f"{self.test_key}_listener_multiaddr"
+                assert self.redis_client is not None
+                self.redis_client.set(redis_key, actual_addr)
+            print("Listener ready, waiting for dialer...", file=sys.stderr)
+            _log_perf_phase(
+                "listener",
+                "ready",
+                test_timeout_seconds=self.test_timeout_seconds,
+                muxer=self.muxer,
+                security=self.security,
+                transport=self.transport,
+            )
 
-                connect_deadline = time.monotonic() + self.test_timeout_seconds
-                saw_peer = False
-                empty_peer_polls = 0
-                last_peer_seen_at = time.monotonic()
-                teardown_idle_secs = self._listener_teardown_idle_secs()
-                while True:
-                    if not saw_peer:
-                        if self._listener_peer_present():
-                            saw_peer = True
-                            empty_peer_polls = 0
-                            last_peer_seen_at = time.monotonic()
-                        elif time.monotonic() >= connect_deadline:
-                            raise RuntimeError(
-                                f"Timeout: dialer never connected within "
-                                f"{self.test_timeout_seconds}s"
-                            )
-                    elif self.host.get_live_peers():
+            connect_deadline = time.monotonic() + self.test_timeout_seconds
+            saw_peer = False
+            empty_peer_polls = 0
+            last_peer_seen_at = time.monotonic()
+            teardown_idle_secs = self._listener_teardown_idle_secs()
+            while True:
+                if not saw_peer:
+                    if self._listener_peer_present():
+                        saw_peer = True
                         empty_peer_polls = 0
                         last_peer_seen_at = time.monotonic()
-                    else:
-                        empty_peer_polls += 1
-                        peer_idle_secs = time.monotonic() - last_peer_seen_at
-                        if (
-                            empty_peer_polls >= _LISTENER_EMPTY_PEER_POLLS_REQUIRED
-                            and peer_idle_secs >= teardown_idle_secs
-                        ):
-                            print(
-                                "Listener: peer disconnected, shutting down",
-                                file=sys.stderr,
-                            )
-                            _log_perf_phase(
-                                "listener",
-                                "teardown_start",
-                                peer_idle_secs=f"{peer_idle_secs:.1f}",
-                            )
-                            await trio.sleep(self._listener_shutdown_grace_secs())
-                            break
+                    elif time.monotonic() >= connect_deadline:
+                        raise RuntimeError(
+                            f"Timeout: dialer never connected within "
+                            f"{self.test_timeout_seconds}s"
+                        )
+                elif self.host.get_live_peers():
+                    empty_peer_polls = 0
+                    last_peer_seen_at = time.monotonic()
+                else:
+                    empty_peer_polls += 1
+                    peer_idle_secs = time.monotonic() - last_peer_seen_at
+                    if (
+                        empty_peer_polls >= _LISTENER_EMPTY_PEER_POLLS_REQUIRED
+                        and peer_idle_secs >= teardown_idle_secs
+                    ):
+                        print(
+                            "Listener: peer disconnected, shutting down",
+                            file=sys.stderr,
+                        )
+                        _log_perf_phase(
+                            "listener",
+                            "teardown_start",
+                            peer_idle_secs=f"{peer_idle_secs:.1f}",
+                        )
+                        await trio.sleep(self._listener_shutdown_grace_secs())
+                        break
 
-                    await trio.sleep(_LISTENER_PEER_POLL_INTERVAL_SECS)
+                await trio.sleep(_LISTENER_PEER_POLL_INTERVAL_SECS)
 
-                await self._stop_perf_service()
-                self._close_redis()
-        except ExceptionGroup as eg:
-            if listener_ready and self._should_ignore_shutdown_error(eg):
-                _log_ignored_shutdown_error("Listener", eg)
-                return
-            raise
-        except BaseException as e:
-            if listener_ready and self._should_ignore_shutdown_error(e):
-                _log_ignored_shutdown_error("Listener", e)
-                return
-            raise
+            await self._stop_perf_service()
+            self._close_redis()
 
     async def _wait_for_listener_addr(self) -> str:
         timeout = min(self.test_timeout_seconds, MAX_TEST_TIMEOUT)
@@ -991,127 +900,108 @@ class PerfTest:
 
         # Must run host inside host.run() so swarm/nursery are active
         # (required for connect and QUIC)
-        try:
-            async with self.host.run(listen_addrs=dialer_listen_addrs or []):
-                # Brief delay so listener is fully listening before we dial
-                await trio.sleep(1.0)
+        async with self.host.run(listen_addrs=dialer_listen_addrs or []):
+            # Brief delay so listener is fully listening before we dial
+            await trio.sleep(1.0)
 
-                maddr = multiaddr.Multiaddr(self.listener_addr)
-                info = info_from_p2p_addr(maddr)
-                listener_peer_id = info.peer_id
-                await self.host.connect(info)
-                print("Connected to listener", file=sys.stderr)
-                _log_perf_phase(
-                    "dialer",
-                    "connected",
-                    test_timeout_seconds=self.test_timeout_seconds,
-                    muxer=self.muxer,
-                    security=self.security,
-                    transport=self.transport,
+            maddr = multiaddr.Multiaddr(self.listener_addr)
+            info = info_from_p2p_addr(maddr)
+            listener_peer_id = info.peer_id
+            await self.host.connect(info)
+            print("Connected to listener", file=sys.stderr)
+            _log_perf_phase(
+                "dialer",
+                "connected",
+                test_timeout_seconds=self.test_timeout_seconds,
+                muxer=self.muxer,
+                security=self.security,
+                transport=self.transport,
+            )
+
+            upload_samples: list[float] = []
+            _log_perf_phase("dialer", "upload_start", iterations=self.upload_iterations)
+            for i in range(self.upload_iterations):
+                elapsed = await self._one_measurement(self.upload_bytes, 0)
+                gbps = (self.upload_bytes * 8.0) / elapsed / 1e9 if elapsed > 0 else 0.0
+                upload_samples.append(gbps)
+                print(
+                    f"Upload {i + 1}/{self.upload_iterations}: {gbps:.2f} Gbps",
+                    file=sys.stderr,
                 )
 
-                upload_samples: list[float] = []
-                _log_perf_phase(
-                    "dialer", "upload_start", iterations=self.upload_iterations
+            download_samples: list[float] = []
+            _log_perf_phase(
+                "dialer", "download_start", iterations=self.download_iterations
+            )
+            for i in range(self.download_iterations):
+                elapsed = await self._one_measurement(0, self.download_bytes)
+                gbps = (
+                    (self.download_bytes * 8.0) / elapsed / 1e9 if elapsed > 0 else 0.0
                 )
-                for i in range(self.upload_iterations):
-                    elapsed = await self._one_measurement(self.upload_bytes, 0)
-                    gbps = (
-                        (self.upload_bytes * 8.0) / elapsed / 1e9
-                        if elapsed > 0
-                        else 0.0
-                    )
-                    upload_samples.append(gbps)
-                    print(
-                        f"Upload {i + 1}/{self.upload_iterations}: {gbps:.2f} Gbps",
-                        file=sys.stderr,
-                    )
-
-                download_samples: list[float] = []
-                _log_perf_phase(
-                    "dialer", "download_start", iterations=self.download_iterations
-                )
-                for i in range(self.download_iterations):
-                    elapsed = await self._one_measurement(0, self.download_bytes)
-                    gbps = (
-                        (self.download_bytes * 8.0) / elapsed / 1e9
-                        if elapsed > 0
-                        else 0.0
-                    )
-                    download_samples.append(gbps)
-                    print(
-                        f"Download {i + 1}/{self.download_iterations}: {gbps:.2f} Gbps",
-                        file=sys.stderr,
-                    )
-
-                latency_samples: list[float] = []
-                for i in range(self.latency_iterations):
-                    elapsed = await self._one_measurement(1, 1)
-                    latency_samples.append(elapsed * 1000.0)
-                print("Latency iterations done", file=sys.stderr)
-                _log_perf_phase(
-                    "dialer", "latency_done", iterations=self.latency_iterations
+                download_samples.append(gbps)
+                print(
+                    f"Download {i + 1}/{self.download_iterations}: {gbps:.2f} Gbps",
+                    file=sys.stderr,
                 )
 
-                u = _compute_stats(upload_samples, is_latency=False)
-                d = _compute_stats(download_samples, is_latency=False)
-                lat = _compute_stats(latency_samples, is_latency=True)
+            latency_samples: list[float] = []
+            for i in range(self.latency_iterations):
+                elapsed = await self._one_measurement(1, 1)
+                latency_samples.append(elapsed * 1000.0)
+            print("Latency iterations done", file=sys.stderr)
+            _log_perf_phase(
+                "dialer", "latency_done", iterations=self.latency_iterations
+            )
 
-                # YAML to stdout only (per write-a-perf-test-app.md)
-                print("upload:")
-                print(f"  iterations: {self.upload_iterations}")
-                print(f"  min: {u['min']:.2f}")
-                print(f"  q1: {u['q1']:.2f}")
-                print(f"  median: {u['median']:.2f}")
-                print(f"  q3: {u['q3']:.2f}")
-                print(f"  max: {u['max']:.2f}")
-                print(f"  outliers: {u['outliers']}")
-                print(f"  samples: {u['samples']}")
-                print("  unit: Gbps")
-                print("download:")
-                print(f"  iterations: {self.download_iterations}")
-                print(f"  min: {d['min']:.2f}")
-                print(f"  q1: {d['q1']:.2f}")
-                print(f"  median: {d['median']:.2f}")
-                print(f"  q3: {d['q3']:.2f}")
-                print(f"  max: {d['max']:.2f}")
-                print(f"  outliers: {d['outliers']}")
-                print(f"  samples: {d['samples']}")
-                print("  unit: Gbps")
-                print("latency:")
-                print(f"  iterations: {self.latency_iterations}")
-                print(f"  min: {lat['min']:.3f}")
-                print(f"  q1: {lat['q1']:.3f}")
-                print(f"  median: {lat['median']:.3f}")
-                print(f"  q3: {lat['q3']:.3f}")
-                print(f"  max: {lat['max']:.3f}")
-                print(f"  outliers: {lat['outliers']}")
-                print(f"  samples: {lat['samples']}")
-                print("  unit: ms")
+            u = _compute_stats(upload_samples, is_latency=False)
+            d = _compute_stats(download_samples, is_latency=False)
+            lat = _compute_stats(latency_samples, is_latency=True)
 
-                self._benchmarks_complete = True
-                _log_perf_phase("dialer", "benchmarks_complete")
+            # YAML to stdout only (per write-a-perf-test-app.md)
+            print("upload:")
+            print(f"  iterations: {self.upload_iterations}")
+            print(f"  min: {u['min']:.2f}")
+            print(f"  q1: {u['q1']:.2f}")
+            print(f"  median: {u['median']:.2f}")
+            print(f"  q3: {u['q3']:.2f}")
+            print(f"  max: {u['max']:.2f}")
+            print(f"  outliers: {u['outliers']}")
+            print(f"  samples: {u['samples']}")
+            print("  unit: Gbps")
+            print("download:")
+            print(f"  iterations: {self.download_iterations}")
+            print(f"  min: {d['min']:.2f}")
+            print(f"  q1: {d['q1']:.2f}")
+            print(f"  median: {d['median']:.2f}")
+            print(f"  q3: {d['q3']:.2f}")
+            print(f"  max: {d['max']:.2f}")
+            print(f"  outliers: {d['outliers']}")
+            print(f"  samples: {d['samples']}")
+            print("  unit: Gbps")
+            print("latency:")
+            print(f"  iterations: {self.latency_iterations}")
+            print(f"  min: {lat['min']:.3f}")
+            print(f"  q1: {lat['q1']:.3f}")
+            print(f"  median: {lat['median']:.3f}")
+            print(f"  q3: {lat['q3']:.3f}")
+            print(f"  max: {lat['max']:.3f}")
+            print(f"  outliers: {lat['outliers']}")
+            print(f"  samples: {lat['samples']}")
+            print("  unit: ms")
 
-                # Graceful close: disconnect listener so it sees a clean
-                # close, then stop services
-                _log_perf_phase("dialer", "teardown_start")
-                try:
-                    await self.host.disconnect(listener_peer_id)
-                except Exception as e:
-                    logger.debug("Disconnect: %s", e)
-                await trio.sleep(self._dialer_disconnect_grace_secs())
-                await self._stop_perf_service()
-                self._close_redis()
-        except ExceptionGroup as eg:
-            if self._should_ignore_shutdown_error(eg):
-                _log_ignored_shutdown_error("Dialer", eg)
-                return
-            raise
-        except BaseException as e:
-            if self._should_ignore_shutdown_error(e):
-                _log_ignored_shutdown_error("Dialer", e)
-                return
-            raise
+            self._benchmarks_complete = True
+            _log_perf_phase("dialer", "benchmarks_complete")
+
+            # Graceful close: disconnect listener so it sees a clean
+            # close, then stop services
+            _log_perf_phase("dialer", "teardown_start")
+            try:
+                await self.host.disconnect(listener_peer_id)
+            except Exception as e:
+                logger.debug("Disconnect: %s", e)
+            await trio.sleep(self._dialer_disconnect_grace_secs())
+            await self._stop_perf_service()
+            self._close_redis()
 
     async def run(self) -> None:
         try:
@@ -1119,19 +1009,7 @@ class PerfTest:
                 await self.run_dialer()
             else:
                 await self.run_listener()
-        except ExceptionGroup as eg:
-            if self._should_ignore_shutdown_error(eg):
-                _log_ignored_shutdown_error("Perf", eg)
-                return
-            print(f"Error: {eg}", file=sys.stderr)
-            import traceback
-
-            traceback.print_exc(file=sys.stderr)
-            sys.exit(1)
-        except BaseException as e:
-            if self._should_ignore_shutdown_error(e):
-                _log_ignored_shutdown_error("Perf", e)
-                return
+        except Exception as e:
             print(f"Error: {e}", file=sys.stderr)
             import traceback
 
