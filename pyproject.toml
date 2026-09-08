@@ -68,6 +68,7 @@ health-demo = ["rich>=13.0"]
 
 [project.scripts]
 chat-demo = "examples.chat.chat:main"
+dht-chat-demo = "examples.dht_chat.dht_chat:main"
 echo-demo = "examples.echo.echo:main"
 echo-quic-demo = "examples.echo.echo_quic:main"
 ping-demo = "examples.ping.ping:main"
@@ -335,7 +336,6 @@ project_excludes = [
     "**/*pb2_grpc.py",
     "**/*.pyi",
     ".venv/**",
-    "./tests/interop/nim_libp2p",
     "./tests/core/transport/webrtc",
     "./libp2p/transport/webrtc/_asyncio_bridge.py",
     "./libp2p/transport/webrtc/_aiortc_helpers.py",

@@ -1,0 +1,3 @@
+Fixed WebRTC Direct experimental ``/sdp`` harness listen on Windows by binding
+TCP first for ephemeral ports, then UDP on the same number, so Hyper-V excluded
+port ranges no longer fail ``listen()`` with ``WinError 10013``.

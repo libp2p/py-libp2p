@@ -3,7 +3,8 @@ QUIC Transport exceptions
 """
 
 import logging
-from typing import Any, Literal
+from types import TracebackType
+from typing import Literal
 
 import trio
 
@@ -360,7 +361,7 @@ class QUICErrorContext:
         self,
         exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
-        exc_tb: Any,
+        exc_tb: TracebackType | None,
     ) -> Literal[False]:
         if exc_type is None or exc_val is None:
             return False

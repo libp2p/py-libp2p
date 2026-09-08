@@ -351,21 +351,22 @@ class TestMuxedTransport:
             received: list[bytes] = []
 
             class _Echo(asyncio.DatagramProtocol):
+                def __init__(self) -> None:
+                    self.got = asyncio.Event()
+
                 def datagram_received(self, data, addr):
                     received.append(data)
+                    self.got.set()
 
+            protocol = _Echo()
             server_transport, _ = await loop.create_datagram_endpoint(
-                _Echo, local_addr=("127.0.0.1", 0)
+                lambda: protocol, local_addr=("127.0.0.1", 0)
             )
             server_addr = server_transport.get_extra_info("sockname")[:2]
             try:
                 mt = _MuxedTransport(mux._transport, mux.local_addr)
                 mt.sendto(b"hello", server_addr)
-                # Poll until delivered instead of a fixed sleep (flakes on load).
-                for _ in range(200):
-                    if received:
-                        break
-                    await asyncio.sleep(0.01)
+                await asyncio.wait_for(protocol.got.wait(), timeout=5.0)
                 assert received == [b"hello"]
             finally:
                 server_transport.close()

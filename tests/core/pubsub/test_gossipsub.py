@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 import random
 from typing import cast
 from unittest.mock import (
@@ -8,6 +9,8 @@ from unittest.mock import (
 import pytest
 import trio
 
+from libp2p.abc import IHost
+from libp2p.peer.id import ID
 from libp2p.pubsub.gossipsub import (
     PROTOCOL_ID,
     GossipSub,
@@ -15,6 +18,7 @@ from libp2p.pubsub.gossipsub import (
 from libp2p.pubsub.pb import (
     rpc_pb2,
 )
+from libp2p.pubsub.pubsub import Pubsub
 from libp2p.pubsub.utils import (
     safe_bytes_from_hex,
 )
@@ -358,53 +362,79 @@ async def test_fanout():
                 assert msg.data == msg_content
 
 
+async def _wait_fanout_maintenance_ready(
+    pubsubs_gsub: Sequence[Pubsub],
+    hosts: Sequence[IHost],
+    subscribed_indices: Sequence[int],
+    topic: str,
+    *,
+    timeout: float = 10.0,
+) -> None:
+    """Event-driven peer / subscription / mesh readiness for fanout maintenance."""
+    for i, pubsub in enumerate(pubsubs_gsub):
+        for j, host in enumerate(hosts):
+            if i == j:
+                continue
+            await pubsub.wait_for_peer(host.get_id(), timeout=timeout)
+
+    for i in subscribed_indices:
+        for j in subscribed_indices:
+            if i == j:
+                continue
+            await pubsubs_gsub[i].wait_for_subscription(
+                hosts[j].get_id(), topic, timeout=timeout
+            )
+
+    # Each subscribed peer must have at least one mesh neighbour. Race
+    # wait_for_mesh against all other subscribed peers (degree may omit a
+    # specific ring neighbour).
+    for i in subscribed_indices:
+        other_ids = [hosts[j].get_id() for j in subscribed_indices if j != i]
+        pubsub = pubsubs_gsub[i]
+        with trio.fail_after(timeout):
+            async with trio.open_nursery() as nursery:
+
+                async def _wait_one(peer_id: ID, *, _pubsub: Pubsub = pubsub) -> None:
+                    await _pubsub.wait_for_mesh(peer_id, topic, timeout=timeout)
+                    nursery.cancel_scope.cancel()
+
+                for peer_id in other_ids:
+                    nursery.start_soon(_wait_one, peer_id)
+
+
 @pytest.mark.trio
 @pytest.mark.slow
 async def test_fanout_maintenance():
+    # Smaller dense topology + prune_back_off=1 so GRAFT-flood threshold is
+    # min(10, 1)=1s and aligns with unsubscribe_back_off (see #1504).
     async with PubsubFactory.create_batch_with_gossipsub(
-        10, unsubscribe_back_off=1
+        5,
+        degree=3,
+        degree_low=2,
+        degree_high=4,
+        unsubscribe_back_off=1,
+        prune_back_off=1,
     ) as pubsubs_gsub:
         hosts = [pubsub.host for pubsub in pubsubs_gsub]
         num_msgs = 5
-
-        # All pubsub subscribe to foobar
-        queues = []
         topic = "foobar"
         routers = [cast(GossipSub, pubsub.router) for pubsub in pubsubs_gsub]
-        for i in range(1, len(pubsubs_gsub)):
-            q = await pubsubs_gsub[i].subscribe(topic)
+        subscribed_indices = list(range(1, len(pubsubs_gsub)))
 
-            # Add each blocking queue to an array of blocking queues
-            queues.append(q)
+        queues = []
+        for i in subscribed_indices:
+            queues.append(await pubsubs_gsub[i].subscribe(topic))
 
-        # Densely connect libp2p hosts in random way
         await dense_connect(hosts)
-
-        await wait_for(
-            lambda: all(len(ps.peers) == len(hosts) - 1 for ps in pubsubs_gsub),
-            timeout=10.0,
-            fail_msg="Fanout maintenance dense connect incomplete",
-        )
-        await wait_for(
-            lambda: all(
-                topic in routers[i].mesh and len(routers[i].mesh[topic]) > 0
-                for i in range(1, len(routers))
-            ),
-            timeout=10.0,
-            fail_msg="Fanout maintenance mesh did not form",
+        await _wait_fanout_maintenance_ready(
+            pubsubs_gsub, hosts, subscribed_indices, topic
         )
 
         # Send messages with origin not subscribed
         for i in range(num_msgs):
             msg_content = b"foo " + i.to_bytes(1, "big")
-
-            # Pick the message origin to the node that is not subscribed to 'foobar'
             origin_idx = 0
-
-            # publish from the randomly chosen host
             await pubsubs_gsub[origin_idx].publish(topic, msg_content)
-
-            # Assert that all blocking queues receive the message
             for queue in queues:
                 msg = await wait_for_pubsub_payload(queue, msg_content)
                 assert msg.data == msg_content
@@ -414,42 +444,28 @@ async def test_fanout_maintenance():
 
         queues = []
 
-        # Wait until meshes are cleared after unsubscribe
+        # Absence of mesh has no trio.Event; poll until cleared.
         await wait_for(
             lambda: all(topic not in router.mesh for router in routers),
             timeout=10.0,
             fail_msg="Meshes not cleared after unsubscribe",
         )
-        # unsubscribe_back_off=1: allow backoff window to expire before resubscribe
-        await trio.sleep(1)
+        # Intentional: unsubscribe_back_off / prune_back_off expiry (both 1s).
+        # Flood window must elapse before re-GRAFT after resubscribe.
+        await trio.sleep(1.05)
 
         # Resub and repeat
-        for i in range(1, len(pubsubs_gsub)):
-            q = await pubsubs_gsub[i].subscribe(topic)
+        for i in subscribed_indices:
+            queues.append(await pubsubs_gsub[i].subscribe(topic))
 
-            # Add each blocking queue to an array of blocking queues
-            queues.append(q)
-
-        await wait_for(
-            lambda: all(
-                topic in routers[i].mesh and len(routers[i].mesh[topic]) > 0
-                for i in range(1, len(routers))
-            ),
-            timeout=10.0,
-            fail_msg="Fanout maintenance mesh did not reform after resubscribe",
+        await _wait_fanout_maintenance_ready(
+            pubsubs_gsub, hosts, subscribed_indices, topic
         )
 
-        # Check messages can still be sent
         for i in range(num_msgs):
             msg_content = b"bar " + i.to_bytes(1, "big")
-
-            # Pick the message origin to the node that is not subscribed to 'foobar'
             origin_idx = 0
-
-            # publish from the randomly chosen host
             await pubsubs_gsub[origin_idx].publish(topic, msg_content)
-
-            # Assert that all blocking queues receive the message
             for queue in queues:
                 msg = await wait_for_pubsub_payload(queue, msg_content)
                 assert msg.data == msg_content

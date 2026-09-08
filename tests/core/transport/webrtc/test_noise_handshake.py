@@ -285,7 +285,9 @@ class TestPerformNoiseHandshake:
                 )
             except WebRTCHandshakeError as e:
                 errors.append(e)
+                err_seen.set()
 
+        err_seen = trio.Event()
         with trio.move_on_after(10):
             async with trio.open_nursery() as nursery:
                 nursery.start_soon(
@@ -306,8 +308,7 @@ class TestPerformNoiseHandshake:
                     dialer_cert.fingerprint,
                 )
                 # first failure aborts; cancel the peer stuck waiting
-                while not errors:
-                    await trio.sleep(0.01)
+                await err_seen.wait()
                 nursery.cancel_scope.cancel()
 
         assert errors

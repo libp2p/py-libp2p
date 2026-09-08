@@ -155,6 +155,18 @@ async def test_swarm_close_peer(security_protocol):
 
 
 @pytest.mark.trio
+async def test_swarm_close_is_idempotent(security_protocol):
+    async with SwarmFactory.create_and_listen(
+        security_protocol=security_protocol
+    ) as swarm:
+        await swarm.close()
+        assert swarm._closing is True
+        # Second close must be a no-op (HostFactory + SwarmFactory double-close path).
+        await swarm.close()
+        assert swarm._closing is True
+
+
+@pytest.mark.trio
 async def test_swarm_remove_conn(swarm_pair):
     swarm_0, swarm_1 = swarm_pair
     # Get the first connection from the list
