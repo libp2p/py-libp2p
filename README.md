@@ -30,13 +30,14 @@ ______________________________________________________________________
 
 ### Transports
 
-| **Transport**                          | **Status** |                                     **Source**                                      |
-| -------------------------------------- | :--------: | :---------------------------------------------------------------------------------: |
-| **`libp2p-tcp`**                       |     ✅     | [source](https://github.com/libp2p/py-libp2p/blob/main/libp2p/transport/tcp/tcp.py) |
-| **`libp2p-quic`**                      |     ✅     |    [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/transport/quic)    |
-| **`libp2p-websocket`**                 |     ✅     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/transport/websocket)  |
-| **`libp2p-webrtc-browser-to-server`**  |     🌱     |                                                                                     |
-| **`libp2p-webrtc-private-to-private`** |     🌱     |                                                                                     |
+| **Transport**                          | **Status** |                                      **Source**                                       |
+| -------------------------------------- | :--------: | :-----------------------------------------------------------------------------------: |
+| **`libp2p-tcp`**                       |     ✅     |  [source](https://github.com/libp2p/py-libp2p/blob/main/libp2p/transport/tcp/tcp.py)  |
+| **`libp2p-quic`**                      |     ✅     |     [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/transport/quic)     |
+| **`libp2p-websocket`**                 |     ✅     |  [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/transport/websocket)   |
+| **`libp2p-webtransport`**              |     🌱     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/transport/webtransport) |
+| **`libp2p-webrtc-browser-to-server`**  |     🌱     |                                                                                       |
+| **`libp2p-webrtc-private-to-private`** |     🌱     |                                                                                       |
 
 WebRTC-Direct (browser/server) uses the spec STUN path by default: inbound dials
 hit a shared UDP port and the listener infers the offer from the first STUN
