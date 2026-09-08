@@ -1,0 +1,1 @@
+Added ``RoutingTableDiagnostics`` to ``libp2p.kad_dht``, providing operators with a read-only health-inspection surface for the Kademlia routing table: bucket fill rates, keyspace coverage gaps, peer freshness distribution, and a composite 0-100 health score.

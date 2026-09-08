@@ -5,8 +5,16 @@ This module provides a Distributed Hash Table (DHT) implementation
 based on the Kademlia protocol.
 """
 
+from .diagnostics import (
+    BucketStat,
+    CoverageGap,
+    FreshnessDistribution,
+    RoutingTableDiagnostics,
+    RoutingTableReport,
+)
 from .kad_dht import (
     KadDHT,
+    DHTMode,
 )
 from .peer_routing import (
     PeerRouting,
@@ -23,8 +31,14 @@ from .value_store import (
 
 __all__ = [
     "KadDHT",
+    "DHTMode",
     "RoutingTable",
     "PeerRouting",
     "ValueStore",
     "create_key_from_binary",
+    "RoutingTableDiagnostics",
+    "RoutingTableReport",
+    "BucketStat",
+    "CoverageGap",
+    "FreshnessDistribution",
 ]

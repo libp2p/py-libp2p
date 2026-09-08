@@ -1,0 +1,1 @@
+kad-dht: ``FIND_NODE`` replies now include the target peer itself when we know its addresses, even when the target is the requester or ourselves, matching go-libp2p. This lets a peer ask the network for its own observed addresses, and keeps client-mode peers reachable through the DHT.

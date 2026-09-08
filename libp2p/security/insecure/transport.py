@@ -148,7 +148,7 @@ async def run_handshake(
 
     # Verify that `remote_peer_id` isn't `None`
     # That is the only condition that `remote_peer_id` would not need to be checked
-    # against the `recieved_peer_id` gotten from the outbound/recieved `msg`.
+    # against the `received_peer_id` gotten from the outbound/received `msg`.
     # The check against `received_peer_id` happens in the next if-block
     if is_initiator and remote_peer_id is None:
         raise HandshakeFailure(

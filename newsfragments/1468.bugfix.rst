@@ -1,0 +1,4 @@
+``RawConnection.read()`` and ``RawConnection.write()`` now catch
+``ConnectionResetError`` from the underlying stream and wrap it in
+``RawConnError``, preventing OS-level connection-reset errors from leaking to
+callers that expect ``RawConnError`` for all connection failures.

@@ -1,0 +1,1 @@
+Stop the two ``TestQUICListenerRaceConditions`` tests from racing on a fixed ``trio.sleep(0.1)``. ``test_multiple_cid_routing_concurrent_load`` and ``test_promotion_race_condition`` now join a nursery around their concurrent tasks so the assertions run only after every task has finished, instead of guessing how long the tasks take.

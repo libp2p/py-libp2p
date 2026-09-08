@@ -1,0 +1,1 @@
+Fixed peer record validation to ensure signed ``PeerRecord``s have matching signer identity and peer ID, preventing certified address book poisoning for arbitrary peer IDs.

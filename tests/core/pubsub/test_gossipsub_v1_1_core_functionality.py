@@ -7,12 +7,12 @@ This module tests the core functionality of GossipSub v1.1, including:
 """
 
 import pytest
-import trio
 
 from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.score import ScoreParams, TopicScoreParams
 from libp2p.tools.utils import connect
 from tests.utils.factories import PubsubFactory
+from tests.utils.pubsub.wait import wait_for_pubsub_payload
 
 
 @pytest.mark.trio
@@ -32,13 +32,24 @@ async def test_message_propagation_normal_mesh():
         # Connect hosts in a line: 0 -- 1 -- 2
         await connect(hosts[0], hosts[1])
         await connect(hosts[1], hosts[2])
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(pubsubs[1].my_id)
+        await pubsubs[1].wait_for_peer(pubsubs[0].my_id)
+        await pubsubs[1].wait_for_peer(pubsubs[2].my_id)
+        await pubsubs[2].wait_for_peer(pubsubs[1].my_id)
 
         # All hosts subscribe to the same topic
         topic = "test_message_propagation"
+        subs = []
         for pubsub in pubsubs:
-            await pubsub.subscribe(topic)
-        await trio.sleep(1.0)  # Allow time for mesh formation
+            subs.append(await pubsub.subscribe(topic))
+        await pubsubs[0].wait_for_subscription(pubsubs[1].my_id, topic)
+        await pubsubs[1].wait_for_subscription(pubsubs[0].my_id, topic)
+        await pubsubs[1].wait_for_subscription(pubsubs[2].my_id, topic)
+        await pubsubs[2].wait_for_subscription(pubsubs[1].my_id, topic)
+        await pubsubs[0].wait_for_mesh(pubsubs[1].my_id, topic)
+        await pubsubs[1].wait_for_mesh(pubsubs[0].my_id, topic)
+        await pubsubs[1].wait_for_mesh(pubsubs[2].my_id, topic)
+        await pubsubs[2].wait_for_mesh(pubsubs[1].my_id, topic)
 
         # Verify that mesh has been formed
         for i, gsub in enumerate(gsubs):
@@ -48,12 +59,14 @@ async def test_message_propagation_normal_mesh():
         # Host 0 publishes a message
         test_message = b"test message from host 0"
         await pubsubs[0].publish(topic, test_message)
-        await trio.sleep(1.0)
+        await wait_for_pubsub_payload(subs[1], test_message)
+        await wait_for_pubsub_payload(subs[2], test_message)
 
         # Host 2 publishes a message
         test_message_2 = b"test message from host 2"
         await pubsubs[2].publish(topic, test_message_2)
-        await trio.sleep(1.0)
+        await wait_for_pubsub_payload(subs[1], test_message_2)
+        await wait_for_pubsub_payload(subs[0], test_message_2)
 
         # Verify mesh is still intact
         for i, gsub in enumerate(gsubs):
@@ -83,13 +96,17 @@ async def test_interop_with_gossipsub_v1_0():
 
             # Connect v1.0 and v1.1 hosts
             await connect(v1_0_host, v1_1_host)
-            await trio.sleep(0.5)
+            await v1_0_pubsubs[0].wait_for_peer(v1_1_pubsubs[0].my_id)
+            await v1_1_pubsubs[0].wait_for_peer(v1_0_pubsubs[0].my_id)
 
             # Both subscribe to the same topic
             topic = "test_interop"
-            await v1_0_pubsubs[0].subscribe(topic)
-            await v1_1_pubsubs[0].subscribe(topic)
-            await trio.sleep(1.0)  # Allow time for mesh formation
+            sub_v1_0 = await v1_0_pubsubs[0].subscribe(topic)
+            sub_v1_1 = await v1_1_pubsubs[0].subscribe(topic)
+            await v1_0_pubsubs[0].wait_for_subscription(v1_1_pubsubs[0].my_id, topic)
+            await v1_1_pubsubs[0].wait_for_subscription(v1_0_pubsubs[0].my_id, topic)
+            await v1_0_pubsubs[0].wait_for_mesh(v1_1_pubsubs[0].my_id, topic)
+            await v1_1_pubsubs[0].wait_for_mesh(v1_0_pubsubs[0].my_id, topic)
 
             # Verify that they've formed a mesh
             assert v1_1_host.get_id() in v1_0_gsub.mesh.get(topic, set())
@@ -98,12 +115,12 @@ async def test_interop_with_gossipsub_v1_0():
             # Test message exchange from v1.0 to v1.1
             test_message = b"test message from v1.0"
             await v1_0_pubsubs[0].publish(topic, test_message)
-            await trio.sleep(0.5)
+            await wait_for_pubsub_payload(sub_v1_1, test_message)
 
             # Test message exchange from v1.1 to v1.0
             test_message_2 = b"test message from v1.1"
             await v1_1_pubsubs[0].publish(topic, test_message_2)
-            await trio.sleep(0.5)
+            await wait_for_pubsub_payload(sub_v1_0, test_message_2)
 
 
 @pytest.mark.trio
@@ -135,13 +152,17 @@ async def test_graceful_fallback_with_v1_0_peers():
 
             # Connect v1.0 and v1.1 hosts
             await connect(v1_0_host, v1_1_host)
-            await trio.sleep(0.5)
+            await v1_0_pubsubs[0].wait_for_peer(v1_1_pubsubs[0].my_id)
+            await v1_1_pubsubs[0].wait_for_peer(v1_0_pubsubs[0].my_id)
 
             # Both subscribe to the same topic
             topic = "test_fallback"
-            await v1_0_pubsubs[0].subscribe(topic)
-            await v1_1_pubsubs[0].subscribe(topic)
-            await trio.sleep(1.0)  # Allow time for mesh formation
+            sub_v1_0 = await v1_0_pubsubs[0].subscribe(topic)
+            sub_v1_1 = await v1_1_pubsubs[0].subscribe(topic)
+            await v1_0_pubsubs[0].wait_for_subscription(v1_1_pubsubs[0].my_id, topic)
+            await v1_1_pubsubs[0].wait_for_subscription(v1_0_pubsubs[0].my_id, topic)
+            await v1_0_pubsubs[0].wait_for_mesh(v1_1_pubsubs[0].my_id, topic)
+            await v1_1_pubsubs[0].wait_for_mesh(v1_0_pubsubs[0].my_id, topic)
 
             # Verify that they've formed a mesh
             assert v1_1_host.get_id() in v1_0_gsub.mesh.get(topic, set())
@@ -161,13 +182,20 @@ async def test_graceful_fallback_with_v1_0_peers():
                 new_score = v1_1_gsub.scorer.score(v1_0_host.get_id(), [topic])
                 assert new_score > initial_score
 
+                # push_msg applies allow_publish to the local forwarder (self).
+                # With publish_threshold=0.5 an unscored self is rejected, so
+                # credit the local peer before exercising publish.
+                v1_1_gsub.scorer.on_join_mesh(v1_1_pubsubs[0].my_id, topic)
+                assert v1_1_gsub.scorer.allow_publish(v1_1_pubsubs[0].my_id, [topic])
+                assert v1_1_gsub.scorer.allow_publish(v1_0_host.get_id(), [topic])
+
             # Test message exchange works in both directions
             # v1.0 to v1.1
             test_message = b"test message from v1.0"
             await v1_0_pubsubs[0].publish(topic, test_message)
-            await trio.sleep(0.5)
+            await wait_for_pubsub_payload(sub_v1_1, test_message)
 
             # v1.1 to v1.0
             test_message_2 = b"test message from v1.1"
             await v1_1_pubsubs[0].publish(topic, test_message_2)
-            await trio.sleep(0.5)
+            await wait_for_pubsub_payload(sub_v1_0, test_message_2)

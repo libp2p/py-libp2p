@@ -56,6 +56,11 @@ def safe_bytes_from_hex(value: str | bytes | bytearray) -> bytes | None:
 
     Used for defensively parsing wire message IDs in IHAVE/IWANT handlers
     so that malformed hex from peers does not crash the gossip handler task.
+
+    Accepts:
+    - hex text ``str`` (legacy)
+    - ASCII-hex ``bytes`` (legacy py-libp2p peers that hex-encoded onto the wire)
+    - opaque non-hex ``bytes`` (GossipSub schema / go / js peers)
     """
     try:
         if isinstance(value, str):
@@ -63,11 +68,18 @@ def safe_bytes_from_hex(value: str | bytes | bytearray) -> bytes | None:
 
         if isinstance(value, (bytes, bytearray)):
             raw = bytes(value)
-            # Prefer canonical hex text if the bytes decode cleanly as ASCII hex.
             try:
-                return bytes.fromhex(raw.decode("ascii"))
-            except (UnicodeDecodeError, ValueError):
-                # Some peers may emit raw bytes over this path. Treat them as-is.
+                text = raw.decode("ascii")
+            except UnicodeDecodeError:
+                return raw
+            try:
+                return bytes.fromhex(text)
+            except ValueError:
+                # ASCII that isn't valid hex: only-hex-digit payloads (e.g.
+                # odd length) are treated as malformed hex text; anything else
+                # is an opaque binary message ID.
+                if text and all(c in "0123456789abcdefABCDEF" for c in text):
+                    return None
                 return raw
 
         return None

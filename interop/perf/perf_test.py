@@ -53,6 +53,7 @@ from libp2p.security.tls.transport import (
 )
 from libp2p.transport.quic.config import QUICTransportConfig
 from libp2p.utils.address_validation import get_available_interfaces
+from libp2p.utils.multiaddr_utils import extract_ip_from_multiaddr
 
 MAX_TEST_TIMEOUT = 300
 logger = logging.getLogger("libp2p.perf_test")
@@ -620,14 +621,8 @@ class PerfTest:
         return None
 
     def _get_ip_value(self, addr: multiaddr.Multiaddr) -> str | None:
-        for protocol in ("ip4", "ip6"):
-            try:
-                value = addr.value_for_protocol(protocol)
-            except Exception:
-                value = None
-            if value:
-                return value
-        return None
+        """Extract IP value from multiaddr (IPv4 or IPv6)."""
+        return extract_ip_from_multiaddr(addr)
 
     def _safe_value_for_protocol(
         self, addr: multiaddr.Multiaddr, protocol: str

@@ -8,6 +8,7 @@ Examples
    examples.identify
    examples.identify_push
    examples.chat
+   examples.dht_chat
    examples.echo
    examples.echo_quic
    examples.ping
@@ -35,7 +36,11 @@ Examples
    examples.websocket
    examples.tls
    examples.tcp
-   examples.transport
+
    examples.autotls
    examples.perf
    examples.path_handling
+   examples.metrics
+   examples.multi_transport
+   examples.connection_health_monitoring
+   examples.health_monitoring

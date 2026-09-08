@@ -96,6 +96,8 @@ class MplexStream(IMuxedStream):
             self._buf.extend(data)
         payload = self._buf
         self._buf = self._buf[len(payload) :]
+        if len(payload) == 0:
+            self._raise_when_no_data()
         return bytes(payload)
 
     def _read_return_when_blocked(self) -> bytearray:
@@ -104,9 +106,22 @@ class MplexStream(IMuxedStream):
             try:
                 data = self.incoming_data_channel.receive_nowait()
                 buf.extend(data)
-            except (trio.WouldBlock, trio.EndOfChannel):
+            except (trio.WouldBlock, trio.EndOfChannel, trio.ClosedResourceError):
                 break
         return buf
+
+    def _raise_when_no_data(self) -> None:
+        """
+        Raise when a read finds no buffered data.
+
+        Prefer reset over EOF so a concurrent remote RESET does not look like a
+        clean close after the channel has been drained.
+        """
+        if self.event_reset.is_set():
+            raise MplexStreamReset
+        if self.event_remote_closed.is_set():
+            raise MplexStreamEOF
+        raise MplexStreamEOF
 
     async def read(self, n: int | None = None) -> bytes:
         """
@@ -114,17 +129,17 @@ class MplexStream(IMuxedStream):
         there are not enough bytes in the Mplex buffer. If `n is None`, read
         until EOF.
 
+        Already-buffered bytes (in `_buf` or the incoming channel) are returned
+        even after a remote reset. `MplexStreamReset` is raised only when a later
+        read finds no remaining data.
+
         :param n: number of bytes to read
         :return: bytes actually read
         :raises TimeoutError: if read_deadline is set and operation times out
-        :raises MplexStreamReset: if stream has been reset
+        :raises MplexStreamReset: if stream has been reset and no data remains
         :raises MplexStreamEOF: if stream has reached end of file
         :raises ValueError: if n is negative
         """
-        # Check if stream is already reset before attempting operation
-        if self.event_reset.is_set():
-            raise MplexStreamReset
-
         # Apply read deadline if set
         return await self._with_timeout(
             self.read_deadline, "Read", lambda: self._do_read(n)
@@ -134,8 +149,14 @@ class MplexStream(IMuxedStream):
         """
         Internal read implementation that performs the actual read operation.
 
+        Drains buffered data before raising reset so a MESSAGE that arrived
+        before (or concurrently with) a remote RESET remains readable.
+
         :param n: number of bytes to read
         :return: bytes actually read
+        :raises MplexStreamReset: if stream has been reset and no data remains
+        :raises MplexStreamEOF: if stream has reached end of file
+        :raises ValueError: if n is negative
         """
         async with self.rw_lock.read_lock():
             if n is not None and n < 0:
@@ -143,9 +164,16 @@ class MplexStream(IMuxedStream):
                     "the number of bytes to read `n` must be non-negative or "
                     f"`None` to indicate read until EOF, got n={n}"
                 )
-            if self.event_reset.is_set():
-                raise MplexStreamReset
             if n is None:
+                # After reset, return any already-queued bytes and do not wait
+                # for a clean EOF that will never arrive.
+                self._buf.extend(self._read_return_when_blocked())
+                if self.event_reset.is_set():
+                    if len(self._buf) == 0:
+                        raise MplexStreamReset
+                    payload = self._buf
+                    self._buf = bytearray()
+                    return bytes(payload)
                 return await self._read_until_eof()
             if len(self._buf) == 0:
                 data: bytes
@@ -154,32 +182,41 @@ class MplexStream(IMuxedStream):
                 try:
                     data = self.incoming_data_channel.receive_nowait()
                     self._buf.extend(data)
-                except trio.EndOfChannel:
-                    raise MplexStreamEOF
+                except (trio.EndOfChannel, trio.ClosedResourceError):
+                    # Send-side close -> EndOfChannel; local reset acloses the
+                    # receive end -> ClosedResourceError. Either way, no more data.
+                    self._raise_when_no_data()
                 except trio.WouldBlock:
+                    # If reset already happened and nothing is buffered, do not
+                    # wait for more data — the peer will not send after RESET.
+                    if self.event_reset.is_set():
+                        self._raise_when_no_data()
                     # We know `receive` will be blocked here. Wait for data here with
                     # `receive` and catch all kinds of errors here.
                     try:
                         data = await self.incoming_data_channel.receive()
                         self._buf.extend(data)
                     except trio.EndOfChannel:
-                        if self.event_reset.is_set():
-                            raise MplexStreamReset
-                        if self.event_remote_closed.is_set():
-                            raise MplexStreamEOF
+                        self._raise_when_no_data()
                     except trio.ClosedResourceError as error:
                         # Probably `incoming_data_channel` is closed in `reset` when
-                        # we are waiting for `receive`.
-                        if self.event_reset.is_set():
-                            raise MplexStreamReset
-                        raise Exception(
-                            "`incoming_data_channel` is closed but stream is not reset."
-                            "This should never happen."
-                        ) from error
+                        # we are waiting for `receive`. Drain any leftover buffer
+                        # first; only raise when nothing remains.
+                        if len(self._buf) == 0:
+                            if self.event_reset.is_set():
+                                raise MplexStreamReset
+                            raise Exception(
+                                "`incoming_data_channel` is closed but "
+                                "stream is not reset. This should never happen."
+                            ) from error
             self._buf.extend(self._read_return_when_blocked())
-            payload = self._buf[:n]
-            self._buf = self._buf[len(payload) :]
-            return bytes(payload)
+            # Return buffered data even if reset is set (Yamux-compatible).
+            if len(self._buf) > 0:
+                payload = self._buf[:n]
+                self._buf = self._buf[len(payload) :]
+                return bytes(payload)
+            self._raise_when_no_data()
+            return b""  # pragma: no cover — _raise_when_no_data always raises
 
     async def write(self, data: bytes) -> None:
         """

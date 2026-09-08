@@ -4,6 +4,7 @@ from collections.abc import (
     Sequence,
 )
 import logging
+import typing
 
 from multiaddr import Multiaddr
 from multiaddr.exceptions import ProtocolLookupError
@@ -132,7 +133,7 @@ class TCPListener(IListener):
                 )
             try:
                 started_listeners = await nursery.start(
-                    serve_tcp,
+                    typing.cast(typing.Any, serve_tcp),
                     handler,
                     tcp_port,
                     host_str,
@@ -260,7 +261,14 @@ class TCP(ITransport):
     async def _dial_resolved(self, maddr: Multiaddr) -> IRawConnection:
         """Dial using a multiaddr that has an IP (no DNS)."""
         host_str = extract_ip_from_multiaddr(maddr)
-        port_str = maddr.value_for_protocol("tcp")
+        try:
+            port_str = maddr.value_for_protocol("tcp")
+        except ProtocolLookupError as error:
+            # Defence in depth: Swarm/TransportManager should filter these via
+            # can_dial(), but match listen()'s handling if a bad addr slips through.
+            raise OpenConnectionError(
+                f"Failed to dial {maddr}: no TCP component in multiaddr."
+            ) from error
 
         if host_str is None:
             raise OpenConnectionError(
@@ -308,6 +316,39 @@ class TCP(ITransport):
         :return: a listener object that implements listener_interface.py
         """
         return TCPListener(handler_function)
+
+    def can_dial(self, maddr: Multiaddr) -> bool:
+        """
+        Return True if this TCP transport can dial the given multiaddr.
+
+        Accepts pure TCP addresses (/ip4/.../tcp/... or /ip6/.../tcp/...) but
+        rejects WebSocket addresses (/ws, /wss) even though they use TCP underneath,
+        so the TransportManager routes those to WebsocketTransport instead.
+
+        :param maddr: The multiaddress to check.
+        :return: True if this transport handles the multiaddr.
+        """
+        names = {p.name for p in maddr.protocols()}
+        return "tcp" in names and not names.intersection(
+            {"ws", "wss", "quic", "quic-v1"}
+        )
+
+    def can_listen(self, maddr: Multiaddr) -> bool:
+        """
+        Return True if this TCP transport can listen on the given multiaddr.
+
+        :param maddr: The multiaddress to check.
+        :return: True if this transport can listen on the multiaddr.
+        """
+        return self.can_dial(maddr)
+
+    def protocols(self) -> list[str]:
+        """
+        Return the list of multiaddr protocol names handled by TCP transport.
+
+        :return: ["tcp"]
+        """
+        return ["tcp"]
 
 
 def _multiaddr_from_socket(socket: trio.socket.SocketType) -> Multiaddr:

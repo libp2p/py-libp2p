@@ -4,12 +4,14 @@ import logging
 import multiaddr
 import trio
 
-from examples.advanced.network_discover import get_optimal_binding_address
 from libp2p import (
     new_host,
 )
-from libp2p.custom_types import (
-    TProtocol,
+from libp2p.host.ping import (
+    ID as PING_PROTOCOL_ID,
+    PING_LENGTH,
+    RESP_TIMEOUT,
+    PingService,
 )
 from libp2p.network.stream.net_stream import (
     INetStream,
@@ -23,26 +25,8 @@ logging.basicConfig(level=logging.WARNING)
 logging.getLogger("multiaddr").setLevel(logging.WARNING)
 logging.getLogger("libp2p").setLevel(logging.WARNING)
 
-PING_PROTOCOL_ID = TProtocol("/ipfs/ping/1.0.0")
-PING_LENGTH = 32
-RESP_TIMEOUT = 60
+
 PSK = "dffb7e3135399a8b1612b2aaca1c36a3a8ac2cd0cca51ceeb2ced87d308cac6d"
-
-
-async def handle_ping(stream: INetStream) -> None:
-    while True:
-        try:
-            payload = await stream.read(PING_LENGTH)
-            peer_id = stream.muxed_conn.peer_id
-            if payload is not None:
-                print(f"received ping from {peer_id}")
-
-                await stream.write(payload)
-                print(f"responded with pong to {peer_id}")
-
-        except Exception:
-            await stream.reset()
-            break
 
 
 async def send_ping(stream: INetStream) -> None:
@@ -66,13 +50,11 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
     from libp2p.utils.address_validation import (
         find_free_port,
         get_available_interfaces,
+        get_optimal_binding_address,
     )
 
     if port <= 0:
         port = find_free_port()
-
-    _ = get_available_interfaces(8000)
-    _ = get_optimal_binding_address(8000)
 
     if transport == "tcp":
         listen_addrs = get_available_interfaces(port)
@@ -89,7 +71,8 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
         nursery.start_soon(host.get_peerstore().start_cleanup_task, 60)
 
         if not destination:
-            host.set_stream_handler(PING_PROTOCOL_ID, handle_ping)
+            ping_service = PingService(host)
+            host.set_stream_handler(PING_PROTOCOL_ID, ping_service.handle_ping)
 
             # Get all available addresses with peer ID
             all_addrs = host.get_addrs()
@@ -104,8 +87,9 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
                 print(f"{addr}")
 
             print(
-                f"\nRun this from the same folder in another console:\n\n"
-                f"ping-demo -d {host.get_addrs()[0]} -psk {psk} -t {transport}\n"
+                "\nRun this from the same folder in another console:\n\n"
+                f"ping-demo -d {get_optimal_binding_address(port)}"
+                f" -psk {psk} -t {transport}\n"
             )
             print("Waiting for incoming connection...")
 

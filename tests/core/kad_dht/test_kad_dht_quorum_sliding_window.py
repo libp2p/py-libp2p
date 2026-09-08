@@ -41,6 +41,7 @@ def _make_dht() -> KadDHT:
     host = MagicMock()
     key_pair = create_new_key_pair()
     host.get_id.return_value = ID.from_pubkey(key_pair.public_key)
+    host.get_private_key.return_value = key_pair.private_key
     host.get_addrs.return_value = [Multiaddr("/ip4/127.0.0.1/tcp/8000")]
     host.get_peerstore.return_value = MagicMock()
     host.new_stream = AsyncMock()
@@ -54,6 +55,22 @@ def _make_dht() -> KadDHT:
     return dht
 
 
+def _patch_peer_lookup(dht: KadDHT, peers: list[ID]):
+    """
+    Mock the network peer lookup used by put_value/get_value.
+
+    get_value/put_value resolve candidate peers via
+    ``peer_routing.find_closest_peers_network`` (an iterative FIND_NODE
+    lookup over real network streams). For method-level tests we replace
+    that lookup with the fixed peer list.
+    """
+    return patch.object(
+        dht.peer_routing,
+        "find_closest_peers_network",
+        new=AsyncMock(return_value=peers),
+    )
+
+
 # ---------------------------------------------------------------------------
 # get_value: quorum early-stop through real method
 # ---------------------------------------------------------------------------
@@ -65,33 +82,37 @@ class TestGetValueQuorumEarlyStop:
     @pytest.mark.trio
     async def test_get_value_stops_after_quorum(self):
         """
-        With 8 closest peers and quorum=2, get_value should not
-        query all 8.
+        With more peers than ALPHA and quorum=2, get_value should not
+        query all peers — quorum early-stop should limit queries.
         """
+        from libp2p.kad_dht.common import ALPHA
+
         dht = _make_dht()
-        peers = [_make_peer_id(f"peer{i}") for i in range(8)]
+        # Use enough peers that ALPHA limit + quorum interact
+        total_peers = ALPHA + 5
+        peers = [_make_peer_id(f"peer{i}") for i in range(total_peers)]
         query_count: list[int] = [0]
 
-        async def mock_get(peer, key_bytes, return_record=False):
+        async def mock_get(
+            peer, key_bytes, return_record=False, return_closer_peers=False
+        ):
             query_count[0] += 1
             idx = peers.index(peer)
-            if idx < 3:
+            if idx < 2:
+                # First 2 peers return quickly with valid records
                 await trio.sleep(0.01)
                 rec = Record()
                 rec.key = key_bytes
                 rec.value = b"test-value"
                 rec.timeReceived = str(int(time.time()))
-                return rec
+                return (rec, [])
             else:
-                await trio.sleep(1.0)
+                # All other peers are slow
+                await trio.sleep(10.0)
                 return None
 
         with (
-            patch.object(
-                dht.routing_table,
-                "find_local_closest_peers",
-                return_value=peers,
-            ),
+            _patch_peer_lookup(dht, peers),
             patch.object(dht.value_store, "get", return_value=None),
             patch.object(dht.value_store, "_get_from_peer", side_effect=mock_get),
             patch.object(dht, "validator", SimpleValidator()),
@@ -99,8 +120,10 @@ class TestGetValueQuorumEarlyStop:
             result = await dht.get_value("test-key", quorum=2)
 
         assert result == b"test-value"
-        assert query_count[0] <= 5, (
-            f"Expected at most ~4-5 queries with quorum=2, ALPHA=3, "
+        # Quorum=2 means after ALPHA peers are dispatched and 2 return valid,
+        # no more should be dispatched. Bound is ALPHA + small margin.
+        assert query_count[0] <= ALPHA + 2, (
+            f"Expected at most ALPHA+2 queries with quorum=2, ALPHA={ALPHA}, "
             f"but got {query_count[0]}."
         )
 
@@ -111,21 +134,19 @@ class TestGetValueQuorumEarlyStop:
         peers = [_make_peer_id(f"peer{i}") for i in range(5)]
         query_count: list[int] = [0]
 
-        async def mock_get(peer, key_bytes, return_record=False):
+        async def mock_get(
+            peer, key_bytes, return_record=False, return_closer_peers=False
+        ):
             query_count[0] += 1
             await trio.sleep(0.01)
             rec = Record()
             rec.key = key_bytes
             rec.value = b"val"
             rec.timeReceived = str(int(time.time()))
-            return rec
+            return (rec, [])
 
         with (
-            patch.object(
-                dht.routing_table,
-                "find_local_closest_peers",
-                return_value=peers,
-            ),
+            _patch_peer_lookup(dht, peers),
             patch.object(dht.value_store, "get", return_value=None),
             patch.object(dht.value_store, "_get_from_peer", side_effect=mock_get),
             patch.object(dht, "validator", SimpleValidator()),
@@ -166,11 +187,7 @@ class TestPutValueSlidingWindow:
             return True
 
         with (
-            patch.object(
-                dht.routing_table,
-                "find_local_closest_peers",
-                return_value=peers,
-            ),
+            _patch_peer_lookup(dht, peers),
             patch.object(
                 dht.value_store,
                 "_store_at_peer",
@@ -203,11 +220,7 @@ class TestPutValueSlidingWindow:
             return idx in (0, 2)
 
         with (
-            patch.object(
-                dht.routing_table,
-                "find_local_closest_peers",
-                return_value=peers,
-            ),
+            _patch_peer_lookup(dht, peers),
             patch.object(
                 dht.value_store,
                 "_store_at_peer",
@@ -240,7 +253,9 @@ class TestGetValueSlidingWindow:
         peers = [_make_peer_id(f"peer{i}") for i in range(5)]
         started_at: dict[int, float] = {}
 
-        async def mock_get(peer, key_bytes, return_record=False):
+        async def mock_get(
+            peer, key_bytes, return_record=False, return_closer_peers=False
+        ):
             idx = peers.index(peer)
             started_at[idx] = trio.current_time()
             if idx == 2:
@@ -251,14 +266,10 @@ class TestGetValueSlidingWindow:
             rec.key = key_bytes
             rec.value = b"val"
             rec.timeReceived = str(int(time.time()))
-            return rec
+            return (rec, [])
 
         with (
-            patch.object(
-                dht.routing_table,
-                "find_local_closest_peers",
-                return_value=peers,
-            ),
+            _patch_peer_lookup(dht, peers),
             patch.object(dht.value_store, "get", return_value=None),
             patch.object(dht.value_store, "_get_from_peer", side_effect=mock_get),
             patch.object(dht, "validator", SimpleValidator()),
