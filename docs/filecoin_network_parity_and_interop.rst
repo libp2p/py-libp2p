@@ -36,9 +36,9 @@ Network parity audit
      - Suggested next step
    * - Listen address defaults
      - Lotus listens on TCP, QUIC, and WebTransport by default; Forest listens on TCP and QUIC.
-     - ``py-libp2p`` defaults to TCP unless QUIC or another transport is explicitly selected.
+     - ``py-libp2p`` defaults to TCP unless QUIC / WebTransport / another transport is explicitly selected (``enable_quic`` / ``enable_webtransport``). WebTransport listen multiaddrs use ``/udp/.../quic-v1/webtransport`` with ``/certhash/`` (see :doc:`webtransport`).
      - different
-     - Filecoin operators should not assume QUIC/WebTransport parity from generic host defaults.
+     - Filecoin operators should not assume QUIC/WebTransport parity from generic host defaults; enable WebTransport explicitly for Lotus-like listen sets.
      - Document Filecoin-specific listen-address recommendations instead of changing the global default in this module.
    * - Transport and security stack order
      - Lotus offers Noise and TLS, with configurable preference; Forest composes TCP/QUIC with Noise and identify/discovery services.

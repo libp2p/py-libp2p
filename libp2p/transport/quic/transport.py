@@ -141,6 +141,8 @@ class QUICTransport(ITransport):
                 verify_mode=self._config.verify_mode,
                 max_datagram_frame_size=self._config.max_datagram_size,
                 idle_timeout=self._config.idle_timeout,
+                max_data=self._config.CONNECTION_FLOW_CONTROL_WINDOW,
+                max_stream_data=self._config.STREAM_FLOW_CONTROL_WINDOW,
             )
 
             # Base client configuration
@@ -150,6 +152,8 @@ class QUICTransport(ITransport):
                 verify_mode=self._config.verify_mode,
                 max_datagram_frame_size=self._config.max_datagram_size,
                 idle_timeout=self._config.idle_timeout,
+                max_data=self._config.CONNECTION_FLOW_CONTROL_WINDOW,
+                max_stream_data=self._config.STREAM_FLOW_CONTROL_WINDOW,
             )
 
             # Apply TLS configuration
