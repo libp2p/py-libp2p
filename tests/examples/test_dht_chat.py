@@ -45,7 +45,7 @@ def test_dht_chat_example_imports() -> None:
 async def test_dht_chat_network_size_small() -> None:
     from examples.dht_chat.dht_chat import run_network_size
 
-    await run_network_size(4)
+    await run_network_size(4, pair_count=6, seed=880)
 
 
 async def _seed_connected(dht: KadDHT) -> None:

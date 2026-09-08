@@ -164,22 +164,34 @@ Interactive commands:
 Automated network-size mode
 ---------------------------
 
-For scaling checks, spin up ``N`` loopback peers in one process. Peer 0 is the
-intro node; peers ``1..N-1`` join it; peer 1 looks up peer ``N-1`` by Peer ID
-and sends a chat message::
+For scaling checks, spin up ``N`` loopback peers in one process, join them in a
+**tree** (peer ``i`` dials parent ``(i-1)//2``), warm routing tables, then run
+random directed ``src -> dst`` pairs. Each pair must:
+
+1. Resolve the destination with ``KadDHT.find_peer`` (Peer ID only)
+2. Deliver a ``/dht-chat/1.0.0`` message
+
+Completeness means **all pairs succeed**. Latencies are reported in
+milliseconds (so sub-10ms chat no longer looks like ``0.00s``).
+
+::
 
     $ python -m examples.dht_chat.dht_chat --network-size 10
-    === DHT network-size experiment: N=10 ===
-    Joined 9 peers to intro in 0.25s (intro connected=9)
-    Routing table sizes: intro=9 source(peer1)=1 target(peer9)=1 min=1 max=9 median=1
-    Peer 1 looked up peer 9 via DHT in 0.29s (1 attempt(s), 1 addr(s))
-    Chat delivery OK in 0.00s
-    TOTAL N=10: join=0.25s lookup=0.29s msg=0.00s wall=0.56s
+    === DHT network-size experiment: N=10 pairs=10 seed=880 ===
+    Join phase done in 0.76s: ok=9 fail=0 joined=10/10
+    Overlay warm-up done in 0.96s
+    Running 10 lookup+chat pairs ...
+    === Pair results ===
+    pairs: ok=10/10 fail=0 success_rate=100.0% ...
+    lookup_ms: p50=... p95=...
+    msg_ms: p50=... p95=...
+    COMPLETE: all lookup+chat pairs succeeded
 
-On the same machine, ``N=100`` completed successfully as well (join ~1s,
-lookup ~0.3s, chat OK). Joiners typically keep a small routing table (often
-just the intro) while the intro accumulates everyone; ``find_peer`` still
-succeeds because peer 1 queries the intro, which knows the target.
+Useful flags:
+
+- ``-n`` / ``--network-size N`` — number of peers
+- ``-k`` / ``--pair-count K`` — number of random directed pairs (default ``min(N, 40)``)
+- ``--seed`` — RNG seed for pair selection
 
 Notes
 -----
@@ -188,6 +200,8 @@ Notes
 - On a small local cluster, DHT query traffic may already dial other joiners
   before you type ``connect``. Use ``lookup`` to always exercise
   ``find_peer`` explicitly.
+- In-process ``N=1000+`` is limited by local handshake/FD load; prefer the
+  pair battery at moderate ``N`` for correctness, not a single lucky path.
 - This example does not cover NAT traversal or public IPFS bootstrap lists;
   see :doc:`examples.nat`, :doc:`examples.circuit_relay`, and
   :doc:`examples.kademlia` for related topics.

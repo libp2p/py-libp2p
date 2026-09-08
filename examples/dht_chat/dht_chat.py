@@ -21,6 +21,8 @@ from contextlib import (
     AsyncExitStack,
 )
 import logging
+import random
+import statistics
 import sys
 import time
 
@@ -323,134 +325,312 @@ async def run(port: int, bootstrap: str | None) -> None:
             await command_loop(host, dht, nursery)
 
 
-async def run_network_size(network_size: int) -> None:
+async def run_network_size(
+    network_size: int,
+    pair_count: int | None = None,
+    seed: int = 880,
+) -> None:
     """
-    Spin up ``network_size`` in-process DHT chat peers and exercise Peer-ID lookup.
+    Spin up ``network_size`` in-process DHT chat peers and run a multi-pair exam.
 
-    Topology: peer 0 is the intro node; peers 1..N-1 dial peer 0 once. Then peer 1
-    resolves peer N-1 via ``KadDHT.find_peer`` (no multiaddr) and sends a chat
-    message.
+    Completeness: after a tree-shaped join, run ``pair_count`` random directed
+    pairs ``(src -> dst)``. Each pair must ``KadDHT.find_peer(dst)`` (Peer ID
+    only) and deliver a chat message. Reports success rate and latencies in ms.
     """
     if network_size < 2:
         raise ValueError("--network-size must be >= 2")
 
-    print(f"=== DHT network-size experiment: N={network_size} ===")
+    max_pairs = network_size * (network_size - 1)
+    if pair_count is None:
+        # Enough random coverage to be meaningful without O(N^2) cost.
+        pair_count = min(max_pairs, max(network_size, 10), 40)
+    if pair_count < 1:
+        raise ValueError("--pair-count must be >= 1")
+    if pair_count > max_pairs:
+        pair_count = max_pairs
+
+    rng = random.Random(seed)
+    print(
+        f"=== DHT network-size experiment: N={network_size} "
+        f"pairs={pair_count} seed={seed} ===",
+        flush=True,
+    )
     t0 = time.perf_counter()
 
     async with AsyncExitStack() as stack:
         hosts = []
         dhts: list[KadDHT] = []
-        ports: list[int] = []
 
+        t_boot = time.perf_counter()
         for i in range(network_size):
             port = find_free_port()
-            ports.append(port)
             host = new_host()
-            # Loopback-only keeps large-N demos lightweight.
             listen = [Multiaddr(f"/ip4/127.0.0.1/tcp/{port}")]
             await stack.enter_async_context(host.run(listen_addrs=listen))
             hosts.append(host)
+            if (i + 1) % 500 == 0 or i + 1 == network_size:
+                print(
+                    f"Started {i + 1}/{network_size} hosts "
+                    f"({time.perf_counter() - t_boot:.1f}s)",
+                    flush=True,
+                )
 
-        received = trio.Event()
-        got: dict[str, bytes | None] = {"data": None}
-        target_idx = network_size - 1
+        # Per-payload waiters so many peers can receive concurrent chat messages.
+        pending: dict[bytes, trio.Event] = {}
+        pending_lock = trio.Lock()
 
-        async def target_handler(stream: INetStream) -> None:
-            data = await stream.read(MAX_READ_LEN)
-            got["data"] = data
-            received.set()
-            await stream.close()
+        def make_handler(_host_idx: int):
+            async def handler(stream: INetStream) -> None:
+                data = b""
+                try:
+                    data = await stream.read(MAX_READ_LEN)
+                finally:
+                    try:
+                        await stream.close()
+                    except Exception:
+                        pass
+                if not data:
+                    return
+                async with pending_lock:
+                    event = pending.pop(data, None)
+                if event is not None:
+                    event.set()
 
-        hosts[target_idx].set_stream_handler(PROTOCOL_ID, target_handler)
+            return handler
+
+        for i, host in enumerate(hosts):
+            host.set_stream_handler(PROTOCOL_ID, make_handler(i))
 
         for host in hosts:
             dht = KadDHT(host, DHTMode.SERVER)
             await stack.enter_async_context(background_trio_service(dht))
             dhts.append(dht)
-
-        intro = PeerInfo(hosts[0].get_id(), hosts[0].get_addrs())
-        join_limiter = trio.CapacityLimiter(min(32, network_size))
-
-        async def join_peer(i: int) -> None:
-            async with join_limiter:
-                await hosts[i].connect(intro)
-                await dhts[i].add_peer(hosts[0].get_id())
-
-        t_join = time.perf_counter()
-        async with trio.open_nursery() as nursery:
-            for i in range(1, network_size):
-                nursery.start_soon(join_peer, i)
-        join_s = time.perf_counter() - t_join
         print(
-            f"Joined {network_size - 1} peers to intro in {join_s:.2f}s "
-            f"(intro connected={len(hosts[0].get_connected_peers())})"
+            f"DHT services started for {network_size} peers "
+            f"({time.perf_counter() - t0:.1f}s)",
+            flush=True,
         )
 
-        # Seed intro RT with everyone currently connected.
-        for peer_id in hosts[0].get_connected_peers():
-            await dhts[0].add_peer(peer_id)
+        # Tree bootstrap: peer i dials parent (i-1)//2 (avoids star flood on root).
+        join_limit = 8 if network_size >= 200 else min(16, network_size)
+        join_limiter = trio.CapacityLimiter(join_limit)
+        join_stats = {"ok": 0, "fail": 0}
+        joined = {0}
+        join_lock = trio.Lock()
 
-        # Give routing tables a moment to settle under load.
-        settle_deadline = time.perf_counter() + min(30.0, 2.0 + network_size * 0.05)
-        while time.perf_counter() < settle_deadline:
-            for peer_id in hosts[0].get_connected_peers():
-                await dhts[0].add_peer(peer_id)
-            if dhts[0].get_routing_table_size() >= min(network_size - 1, 20):
-                break
-            await trio.sleep(0.2)
+        async def join_peer(i: int) -> None:
+            parent = (i - 1) // 2
+            parent_info = PeerInfo(hosts[parent].get_id(), hosts[parent].get_addrs())
+            async with join_limiter:
+                last_exc: Exception | None = None
+                for attempt in range(8):
+                    try:
+                        await hosts[i].connect(parent_info)
+                        await dhts[i].add_peer(hosts[parent].get_id())
+                        await dhts[parent].add_peer(hosts[i].get_id())
+                        async with join_lock:
+                            join_stats["ok"] += 1
+                            joined.add(i)
+                        return
+                    except Exception as exc:
+                        last_exc = exc
+                        await trio.sleep(0.05 * (attempt + 1))
+                async with join_lock:
+                    join_stats["fail"] += 1
+                logger.warning(
+                    "Join failed for peer %s (parent=%s): %s", i, parent, last_exc
+                )
 
-        rt_sizes = [d.get_routing_table_size() for d in dhts]
+        t_join = time.perf_counter()
+        level = [1, 2] if network_size > 2 else ([1] if network_size > 1 else [])
+        level = [i for i in level if i < network_size]
+        while level:
+            async with trio.open_nursery() as nursery:
+                for i in level:
+                    nursery.start_soon(join_peer, i)
+            next_level: list[int] = []
+            for i in level:
+                for child in (2 * i + 1, 2 * i + 2):
+                    if child < network_size:
+                        next_level.append(child)
+            level = next_level
+        join_s = time.perf_counter() - t_join
+        print(
+            f"Join phase done in {join_s:.2f}s: ok={join_stats['ok']} "
+            f"fail={join_stats['fail']} joined={len(joined)}/{network_size}",
+            flush=True,
+        )
+        if len(joined) < 2:
+            raise RuntimeError("Need at least 2 joined peers for pair testing")
+
+        joined_list = sorted(joined)
+
+        # Seed RT from live connections, and push each peer's PeerInfo up the
+        # tree so ancestors can answer FIND_NODE without everyone dialing root.
+        t_warm = time.perf_counter()
+        for i in joined_list:
+            for peer_id in hosts[i].get_connected_peers():
+                await dhts[i].add_peer(peer_id)
+
+        for i in joined_list:
+            if i == 0:
+                continue
+            info = PeerInfo(hosts[i].get_id(), hosts[i].get_addrs())
+            cur = i
+            while cur > 0:
+                parent = (cur - 1) // 2
+                try:
+                    hosts[parent].get_peerstore().add_addrs(
+                        info.peer_id, info.addrs, 60 * 60
+                    )
+                except Exception:
+                    pass
+                await dhts[parent].add_peer(info.peer_id, skip_server_mode_check=True)
+                cur = parent
+
+        # Bounded FIND_NODE warm toward root (best-effort record exchange).
+        warm_limiter = trio.CapacityLimiter(min(8, network_size))
+
+        async def warm_peer(i: int) -> None:
+            async with warm_limiter:
+                with trio.move_on_after(1.0):
+                    try:
+                        await dhts[i].find_peer(hosts[0].get_id())
+                    except Exception:
+                        pass
+
+        async with trio.open_nursery() as nursery:
+            for i in joined_list:
+                if i != 0:
+                    nursery.start_soon(warm_peer, i)
+        warm_s = time.perf_counter() - t_warm
+        print(f"Overlay warm-up done in {warm_s:.2f}s", flush=True)
+
+        rt_sizes = [dhts[i].get_routing_table_size() for i in joined_list]
         median_rt = sorted(rt_sizes)[len(rt_sizes) // 2]
         print(
             "Routing table sizes: "
-            f"intro={rt_sizes[0]} "
-            f"source(peer1)={rt_sizes[1]} "
-            f"target(peer{target_idx})={rt_sizes[target_idx]} "
-            f"min={min(rt_sizes)} max={max(rt_sizes)} median={median_rt}"
+            f"min={min(rt_sizes)} max={max(rt_sizes)} median={median_rt}",
+            flush=True,
         )
 
-        source_host, source_dht = hosts[1], dhts[1]
-        target_id = hosts[target_idx].get_id()
+        # Build unique random directed pairs among joined peers.
+        all_directed = [(a, b) for a in joined_list for b in joined_list if a != b]
+        rng.shuffle(all_directed)
+        pairs = all_directed[:pair_count]
 
-        t_lookup = time.perf_counter()
-        found: PeerInfo | None = None
-        attempts = 0
-        with trio.fail_after(60):
-            while True:
-                attempts += 1
-                found = await source_dht.find_peer(target_id)
-                if found is not None and found.addrs:
+        lookup_ms: list[float] = []
+        msg_ms: list[float] = []
+        pair_ok = 0
+        pair_fail = 0
+        lookup_budget = min(60.0, 10.0 + network_size * 0.02)
+
+        print(f"Running {len(pairs)} lookup+chat pairs ...", flush=True)
+        t_pairs = time.perf_counter()
+        for idx, (src, dst) in enumerate(pairs, start=1):
+            pair_succeeded = False
+            last_exc: Exception | None = None
+            for attempt in range(3):
+                payload = f"pair-{src}-{dst}-{idx}-{seed}-a{attempt}\n".encode()
+                event = trio.Event()
+                async with pending_lock:
+                    pending[payload] = event
+                try:
+                    t_lookup = time.perf_counter()
+                    found: PeerInfo | None = None
+                    with trio.fail_after(lookup_budget):
+                        while True:
+                            found = await dhts[src].find_peer(hosts[dst].get_id())
+                            if found is not None and found.addrs:
+                                break
+                            await trio.sleep(0.1)
+                    assert found is not None
+                    lookup_ms.append((time.perf_counter() - t_lookup) * 1000.0)
+
+                    t_msg = time.perf_counter()
+                    await hosts[src].connect(found)
+                    await dhts[src].add_peer(found.peer_id)
+                    stream = await hosts[src].new_stream(found.peer_id, [PROTOCOL_ID])
+                    try:
+                        await stream.write(payload)
+                    finally:
+                        await stream.close()
+                    with trio.fail_after(15):
+                        await event.wait()
+                    msg_ms.append((time.perf_counter() - t_msg) * 1000.0)
+                    pair_succeeded = True
+                    pair_ok += 1
                     break
-                await trio.sleep(0.2)
-        lookup_s = time.perf_counter() - t_lookup
-        assert found is not None
-        print(
-            f"Peer 1 looked up peer {target_idx} via DHT in {lookup_s:.2f}s "
-            f"({attempts} attempt(s), {len(found.addrs)} addr(s))"
-        )
+                except Exception as exc:
+                    last_exc = exc
+                    async with pending_lock:
+                        pending.pop(payload, None)
+                    await trio.sleep(0.2 * (attempt + 1))
 
-        t_msg = time.perf_counter()
-        await source_host.connect(found)
-        stream = await source_host.new_stream(target_id, [PROTOCOL_ID])
-        payload = f"hello-from-N{network_size}\n".encode()
-        try:
-            await stream.write(payload)
-        finally:
-            await stream.close()
+            if not pair_succeeded:
+                pair_fail += 1
+                err = (
+                    f"{type(last_exc).__name__}: {last_exc}" if last_exc else "unknown"
+                )
+                print(
+                    f"  FAIL pair {idx}/{len(pairs)} {src}->{dst}: {err}",
+                    flush=True,
+                )
 
-        with trio.fail_after(30):
-            await received.wait()
-        msg_s = time.perf_counter() - t_msg
+            if idx == len(pairs) or idx % max(1, len(pairs) // 5) == 0:
+                print(
+                    f"  progress {idx}/{len(pairs)} ok={pair_ok} fail={pair_fail}",
+                    flush=True,
+                )
 
-        ok = got["data"] == payload
+        pairs_s = time.perf_counter() - t_pairs
         total_s = time.perf_counter() - t0
-        print(f"Chat delivery {'OK' if ok else 'FAIL'} in {msg_s:.2f}s")
+        success_rate = 100.0 * pair_ok / len(pairs)
+
+        def _pct(values: list[float], p: float) -> float:
+            if not values:
+                return float("nan")
+            ordered = sorted(values)
+            rank = int(round((p / 100.0) * (len(ordered) - 1)))
+            return ordered[rank]
+
+        print("=== Pair results ===", flush=True)
         print(
-            f"TOTAL N={network_size}: join={join_s:.2f}s lookup={lookup_s:.2f}s "
-            f"msg={msg_s:.2f}s wall={total_s:.2f}s"
+            f"pairs: ok={pair_ok}/{len(pairs)} fail={pair_fail} "
+            f"success_rate={success_rate:.1f}% in {pairs_s:.2f}s",
+            flush=True,
         )
-        if not ok:
-            raise RuntimeError(f"Unexpected payload: {got['data']!r}")
+        if lookup_ms:
+            print(
+                "lookup_ms: "
+                f"p50={_pct(lookup_ms, 50):.1f} "
+                f"p95={_pct(lookup_ms, 95):.1f} "
+                f"mean={statistics.fmean(lookup_ms):.1f} "
+                f"max={max(lookup_ms):.1f}",
+                flush=True,
+            )
+        if msg_ms:
+            print(
+                "msg_ms: "
+                f"p50={_pct(msg_ms, 50):.1f} "
+                f"p95={_pct(msg_ms, 95):.1f} "
+                f"mean={statistics.fmean(msg_ms):.1f} "
+                f"max={max(msg_ms):.1f}",
+                flush=True,
+            )
+        print(
+            f"TOTAL N={network_size}: join={join_s:.2f}s warm={warm_s:.2f}s "
+            f"pairs={pairs_s:.2f}s wall={total_s:.2f}s "
+            f"join_fail={join_stats['fail']}",
+            flush=True,
+        )
+
+        if pair_fail:
+            raise RuntimeError(
+                f"Pair battery incomplete: {pair_ok}/{len(pairs)} succeeded "
+                f"({success_rate:.1f}%)"
+            )
+        print("COMPLETE: all lookup+chat pairs succeeded", flush=True)
 
 
 def main() -> None:
@@ -460,8 +640,9 @@ def main() -> None:
     Interactive mode: start one intro peer, then join others with
     --bootstrap <multiaddr>. Subsequent dials use KadDHT.find_peer(peer_id).
 
-    Automated mode: --network-size N spins up N in-process peers, joins them
-    through one intro peer, then has peer 1 look up peer N-1 by Peer ID and chat.
+    Automated mode: --network-size N spins up N in-process peers (tree join),
+    warms the DHT, then runs random src->dst lookup+chat pairs and reports
+    success rate plus lookup/msg latency in milliseconds.
     """
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument(
@@ -485,15 +666,36 @@ def main() -> None:
         default=None,
         help="Run automated N-peer DHT overlay experiment (N >= 2) and exit",
     )
+    parser.add_argument(
+        "-k",
+        "--pair-count",
+        type=int,
+        default=None,
+        help="Random directed lookup+chat pairs to run (default: min(N,40))",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=880,
+        help="RNG seed for pair selection (default: 880)",
+    )
     args = parser.parse_args()
 
     try:
         if args.network_size is not None:
-            trio.run(run_network_size, args.network_size)
+            trio.run(
+                run_network_size,
+                args.network_size,
+                args.pair_count,
+                args.seed,
+            )
         else:
             trio.run(run, args.port, args.bootstrap)
     except KeyboardInterrupt:
         pass
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr, flush=True)
+        raise SystemExit(1) from exc
 
 
 if __name__ == "__main__":
