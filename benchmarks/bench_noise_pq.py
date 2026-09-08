@@ -2,7 +2,7 @@
 Noise PQ vs classical Noise benchmarks for py-libp2p.
 
 Measures:
-  1. X-Wing KEM micro-benchmarks: keygen, encapsulate, decapsulate
+  1. ML-KEM-768 KEM micro-benchmarks: keygen, encapsulate, decapsulate
   2. Classical Noise XX handshake latency (round-trip)
   3. Noise XXhfs (PQ) handshake latency (round-trip)
   4. Post-handshake transport throughput: 1 KB, 10 KB, 100 KB
@@ -188,9 +188,9 @@ def _bench_one_kem(kem, n_warmup: int = None, n_iter: int = None) -> dict:
 
 
 def bench_kem() -> dict:
-    from libp2p.security.noise.pq.kem import XWingKem
+    from libp2p.security.noise.pq.kem import MLKEM768Kem
 
-    return _bench_one_kem(XWingKem())
+    return _bench_one_kem(MLKEM768Kem())
 
 
 def bench_kem_backends() -> dict:
@@ -199,14 +199,14 @@ def bench_kem_backends() -> dict:
 
     Returns a dict keyed by backend name, each value is a _bench_one_kem dict.
     """
-    from libp2p.security.noise.pq.kem import XWingKem
+    from libp2p.security.noise.pq.kem import MLKEM768Kem
     from libp2p.security.noise.pq.kem_backends import LibOQSXWingKem
 
     results: dict[str, dict] = {}
 
     # kyber-py baseline (always available, pure Python)
     print("  Benchmarking kyber-py (pure Python)…")
-    results["kyber-py"] = _bench_one_kem(XWingKem())
+    results["kyber-py"] = _bench_one_kem(MLKEM768Kem())
 
     # liboqs C backend (available if liboqs shared library is installed)
     try:
@@ -349,7 +349,7 @@ async def bench_throughput() -> dict:
 
 
 def wire_sizes() -> dict:
-    from libp2p.security.noise.pq.kem import XWING_CT_SIZE, XWING_PK_SIZE
+    from libp2p.security.noise.pq.kem import MLKEM768_CT_SIZE, MLKEM768_PK_SIZE
 
     x25519 = 32
     aead_tag = 16
@@ -361,11 +361,11 @@ def wire_sizes() -> dict:
     classical_fixed = 32 + (32 + 48) + 48  # = 160 B fixed; payload adds ~32+ per side
 
     # XXhfs
-    # Msg A: e_pk (32) + e1_pk (1216)                                   = 1248
-    # Msg B: e (32) + enc_ct (1120+16=1136) + enc_s (48) + enc_payload
+    # Msg A: e_pk (32) + e1_pk (1184)                                   = 1216
+    # Msg B: e (32) + enc_ct (1088+16=1104) + enc_s (48) + enc_payload
     # Msg C: enc_s (48) + enc_payload
-    msg_a = x25519 + XWING_PK_SIZE  # 32 + 1216 = 1248
-    msg_b_fixed = x25519 + (XWING_CT_SIZE + aead_tag) + (x25519 + aead_tag)  # 1216
+    msg_a = x25519 + MLKEM768_PK_SIZE  # 32 + 1184 = 1216
+    msg_b_fixed = x25519 + (MLKEM768_CT_SIZE + aead_tag) + (x25519 + aead_tag)  # 1200
     msg_c_fixed = x25519 + aead_tag  # 48
 
     return {
@@ -427,7 +427,7 @@ async def run_all() -> dict:
             f"  {speedup:>6.1f}x"
         )
 
-    print_section("X-Wing KEM micro-benchmarks (kyber-py baseline)")
+    print_section("ML-KEM-768 KEM micro-benchmarks (kyber-py baseline)")
     print(f"  keygen     : {_fmt(kem['keygen_ms'], kem['keygen_ops'])}")
     print(f"  encapsulate: {_fmt(kem['encap_ms'], kem['encap_ops'])}")
     print(f"  decapsulate: {_fmt(kem['decap_ms'], kem['decap_ops'])}")
