@@ -862,60 +862,58 @@ class PingTest:
             if not all_addrs:
                 raise RuntimeError("No listen addresses available")
 
-                actual_addr = self._get_publishable_address(all_addrs)
-                print(
-                    f"Publishing address for transport {self.transport}: {actual_addr}",
-                    file=sys.stderr,
-                )
-                # Redis Coordination Protocol:
-                # - Key: self.redis_listener_key (test-plans: listenerAddr;
-                #   unified: {TEST_KEY}_listener_multiaddr)
-                # - Operation: RPUSH; dialer uses BLPOP on the same key.
-                redis_key = self.redis_listener_key
+            actual_addr = self._get_publishable_address(all_addrs)
+            print(
+                f"Publishing address for transport {self.transport}: {actual_addr}",
+                file=sys.stderr,
+            )
+            # Redis Coordination Protocol:
+            # - Key: self.redis_listener_key (test-plans: listenerAddr;
+            #   unified: {TEST_KEY}_listener_multiaddr)
+            # - Operation: RPUSH; dialer uses BLPOP on the same key.
+            redis_key = self.redis_listener_key
 
-                # Clean up any existing key to ensure it's a list type
-                try:
-                    assert self.redis_client is not None
-                    self.redis_client.delete(redis_key)
-                except Exception:
-                    pass  # Ignore if key doesn't exist
-
-                # Dialers may race multistream after WS upgrade; brief settle helps.
-                if self.test_plans and self.transport in ("ws", "wss"):
-                    await trio.sleep(0.3)
-
-                # Publish listener address using RPUSH (list operation)
-                # Dialer will use BLPOP to block and read this value
+            # Clean up any existing key to ensure it's a list type
+            try:
                 assert self.redis_client is not None
-                self.redis_client.rpush(redis_key, actual_addr)
-                print(
-                    "Listener ready, waiting for dialer to connect...", file=sys.stderr
-                )
+                self.redis_client.delete(redis_key)
+            except Exception:
+                pass  # Ignore if key doesn't exist
 
-                wait_timeout = min(self.test_timeout_seconds, MAX_TEST_TIMEOUT)
-                check_interval = 0.5
-                elapsed: float = 0
+            # Dialers may race multistream after WS upgrade; brief settle helps.
+            if self.test_plans and self.transport in ("ws", "wss"):
+                await trio.sleep(0.3)
 
-                while elapsed < wait_timeout:
-                    if self.ping_received:
-                        print(
-                            "Ping received and responded, listener exiting",
-                            file=sys.stderr,
-                        )
-                        # Small muxer drain delay; in test-plans wait longer so the
-                        # dialer container can exit before we do (see module note).
-                        grace = self._listener_post_ping_grace_secs()
-                        await trio.sleep(grace)
-                        break
-                    await trio.sleep(check_interval)
-                    elapsed += check_interval
+            # Publish listener address using RPUSH (list operation)
+            # Dialer will use BLPOP to block and read this value
+            assert self.redis_client is not None
+            self.redis_client.rpush(redis_key, actual_addr)
+            print("Listener ready, waiting for dialer to connect...", file=sys.stderr)
 
-                if not self.ping_received:
+            wait_timeout = min(self.test_timeout_seconds, MAX_TEST_TIMEOUT)
+            check_interval = 0.5
+            elapsed: float = 0
+
+            while elapsed < wait_timeout:
+                if self.ping_received:
                     print(
-                        f"Timeout: No ping received within {wait_timeout} seconds",
+                        "Ping received and responded, listener exiting",
                         file=sys.stderr,
                     )
-                    sys.exit(1)
+                    # Small muxer drain delay; in test-plans wait longer so the
+                    # dialer container can exit before we do (see module note).
+                    grace = self._listener_post_ping_grace_secs()
+                    await trio.sleep(grace)
+                    break
+                await trio.sleep(check_interval)
+                elapsed += check_interval
+
+            if not self.ping_received:
+                print(
+                    f"Timeout: No ping received within {wait_timeout} seconds",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
 
     async def _connect_redis_with_retry(
         self, max_retries: int = 10, retry_delay: float = 1.0
