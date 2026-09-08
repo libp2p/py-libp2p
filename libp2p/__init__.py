@@ -289,6 +289,7 @@ def _build_transports_for_swarm(
     transports: Sequence[ITransport] | None,
     enable_quic: bool,
     enable_webrtc: bool,
+    enable_webtransport: bool,
     enable_tcp: bool,
     enable_websocket: bool,
     enable_autotls: bool,
@@ -314,6 +315,7 @@ def _build_transports_for_swarm(
     :param transports: Explicit transport list, or ``None`` to auto-build.
     :param enable_quic: Whether to create a QUIC transport when auto-building.
     :param enable_webrtc: Whether to create a WebRTC transport when auto-building.
+    :param enable_webtransport: Whether to create a WebTransport transport.
     :param enable_tcp: Whether to include a TCP transport when auto-building.
     :param enable_websocket: Whether to include a WebSocket transport.
     :param enable_autotls: Whether to enable AutoTLS in QUIC/WebSocket transports.
@@ -340,6 +342,15 @@ def _build_transports_for_swarm(
 
             if "tcp" in protocols and "ws" not in protocols and "wss" not in protocols:
                 transport_obj = TCP()
+            elif "webtransport" in protocols:
+                from libp2p.transport.webtransport import WebTransportTransport
+
+                if key_pair is None:
+                    logger.warning(
+                        "WebTransport transport requires key_pair (private_key)"
+                    )
+                    continue
+                transport_obj = WebTransportTransport(private_key=key_pair.private_key)
             elif "quic" in protocols or "quic-v1" in protocols:
                 if key_pair is None:
                     logger.warning("QUIC transport requires key_pair (private_key)")
@@ -419,6 +430,17 @@ def _build_transports_for_swarm(
                 logger.warning("WebRTC transport requires key_pair (private_key)")
             else:
                 result.append(WebRTCDirectTransport(private_key=key_pair.private_key))
+        if enable_webtransport:
+            from libp2p.transport.webtransport import WebTransportTransport
+
+            if key_pair is None:
+                logger.warning(
+                    "WebTransport transport requires key_pair (private_key)"
+                )
+            else:
+                result.append(
+                    WebTransportTransport(private_key=key_pair.private_key)
+                )
         if enable_tcp or not result:
             result.append(TCP())
 
@@ -437,6 +459,7 @@ def new_swarm(
     # Backward-compat flags
     enable_quic: bool = False,
     enable_webrtc: bool = False,
+    enable_webtransport: bool = False,
     enable_autotls: bool = False,
     # NEW: convenience flags for auto-building transports
     enable_tcp: bool = True,
@@ -576,6 +599,7 @@ def new_swarm(
         transports=transports,
         enable_quic=enable_quic,
         enable_webrtc=enable_webrtc,
+        enable_webtransport=enable_webtransport,
         enable_tcp=enable_tcp,
         enable_websocket=enable_websocket,
         enable_autotls=enable_autotls,
@@ -685,6 +709,7 @@ def new_host(
     negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     enable_quic: bool = False,
     enable_webrtc: bool = False,
+    enable_webtransport: bool = False,
     quic_transport_opt: QUICTransportConfig | None = None,
     tls_client_config: ssl.SSLContext | None = None,
     tls_server_config: ssl.SSLContext | None = None,
@@ -801,6 +826,7 @@ def new_host(
     swarm = new_swarm(
         enable_quic=enable_quic,
         enable_webrtc=enable_webrtc,
+        enable_webtransport=enable_webtransport,
         key_pair=key_pair,
         muxer_opt=muxer_opt,
         sec_opt=sec_opt,

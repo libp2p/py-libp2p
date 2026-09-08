@@ -1,0 +1,5 @@
+Added experimental libp2p WebTransport (``/quic-v1/webtransport``) on aioquic:
+HTTP/3 ALPN ``h3``, Noise XX with ``webtransport_certhashes``, dual cert rotation,
+host flag ``enable_webtransport``, go-libp2p interop harness, and echo demo.
+Also maps QUIC ``CONNECTION_FLOW_CONTROL_WINDOW`` / ``STREAM_FLOW_CONTROL_WINDOW``
+onto aioquic ``max_data`` / ``max_stream_data`` for multi-stream stability.
