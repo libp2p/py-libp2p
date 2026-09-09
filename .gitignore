@@ -45,6 +45,11 @@ coverage.xml
 *.cover
 .pytest_cache/
 
+# Test result files
+tests/**/results/*.json
+tests/**/results/*.xml
+tests/**/results/*.html
+
 # Translations
 *.mo
 *.pot
@@ -133,6 +138,8 @@ fabric.properties
 
 # Django stuff:
 *.log
+*.pem
+*.key
 local_settings.py
 db.sqlite3
 
@@ -178,3 +185,20 @@ env.bak/
 #lockfiles
 uv.lock
 poetry.lock
+tests/interop/js_libp2p/js_node/node_modules/
+tests/interop/js_libp2p/js_node/package-lock.json
+tests/interop/js_libp2p/js_node/src/node_modules/
+tests/interop/js_libp2p/js_node/src/package-lock.json
+examples/request_response/synapse_sidecar/node_modules/
+
+# Sphinx documentation build
+_build/
+
+# Attack simulation test results
+tests/security/attack_simulation/results/
+libp2p-forge
+libp2p-metrics
+
+# OSO health report generated outputs
+reports/*.json
+reports/*.md

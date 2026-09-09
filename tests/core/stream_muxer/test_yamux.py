@@ -1,13 +1,16 @@
 import logging
+import platform
 import struct
 
 import pytest
+from multiaddr import Multiaddr
 import trio
 from trio.testing import (
     memory_stream_pair,
 )
 
 from libp2p.abc import (
+    ConnectionType,
     IRawConnection,
 )
 from libp2p.crypto.ed25519 import (
@@ -19,33 +22,57 @@ from libp2p.peer.id import (
 from libp2p.security.insecure.transport import (
     InsecureTransport,
 )
+from libp2p.stream_muxer.exceptions import (
+    MuxedConnUnavailable,
+)
 from libp2p.stream_muxer.yamux.yamux import (
+    DEFAULT_WINDOW_SIZE,
+    FLAG_ACK,
+    FLAG_FIN,
+    FLAG_RST,
     FLAG_SYN,
     GO_AWAY_PROTOCOL_ERROR,
+    HEADER_SIZE,
+    MAX_MESSAGE_SIZE,
+    MAX_WINDOW_SIZE,
+    TYPE_DATA,
     TYPE_PING,
     TYPE_WINDOW_UPDATE,
     YAMUX_HEADER_FORMAT,
     MuxedStreamEOF,
     MuxedStreamError,
+    MuxedStreamReset,
     Yamux,
     YamuxStream,
 )
 
 
 class TrioStreamAdapter(IRawConnection):
+    """
+    Adapter that wraps a trio memory stream pair for use as IRawConnection.
+
+    Uses a write lock so that the connection can be written from both the
+    muxer's background task and from tests (e.g. injecting raw frames)
+    without tripping trio.BusyResourceError (single-user stream).
+    """
+
     def __init__(self, send_stream, receive_stream, is_initiator: bool = False):
         self.send_stream = send_stream
         self.receive_stream = receive_stream
         self.is_initiator = is_initiator
+        self._write_lock = trio.Lock()
 
     async def write(self, data: bytes) -> None:
         logging.debug(f"Writing {len(data)} bytes")
-        with trio.move_on_after(2):
-            await self.send_stream.send_all(data)
+        async with self._write_lock:
+            with trio.move_on_after(2):
+                await self.send_stream.send_all(data)
 
     async def read(self, n: int | None = None) -> bytes:
         if n is None or n == -1:
-            raise ValueError("Reading unbounded not supported")
+            return await self.receive_stream.receive_some(8192)
+        if n == 0:
+            raise ValueError("Reading zero bytes not supported")
         logging.debug(f"Attempting to read {n} bytes")
         with trio.move_on_after(2):
             data = await self.receive_stream.receive_some(n)
@@ -53,11 +80,21 @@ class TrioStreamAdapter(IRawConnection):
             return data
 
     async def close(self) -> None:
-        logging.debug("Closing stream")
+        logging.debug("Closing stream adapter")
+        await self.send_stream.aclose()
+        await self.receive_stream.aclose()
 
     def get_remote_address(self) -> tuple[str, int] | None:
         # Return None since this is a test adapter without real network info
         return None
+
+    def get_transport_addresses(self) -> list[Multiaddr]:
+        """Mock implementation of get_transport_addresses."""
+        return []
+
+    def get_connection_type(self) -> ConnectionType:
+        """Mock implementation of get_connection_type."""
+        return ConnectionType.DIRECT
 
 
 @pytest.fixture
@@ -97,7 +134,6 @@ async def secure_conn_pair(key_pair, peer_id):
     async with trio.open_nursery() as nursery:
         nursery.start_soon(run_outbound, nursery_results)
         nursery.start_soon(run_inbound, nursery_results)
-        await trio.sleep(0.1)  # Give tasks a chance to finish
 
     client_conn = nursery_results.get("client")
     server_conn = nursery_results.get("server")
@@ -116,11 +152,10 @@ async def yamux_pair(secure_conn_pair, peer_id):
     client_yamux = Yamux(client_conn, peer_id, is_initiator=True)
     server_yamux = Yamux(server_conn, peer_id, is_initiator=False)
     async with trio.open_nursery() as nursery:
-        with trio.move_on_after(5):
-            nursery.start_soon(client_yamux.start)
-            nursery.start_soon(server_yamux.start)
-            await trio.sleep(0.1)
-            logging.debug("yamux_pair started")
+        nursery.start_soon(client_yamux.start)
+        nursery.start_soon(server_yamux.start)
+        await trio.sleep(0.1)  # allow start
+        logging.debug("yamux_pair started")
         yield client_yamux, server_yamux
     logging.debug("yamux_pair cleanup")
 
@@ -148,6 +183,18 @@ async def test_yamux_accept_stream(yamux_pair):
     assert server_stream.stream_id == client_stream.stream_id
     assert isinstance(server_stream, YamuxStream)
     logging.debug("test_yamux_accept_stream complete")
+
+
+@pytest.mark.trio
+async def test_yamux_stream_set_deadline_raises_not_implemented(yamux_pair):
+    """Yamux streams do not support set_deadline()."""
+    client_yamux, _server_yamux = yamux_pair
+    stream = await client_yamux.open_stream()
+
+    with pytest.raises(
+        NotImplementedError, match="does not support setting read deadlines"
+    ):
+        stream.set_deadline(5)
 
 
 @pytest.mark.trio
@@ -280,9 +327,10 @@ async def test_yamux_flow_control(yamux_pair):
     # Send the data
     await client_stream.write(large_data)
 
-    # Check that window was reduced
-    assert client_stream.send_window < initial_window, (
-        "Window should be reduced after sending"
+    # Window was reduced by the send; ACK may have already restored some,
+    # but it should differ from the initial value.
+    assert client_stream.send_window != initial_window, (
+        "Window should have changed after sending data and receiving ACK"
     )
 
     # Read the data on the server side
@@ -426,6 +474,114 @@ async def test_yamux_go_away_with_error(yamux_pair):
 
 
 @pytest.mark.trio
+async def test_yamux_backlog_slot_released_on_stream_close(yamux_pair):
+    """
+    Closed streams must release their backlog slot so a connection can open
+    more than ``stream_backlog_limit`` streams over its lifetime.
+
+    Regression test for the bitswap large-file transfer hang: the bitswap
+    client opens one wantlist stream per batch, and a 2GB file needs 250+
+    batches. Previously every stream consumed a permanent slot in the 256-slot
+    ``stream_backlog_semaphore``, so ``open_stream`` blocked forever once the
+    limit was reached.
+    """
+    client_yamux, server_yamux = yamux_pair
+
+    # Open and fully close more streams than the backlog limit (256).
+    with trio.fail_after(30):
+        for _ in range(300):
+            client_stream = await client_yamux.open_stream()
+            server_stream = await server_yamux.accept_stream()
+            await client_stream.close()
+            await server_stream.close()
+
+        # The slot is released on local close, so opening more streams must
+        # not block on an exhausted semaphore.
+        client_stream = await client_yamux.open_stream()
+        server_stream = await server_yamux.accept_stream()
+        await client_stream.close()
+        await server_stream.close()
+
+    # Sanity: the connection is still healthy and the semaphore has capacity.
+    assert client_yamux.stream_backlog_semaphore.value > 0
+    logging.debug("test_yamux_backlog_slot_released_on_stream_close complete")
+
+
+@pytest.mark.trio
+async def test_yamux_stream_bookkeeping_removed_on_full_close(yamux_pair):
+    """
+    A fully closed stream (FIN in both directions) is removed from the
+    connection's stream/buffer/event bookkeeping, so long-lived connections do
+    not accumulate dead stream entries.
+    """
+    client_yamux, server_yamux = yamux_pair
+    client_stream = await client_yamux.open_stream()
+    server_stream = await server_yamux.accept_stream()
+    sid = client_stream.stream_id
+
+    # Exchange data so there is a non-empty receive buffer to drain first.
+    await client_stream.write(b"hello")
+    assert await server_stream.read(5) == b"hello"
+
+    # Close both directions.
+    await client_stream.close()
+    await server_stream.close()
+    # Give the FIN frames time to propagate to both sides.
+    await trio.sleep(0.2)
+
+    async with client_yamux.streams_lock:
+        assert sid not in client_yamux.streams
+        assert sid not in client_yamux.stream_buffers
+        assert sid not in client_yamux.stream_events
+    logging.debug("test_yamux_stream_bookkeeping_removed_on_full_close complete")
+
+
+@pytest.mark.trio
+async def test_yamux_stale_stream_swept_after_grace_period(yamux_pair):
+    """
+    A fully-closed stream that still holds unread buffered data keeps its
+    bookkeeping (so readers can drain it) but is reclaimed by the stale-stream
+    sweeper once the grace period elapses — otherwise long-lived connections
+    would accumulate one dead entry per abandoned stream.
+    """
+    client_yamux, server_yamux = yamux_pair
+    client_stream = await client_yamux.open_stream()
+    server_stream = await server_yamux.accept_stream()
+    sid = client_stream.stream_id
+
+    # Server sends data that the client never reads — it stays buffered.
+    await server_stream.write(b"unread-data")
+    await trio.sleep(0.1)
+    # Close both directions (server FIN first, so the client's close() sees
+    # recv_closed=True and fully closes the stream).
+    await server_stream.close()
+    await trio.sleep(0.1)
+    await client_stream.close()
+    await trio.sleep(0.1)
+
+    async with client_yamux.streams_lock:
+        stream = client_yamux.streams[sid]
+        # Fully closed, but the buffered data keeps the entry alive...
+        assert stream.closed
+        assert client_yamux.stream_buffers[sid]
+        assert stream._closed_at > 0
+        # ...and within the grace period the sweeper leaves it alone.
+        assert client_yamux._sweep_stale_streams(now=trio.current_time()) == 0
+
+    # Once the grace period has elapsed, the entry is reclaimed.
+    async with client_yamux.streams_lock:
+        stream = client_yamux.streams[sid]
+        assert client_yamux._sweep_stale_streams(now=stream._closed_at + 1000) == 1
+        assert sid not in client_yamux.streams
+        assert sid not in client_yamux.stream_buffers
+        assert sid not in client_yamux.stream_events
+
+    # The backlog slot was released on local close regardless of buffering.
+    assert client_yamux.stream_backlog_semaphore.value == 256
+    logging.debug("test_yamux_stale_stream_swept_after_grace_period complete")
+
+
+@pytest.mark.trio
 async def test_yamux_backpressure(yamux_pair):
     logging.debug("Starting test_yamux_backpressure")
     client_yamux, server_yamux = yamux_pair
@@ -458,3 +614,788 @@ async def test_yamux_backpressure(yamux_pair):
         await stream.close()
 
     logging.debug("test_yamux_backpressure complete")
+
+
+@pytest.mark.trio
+async def test_yamux_fin_on_window_update(yamux_pair):
+    """
+    Tests that a FIN flag is correctly processed when it arrives
+    on a WINDOW_UPDATE frame, as per the Yamux spec.
+    """
+    logging.debug("Starting test_yamux_fin_on_window_update")
+    client_yamux, server_yamux = yamux_pair
+    client_stream = await client_yamux.open_stream()
+
+    async def read_and_catch_eof(stream):
+        with pytest.raises(MuxedStreamEOF, match="Stream is closed for receiving"):
+            logging.debug("Test: client_stream.read() blocking...")
+            await stream.read()
+        logging.debug("Test: client_stream.read() correctly raised EOF")
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(read_and_catch_eof, client_stream)
+        await trio.sleep(0.1)
+        logging.debug("Test: Server injecting WINDOW_UPDATE with FLAG_FIN")
+        header = struct.pack(
+            YAMUX_HEADER_FORMAT,
+            0,
+            TYPE_WINDOW_UPDATE,
+            FLAG_FIN,
+            client_stream.stream_id,
+            0,
+        )
+        await server_yamux.secured_conn.write(header)
+
+    logging.debug("test_yamux_fin_on_window_update complete")
+
+
+@pytest.mark.trio
+async def test_yamux_rst_on_window_update(yamux_pair):
+    """
+    Tests that a RST flag is correctly processed when it arrives
+    on a WINDOW_UPDATE frame, as per the Yamux spec.
+    """
+    logging.debug("Starting test_yamux_rst_on_window_update")
+    client_yamux, server_yamux = yamux_pair
+    client_stream = await client_yamux.open_stream()
+
+    async def read_and_catch_reset(stream):
+        with pytest.raises(MuxedStreamReset, match="Stream was reset"):
+            logging.debug("Test: client_stream.read() blocking...")
+            await stream.read()
+        logging.debug("Test: client_stream.read() correctly raised Reset")
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(read_and_catch_reset, client_stream)
+        await trio.sleep(0.1)
+        logging.debug("Test: Server injecting WINDOW_UPDATE with FLAG_RST")
+        header = struct.pack(
+            YAMUX_HEADER_FORMAT,
+            0,
+            TYPE_WINDOW_UPDATE,
+            FLAG_RST,
+            client_stream.stream_id,
+            0,
+        )
+        await server_yamux.secured_conn.write(header)
+
+    logging.debug("test_yamux_rst_on_window_update complete")
+
+
+@pytest.mark.trio
+async def test_yamux_accept_stream_unblocks_on_close(yamux_pair):
+    """
+    Test that accept_stream unblocks when connection closes (fixes #930).
+
+    This test verifies that accept_stream() raises MuxedConnUnavailable when
+    the connection is closed, preventing indefinite hangs. This matches the
+    behavior of Mplex and QUIC implementations.
+    """
+    logging.debug("Starting test_yamux_accept_stream_unblocks_on_close")
+    client_yamux, server_yamux = yamux_pair
+
+    exception_raised = trio.Event()
+
+    async def close_connection():
+        await trio.sleep(0.1)  # Give accept_stream time to start waiting
+        logging.debug("Test: Closing server connection")
+        await server_yamux.close()
+
+    async def accept_should_unblock():
+        with pytest.raises(MuxedConnUnavailable, match="Connection closed"):
+            logging.debug("Test: Waiting for accept_stream to unblock")
+            await server_yamux.accept_stream()
+        # If we reach here, the exception was raised (pytest.raises caught it)
+        logging.debug("Test: accept_stream correctly raised MuxedConnUnavailable")
+        exception_raised.set()
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(accept_should_unblock)
+        nursery.start_soon(close_connection)
+
+    # Assert that the exception was raised (test didn't hang)
+    assert exception_raised.is_set(), (
+        "accept_stream() should have raised MuxedConnUnavailable"
+    )
+    logging.debug("test_yamux_accept_stream_unblocks_on_close complete")
+
+
+@pytest.mark.trio
+@pytest.mark.skipif(
+    platform.system() == "Windows",
+    reason=(
+        "Directly closing secured_conn during active read causes worker crash "
+        "on Windows due to platform I/O semantics. The main functionality is "
+        "tested by test_yamux_accept_stream_unblocks_on_close which works on "
+        "all platforms. See 1014-WINDOWS-TEST-FAILURE-ANALYSIS.md for details."
+    ),
+)
+async def test_yamux_accept_stream_unblocks_on_error(yamux_pair):
+    """
+    Test that accept_stream unblocks when connection closes due to error.
+
+    This verifies the fix works for error scenarios, not just clean closes.
+    We close the underlying raw connection to simulate a network error.
+
+    Note: Skipped on Windows because directly closing connections during active
+    read causes a fatal worker crash. The core functionality is fully tested by
+    test_yamux_accept_stream_unblocks_on_close which works on all platforms.
+    """
+    logging.debug("Starting test_yamux_accept_stream_unblocks_on_error")
+    client_yamux, server_yamux = yamux_pair
+
+    exception_raised = trio.Event()
+
+    async def trigger_error():
+        await trio.sleep(0.1)  # Give accept_stream time to start waiting
+        logging.debug("Test: Closing underlying raw connection to trigger error")
+        # Close the underlying raw connection to simulate a network error
+        # This is more reliable than closing secured_conn directly
+        raw_conn = server_yamux.secured_conn.conn
+        await raw_conn.close()
+
+    async def accept_should_unblock():
+        with pytest.raises(MuxedConnUnavailable, match="Connection closed"):
+            logging.debug("Test: Waiting for accept_stream to unblock")
+            await server_yamux.accept_stream()
+        # If we reach here, the exception was raised (pytest.raises caught it)
+        logging.debug("Test: accept_stream correctly raised MuxedConnUnavailable")
+        exception_raised.set()
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(accept_should_unblock)
+        nursery.start_soon(trigger_error)
+
+    # Assert that the exception was raised (test didn't hang)
+    assert exception_raised.is_set(), (
+        "accept_stream() should have raised MuxedConnUnavailable"
+    )
+    logging.debug("test_yamux_accept_stream_unblocks_on_error complete")
+
+
+@pytest.mark.trio
+async def test_yamux_syn_with_data(yamux_pair):
+    """Test that data sent with SYN frame is properly received and buffered."""
+    logging.debug("Starting test_yamux_syn_with_data")
+    client_yamux, server_yamux = yamux_pair
+
+    # Manually construct a SYN frame with accompanying data
+    test_data = b"data with SYN frame"
+    stream_id = 1  # Client stream ID (odd number)
+
+    # Create SYN header with data length
+    syn_header = struct.pack(
+        YAMUX_HEADER_FORMAT,
+        0,  # version
+        TYPE_DATA,  # type
+        FLAG_SYN,  # flags
+        stream_id,
+        len(test_data),  # length of accompanying data
+    )
+
+    # Send SYN with data directly
+    await client_yamux.secured_conn.write(syn_header + test_data)
+    logging.debug(f"Sent SYN with {len(test_data)} bytes of data")
+
+    # Server should accept the stream and have data already buffered
+    server_stream = await server_yamux.accept_stream()
+    assert server_stream.stream_id == stream_id
+
+    # Verify the data was buffered and is immediately available
+    received = await server_stream.read(len(test_data))
+    assert received == test_data, "Data sent with SYN should be immediately available"
+    logging.debug("test_yamux_syn_with_data complete")
+
+
+@pytest.mark.trio
+async def test_yamux_ack_with_data(yamux_pair):
+    """Test that data sent with ACK frame is properly received and buffered."""
+    logging.debug("Starting test_yamux_ack_with_data")
+    client_yamux, server_yamux = yamux_pair
+
+    # Client opens a stream (sends SYN)
+    client_stream = await client_yamux.open_stream()
+    stream_id = client_stream.stream_id
+
+    # Wait for server to receive SYN and respond with ACK
+    await trio.sleep(0.1)
+
+    # Now manually send data with an ACK flag from server to client
+    test_data = b"data with ACK frame"
+    ack_header = struct.pack(
+        YAMUX_HEADER_FORMAT,
+        0,  # version
+        TYPE_DATA,  # type
+        FLAG_ACK,  # flags (ACK flag set)
+        stream_id,
+        len(test_data),  # length of accompanying data
+    )
+
+    # Send ACK with data from server to client
+    await server_yamux.secured_conn.write(ack_header + test_data)
+    logging.debug(f"Sent ACK with {len(test_data)} bytes of data")
+
+    # Wait for the data to be processed
+    await trio.sleep(0.1)
+
+    # Verify the data was buffered on the client side
+    # Since the stream is already open, the data should be in the buffer
+    async with client_yamux.streams_lock:
+        assert stream_id in client_yamux.stream_buffers
+        assert len(client_yamux.stream_buffers[stream_id]) >= len(test_data)
+        buffered_data = bytes(client_yamux.stream_buffers[stream_id][: len(test_data)])
+        # Remove the data we just checked
+        client_yamux.stream_buffers[stream_id] = client_yamux.stream_buffers[stream_id][
+            len(test_data) :
+        ]
+
+    assert buffered_data == test_data, "Data sent with ACK should be buffered"
+    logging.debug("test_yamux_ack_with_data complete")
+
+
+@pytest.mark.trio
+async def test_yamux_syn_with_empty_data(yamux_pair):
+    """Test that SYN frame with zero-length data is handled correctly."""
+    logging.debug("Starting test_yamux_syn_with_empty_data")
+    client_yamux, server_yamux = yamux_pair
+
+    # Manually construct a SYN frame with no data (length = 0)
+    stream_id = 3  # Client stream ID (odd number)
+
+    syn_header = struct.pack(
+        YAMUX_HEADER_FORMAT,
+        0,  # version
+        TYPE_DATA,  # type
+        FLAG_SYN,  # flags
+        stream_id,
+        0,  # length = 0, no accompanying data
+    )
+
+    # Send SYN with no data
+    await client_yamux.secured_conn.write(syn_header)
+    logging.debug("Sent SYN with no data")
+
+    # Server should accept the stream
+    server_stream = await server_yamux.accept_stream()
+    assert server_stream.stream_id == stream_id
+
+    # Verify no data is in the buffer
+    async with server_yamux.streams_lock:
+        assert len(server_yamux.stream_buffers[stream_id]) == 0
+
+    logging.debug("test_yamux_syn_with_empty_data complete")
+
+
+@pytest.mark.trio
+async def test_yamux_syn_with_large_data(yamux_pair):
+    """Test that large data sent with SYN frame is properly handled."""
+    logging.debug("Starting test_yamux_syn_with_large_data")
+    client_yamux, server_yamux = yamux_pair
+
+    # Create large test data (but within window size)
+    test_data = b"X" * 1024  # 1KB of data
+    stream_id = 5  # Client stream ID (odd number)
+
+    syn_header = struct.pack(
+        YAMUX_HEADER_FORMAT,
+        0,  # version
+        TYPE_DATA,  # type
+        FLAG_SYN,  # flags
+        stream_id,
+        len(test_data),
+    )
+
+    # Send SYN with large data
+    await client_yamux.secured_conn.write(syn_header + test_data)
+    logging.debug(f"Sent SYN with {len(test_data)} bytes of large data")
+
+    # Server should accept the stream and have all data buffered
+    server_stream = await server_yamux.accept_stream()
+    assert server_stream.stream_id == stream_id
+
+    # Verify all data was buffered correctly
+    received = await server_stream.read(len(test_data))
+    assert received == test_data
+    assert len(received) == 1024
+    logging.debug("test_yamux_syn_with_large_data complete")
+
+
+@pytest.mark.trio
+async def test_incomplete_read_error_clean_close_detection():
+    """
+    Test that IncompleteReadError correctly identifies clean connection closures.
+
+    This verifies the fix for issue #1084 where yamux listener incorrectly
+    logged clean peer disconnections as errors. Clean closures (0 bytes received)
+    should be detected via the is_clean_close property.
+    """
+    from libp2p.io.exceptions import IncompleteReadError
+
+    # Test clean closure (0 bytes received)
+    clean_error = IncompleteReadError(
+        "Connection closed during read operation: expected 2 bytes but "
+        "received 0 bytes",
+        expected_bytes=2,
+        received_bytes=0,
+    )
+    assert clean_error.is_clean_close, "Should detect clean closure (0 bytes)"
+    assert clean_error.expected_bytes == 2
+    assert clean_error.received_bytes == 0
+
+    # Test partial read (not clean closure)
+    partial_error = IncompleteReadError(
+        "Connection closed during read operation: expected 12 bytes but "
+        "received 5 bytes",
+        expected_bytes=12,
+        received_bytes=5,
+    )
+    assert not partial_error.is_clean_close, "Partial read should not be clean closure"
+    assert partial_error.expected_bytes == 12
+    assert partial_error.received_bytes == 5
+
+    # Test default values (backward compatibility)
+    legacy_error = IncompleteReadError("Some error message")
+    assert legacy_error.is_clean_close, "Default 0 bytes should be clean closure"
+    assert legacy_error.expected_bytes == 0
+    assert legacy_error.received_bytes == 0
+
+    logging.debug("test_incomplete_read_error_clean_close_detection complete")
+
+
+@pytest.mark.trio
+async def test_yamux_syn_with_window_update(yamux_pair):
+    """
+    Test that WINDOW_UPDATE|SYN frame is properly handled without reading payload.
+    This regression test ensures that WINDOW_UPDATE|SYN frames are NOT treated
+    as carrying payload bytes, fixing interop issues.
+    """
+    logging.debug("Starting test_yamux_syn_with_window_update")
+    client_yamux, server_yamux = yamux_pair
+
+    # Manually construct a WINDOW_UPDATE|SYN frame
+    window_increment = 1024
+    stream_id = 11  # Client stream ID (odd number)
+
+    # Create WINDOW_UPDATE header with SYN flag
+    # length is window increment, NOT payload length
+    header = struct.pack(
+        YAMUX_HEADER_FORMAT,
+        0,  # version
+        TYPE_WINDOW_UPDATE,
+        FLAG_SYN,
+        stream_id,
+        window_increment,
+    )
+
+    # Send header directly
+    await client_yamux.secured_conn.write(header)
+    logging.debug(f"Sent WINDOW_UPDATE|SYN with increment {window_increment}")
+
+    # Server should accept the stream and NOT hang trying to read payload
+    with trio.move_on_after(2) as cancel_scope:
+        server_stream = await server_yamux.accept_stream()
+
+    assert not cancel_scope.cancelled_caught, (
+        "Server should have accepted the stream without hanging"
+    )
+    assert server_stream.stream_id == stream_id
+
+    # Check if window increment was applied
+    # Initial window is 256KB by default
+    assert server_stream.send_window == 256 * 1024 + window_increment
+
+    logging.debug("test_yamux_syn_with_window_update complete")
+
+
+@pytest.mark.trio
+async def test_yamux_syn_with_fin(yamux_pair):
+    """
+    Test that DATA|SYN|FIN frame is properly handled (opens and half-closes).
+    """
+    logging.debug("Starting test_yamux_syn_with_fin")
+    client_yamux, server_yamux = yamux_pair
+
+    stream_id = 13
+    header = struct.pack(
+        YAMUX_HEADER_FORMAT,
+        0,
+        TYPE_DATA,
+        FLAG_SYN | FLAG_FIN,
+        stream_id,
+        0,
+    )
+
+    await client_yamux.secured_conn.write(header)
+
+    server_stream = await server_yamux.accept_stream()
+    assert server_stream.stream_id == stream_id
+
+    # Should be recv_closed because of FIN
+    assert server_stream.recv_closed
+
+    # Should be able to read 0 bytes (EOF)
+    with pytest.raises(MuxedStreamEOF):
+        await server_stream.read(1)
+
+    logging.debug("test_yamux_syn_with_fin complete")
+
+
+@pytest.mark.trio
+async def test_yamux_syn_with_rst(yamux_pair):
+    """
+    Test that DATA|SYN|RST frame is properly handled (opens and resets).
+    """
+    logging.debug("Starting test_yamux_syn_with_rst")
+    client_yamux, server_yamux = yamux_pair
+
+    stream_id = 15
+    header = struct.pack(
+        YAMUX_HEADER_FORMAT,
+        0,
+        TYPE_DATA,
+        FLAG_SYN | FLAG_RST,
+        stream_id,
+        0,
+    )
+
+    await client_yamux.secured_conn.write(header)
+
+    server_stream = await server_yamux.accept_stream()
+    assert server_stream.stream_id == stream_id
+
+    # Should be closed and reset_received set
+    assert server_stream.closed
+    assert server_stream.reset_received
+
+    logging.debug("test_yamux_syn_with_rst complete")
+
+
+@pytest.mark.trio
+async def test_yamux_syn_with_window_update_and_fin(yamux_pair):
+    """WINDOW_UPDATE|SYN|FIN opens a stream and half-closes it."""
+    logging.debug("Starting test_yamux_syn_with_window_update_and_fin")
+    client_yamux, server_yamux = yamux_pair
+
+    stream_id = 17
+    header = struct.pack(
+        YAMUX_HEADER_FORMAT,
+        0,
+        TYPE_WINDOW_UPDATE,
+        FLAG_SYN | FLAG_FIN,
+        stream_id,
+        0,
+    )
+
+    await client_yamux.secured_conn.write(header)
+
+    server_stream = await server_yamux.accept_stream()
+    assert server_stream.stream_id == stream_id
+    assert server_stream.recv_closed
+
+    with pytest.raises(MuxedStreamEOF):
+        await server_stream.read(1)
+
+    logging.debug("test_yamux_syn_with_window_update_and_fin complete")
+
+
+@pytest.mark.trio
+async def test_yamux_syn_with_window_update_and_rst(yamux_pair):
+    """WINDOW_UPDATE|SYN|RST opens a stream and resets it."""
+    logging.debug("Starting test_yamux_syn_with_window_update_and_rst")
+    client_yamux, server_yamux = yamux_pair
+
+    stream_id = 19
+    header = struct.pack(
+        YAMUX_HEADER_FORMAT,
+        0,
+        TYPE_WINDOW_UPDATE,
+        FLAG_SYN | FLAG_RST,
+        stream_id,
+        0,
+    )
+
+    await client_yamux.secured_conn.write(header)
+
+    server_stream = await server_yamux.accept_stream()
+    assert server_stream.stream_id == stream_id
+    assert server_stream.closed
+    assert server_stream.reset_received
+
+    logging.debug("test_yamux_syn_with_window_update_and_rst complete")
+
+
+@pytest.mark.trio
+async def test_yamux_window_update_ack_increments_send_window(yamux_pair):
+    """WINDOW_UPDATE|ACK applies length as send_window delta (#1271)."""
+    logging.debug("Starting test_yamux_window_update_ack_increments_send_window")
+    client_yamux, server_yamux = yamux_pair
+
+    client_stream = await client_yamux.open_stream()
+    await server_yamux.accept_stream()
+
+    ack_delta = 4096
+    ack_header = struct.pack(
+        YAMUX_HEADER_FORMAT,
+        0,
+        TYPE_WINDOW_UPDATE,
+        FLAG_ACK,
+        client_stream.stream_id,
+        ack_delta,
+    )
+    await server_yamux.secured_conn.write(ack_header)
+    await trio.sleep(0.1)
+
+    assert client_stream.send_window == DEFAULT_WINDOW_SIZE + ack_delta
+    logging.debug("test_yamux_window_update_ack_increments_send_window complete")
+
+
+@pytest.mark.trio
+async def test_yamux_write_respects_max_message_size(yamux_pair):
+    """Large writes are split into frames capped at MAX_MESSAGE_SIZE (#1269)."""
+    logging.debug("Starting test_yamux_write_respects_max_message_size")
+    client_yamux, server_yamux = yamux_pair
+
+    client_stream = await client_yamux.open_stream()
+    server_stream = await server_yamux.accept_stream()
+
+    payload = b"Z" * (100 * 1024)
+    max_payload = MAX_MESSAGE_SIZE - HEADER_SIZE
+    captured_frames: list[bytes] = []
+    original_write_frame = client_yamux._write_frame
+
+    async def capture_write_frame(data: bytes) -> None:
+        captured_frames.append(data)
+        await original_write_frame(data)
+
+    client_yamux._write_frame = capture_write_frame
+    try:
+        await client_stream.write(payload)
+    finally:
+        client_yamux._write_frame = original_write_frame
+
+    data_frames = [
+        frame
+        for frame in captured_frames
+        if len(frame) >= HEADER_SIZE
+        and struct.unpack(YAMUX_HEADER_FORMAT, frame[:HEADER_SIZE])[1] == TYPE_DATA
+    ]
+    assert len(data_frames) >= 2
+    for frame in data_frames:
+        assert len(frame) - HEADER_SIZE <= max_payload
+
+    received = b""
+    while len(received) < len(payload):
+        chunk = await server_stream.read(len(payload) - len(received))
+        received += chunk
+    assert received == payload
+    logging.debug("test_yamux_write_respects_max_message_size complete")
+
+
+@pytest.mark.trio
+async def test_yamux_auto_tune_increases_target_recv_window(yamux_pair):
+    """Auto-tune doubles target_recv_window within RTT epoch (#1270)."""
+    logging.debug("Starting test_yamux_auto_tune_increases_target_recv_window")
+    client_yamux, server_yamux = yamux_pair
+
+    client_stream = await client_yamux.open_stream()
+    server_stream = await server_yamux.accept_stream()
+
+    server_stream.recv_window = 0
+    server_stream.target_recv_window = DEFAULT_WINDOW_SIZE
+    server_stream.epoch_start = trio.current_time() - 0.01
+    server_yamux._rtt = 0.05
+
+    captured_frames: list[bytes] = []
+    original_write_frame = server_yamux._write_frame
+
+    async def capture_write_frame(data: bytes) -> None:
+        captured_frames.append(data)
+        await original_write_frame(data)
+
+    server_yamux._write_frame = capture_write_frame
+    try:
+        await server_stream._auto_tune_and_send_window_update()
+    finally:
+        server_yamux._write_frame = original_write_frame
+
+    assert server_stream.target_recv_window == DEFAULT_WINDOW_SIZE * 2
+    assert server_stream.target_recv_window <= MAX_WINDOW_SIZE
+    assert server_stream.recv_window > 0
+    assert any(
+        len(frame) >= HEADER_SIZE
+        and struct.unpack(YAMUX_HEADER_FORMAT, frame[:HEADER_SIZE])[1]
+        == TYPE_WINDOW_UPDATE
+        for frame in captured_frames
+    )
+    await client_stream.close()
+    await server_stream.close()
+    logging.debug("test_yamux_auto_tune_increases_target_recv_window complete")
+
+
+@pytest.mark.trio
+async def test_yamux_open_stream_sends_window_update_syn(yamux_pair):
+    """Outbound stream open sends TYPE_WINDOW_UPDATE|SYN (#1271)."""
+    logging.debug("Starting test_yamux_open_stream_sends_window_update_syn")
+    client_yamux, _server_yamux = yamux_pair
+
+    captured_frames: list[bytes] = []
+    original_write_frame = client_yamux._write_frame
+
+    async def capture_write_frame(data: bytes) -> None:
+        captured_frames.append(data)
+        await original_write_frame(data)
+
+    client_yamux._write_frame = capture_write_frame
+    try:
+        stream = await client_yamux.open_stream()
+    finally:
+        client_yamux._write_frame = original_write_frame
+
+    syn_frames = [
+        frame
+        for frame in captured_frames
+        if len(frame) >= HEADER_SIZE
+        and struct.unpack(YAMUX_HEADER_FORMAT, frame[:HEADER_SIZE])[1]
+        == TYPE_WINDOW_UPDATE
+        and struct.unpack(YAMUX_HEADER_FORMAT, frame[:HEADER_SIZE])[2] & FLAG_SYN
+    ]
+    assert len(syn_frames) >= 1
+    _, typ, flags, sid, length = struct.unpack(
+        YAMUX_HEADER_FORMAT, syn_frames[0][:HEADER_SIZE]
+    )
+    assert typ == TYPE_WINDOW_UPDATE
+    assert flags & FLAG_SYN
+    assert length == 0
+    assert sid == stream.stream_id
+    await stream.close()
+    logging.debug("test_yamux_open_stream_sends_window_update_syn complete")
+
+
+@pytest.mark.trio
+async def test_yamux_inbound_syn_replies_with_window_update_ack(yamux_pair):
+    """Inbound SYN is accepted with TYPE_WINDOW_UPDATE|ACK (#1271)."""
+    logging.debug("Starting test_yamux_inbound_syn_replies_with_window_update_ack")
+    client_yamux, server_yamux = yamux_pair
+
+    stream_id = 21
+    captured_frames: list[bytes] = []
+    original_write_frame = server_yamux._write_frame
+
+    async def capture_write_frame(data: bytes) -> None:
+        captured_frames.append(data)
+        await original_write_frame(data)
+
+    server_yamux._write_frame = capture_write_frame
+    try:
+        syn_header = struct.pack(
+            YAMUX_HEADER_FORMAT,
+            0,
+            TYPE_WINDOW_UPDATE,
+            FLAG_SYN,
+            stream_id,
+            0,
+        )
+        await client_yamux.secured_conn.write(syn_header)
+        server_stream = await server_yamux.accept_stream()
+    finally:
+        server_yamux._write_frame = original_write_frame
+
+    ack_frames = [
+        frame
+        for frame in captured_frames
+        if len(frame) == HEADER_SIZE
+        and struct.unpack(YAMUX_HEADER_FORMAT, frame)[1] == TYPE_WINDOW_UPDATE
+        and struct.unpack(YAMUX_HEADER_FORMAT, frame)[2] & FLAG_ACK
+    ]
+    assert len(ack_frames) >= 1
+    assert server_stream.stream_id == stream_id
+    logging.debug("test_yamux_inbound_syn_replies_with_window_update_ack complete")
+
+
+@pytest.mark.trio
+async def test_yamux_ping_uses_write_frame(yamux_pair):
+    """RTT PING frames are sent via _write_frame, not direct secured_conn.write."""
+    logging.debug("Starting test_yamux_ping_uses_write_frame")
+    client_yamux, _server_yamux = yamux_pair
+
+    captured_frames: list[bytes] = []
+    original_write_frame = client_yamux._write_frame
+    direct_ping_writes: list[bytes] = []
+    original_secured_write = client_yamux.secured_conn.write
+    write_frame_depth = [0]
+
+    async def capture_write_frame(data: bytes) -> None:
+        captured_frames.append(data)
+        write_frame_depth[0] += 1
+        try:
+            await original_write_frame(data)
+        finally:
+            write_frame_depth[0] -= 1
+
+    async def track_secured_write(data: bytes) -> None:
+        if (
+            write_frame_depth[0] == 0
+            and len(data) >= HEADER_SIZE
+            and struct.unpack(YAMUX_HEADER_FORMAT, data[:HEADER_SIZE])[1] == TYPE_PING
+        ):
+            direct_ping_writes.append(data)
+        await original_secured_write(data)
+
+    client_yamux._write_frame = capture_write_frame
+    client_yamux.secured_conn.write = track_secured_write
+    try:
+        await trio.sleep(0.6)
+    finally:
+        client_yamux._write_frame = original_write_frame
+        client_yamux.secured_conn.write = original_secured_write
+
+    ping_frames = [
+        frame
+        for frame in captured_frames
+        if len(frame) >= HEADER_SIZE
+        and struct.unpack(YAMUX_HEADER_FORMAT, frame[:HEADER_SIZE])[1] == TYPE_PING
+        and struct.unpack(YAMUX_HEADER_FORMAT, frame[:HEADER_SIZE])[2] & FLAG_SYN
+    ]
+    assert len(ping_frames) >= 1
+    assert not direct_ping_writes
+    logging.debug("test_yamux_ping_uses_write_frame complete")
+
+
+@pytest.mark.trio
+async def test_yamux_oversized_data_frame_closes_connection(yamux_pair):
+    """An oversized DATA frame must tear the connection down, not hang it."""
+    client_yamux, server_yamux = yamux_pair
+
+    # The connection is healthy first (mirrors the PoC's pre-attack ping).
+    client_stream = await client_yamux.open_stream()
+    server_stream = await server_yamux.accept_stream()
+    await client_stream.write(b"healthy")
+    assert await server_stream.read(7) == b"healthy"
+
+    # 12-byte DATA frame claiming a 4 GB body; no body bytes follow it.
+    assert 0xFFFFFFFF > MAX_WINDOW_SIZE
+    frame = struct.pack(YAMUX_HEADER_FORMAT, 0, TYPE_DATA, 0, 1, 0xFFFFFFFF)
+    await server_yamux.secured_conn.write(frame)
+
+    # The receiver must shut down rather than block. Bound the wait so a
+    # regression (infinite stall) fails here instead of hanging the suite.
+    with trio.move_on_after(5) as scope:
+        await client_yamux.event_shutting_down.wait()
+    assert not scope.cancelled_caught, "receiver hung on oversized DATA frame"
+    assert client_yamux.event_shutting_down.is_set()
+
+
+@pytest.mark.trio
+async def test_yamux_withheld_data_body_times_out(yamux_pair, monkeypatch):
+    """A DATA body that is announced but never delivered must time out."""
+    monkeypatch.setenv("PY_YAMUX_DATA_READ_TIMEOUT", "0.5")
+    client_yamux, server_yamux = yamux_pair
+
+    # Legal-sized DATA frame (well under MAX_WINDOW_SIZE), but no body is sent.
+    frame = struct.pack(YAMUX_HEADER_FORMAT, 0, TYPE_DATA, 0, 1, 1024)
+    await server_yamux.secured_conn.write(frame)
+
+    with trio.move_on_after(5) as scope:
+        await client_yamux.event_shutting_down.wait()
+    assert not scope.cancelled_caught, "receiver hung on withheld DATA body"
+    assert client_yamux.event_shutting_down.is_set()

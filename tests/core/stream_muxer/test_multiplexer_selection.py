@@ -15,8 +15,7 @@ from libp2p import (
 from libp2p.custom_types import TProtocol
 from libp2p.peer.peerinfo import PeerInfo
 
-# Enable logging for debugging
-logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 
 # Fixture to create hosts with a specified muxer preference
@@ -74,7 +73,8 @@ async def test_multiplexer_preference_parameter(muxer_preference):
             assert len(connections) > 0, "Connection not established"
 
             # Get the first connection
-            conn = list(connections.values())[0]
+            conns = list(connections.values())[0]
+            conn = conns[0]  # Get first connection from the list
             muxed_conn = conn.muxed_conn
 
             # Define a simple echo protocol
@@ -87,7 +87,7 @@ async def test_multiplexer_preference_parameter(muxer_preference):
                     await stream.write(data)
                     await stream.close()
                 except Exception as e:
-                    print(f"Error in echo handler: {e}")
+                    logger.error("Error in echo handler: %s", e)
 
             host_a.set_stream_handler(ECHO_PROTOCOL, echo_handler)
 
@@ -150,7 +150,8 @@ async def test_explicit_muxer_options(muxer_option_func, expected_stream_class):
             assert len(connections) > 0, "Connection not established"
 
             # Get the first connection
-            conn = list(connections.values())[0]
+            conns = list(connections.values())[0]
+            conn = conns[0]  # Get first connection from the list
             muxed_conn = conn.muxed_conn
 
             # Define a simple echo protocol
@@ -163,7 +164,7 @@ async def test_explicit_muxer_options(muxer_option_func, expected_stream_class):
                     await stream.write(data)
                     await stream.close()
                 except Exception as e:
-                    print(f"Error in echo handler: {e}")
+                    logger.error("Error in echo handler: %s", e)
 
             host_a.set_stream_handler(ECHO_PROTOCOL, echo_handler)
 
@@ -219,7 +220,8 @@ async def test_global_default_muxer(global_default):
             assert len(connections) > 0, "Connection not established"
 
             # Get the first connection
-            conn = list(connections.values())[0]
+            conns = list(connections.values())[0]
+            conn = conns[0]  # Get first connection from the list
             muxed_conn = conn.muxed_conn
 
             # Define a simple echo protocol
@@ -232,7 +234,7 @@ async def test_global_default_muxer(global_default):
                     await stream.write(data)
                     await stream.close()
                 except Exception as e:
-                    print(f"Error in echo handler: {e}")
+                    logger.error("Error in echo handler: %s", e)
 
             host_a.set_stream_handler(ECHO_PROTOCOL, echo_handler)
 

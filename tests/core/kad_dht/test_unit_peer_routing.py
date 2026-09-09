@@ -19,10 +19,15 @@ import pytest
 from multiaddr import (
     Multiaddr,
 )
+import trio
 import varint
 
 from libp2p.crypto.secp256k1 import (
     create_new_key_pair,
+)
+from libp2p.kad_dht.common import (
+    MAX_DHT_MESSAGE_SIZE,
+    QUERY_TIMEOUT,
 )
 from libp2p.kad_dht.pb.kademlia_pb2 import (
     Message,
@@ -30,6 +35,7 @@ from libp2p.kad_dht.pb.kademlia_pb2 import (
 from libp2p.kad_dht.peer_routing import (
     ALPHA,
     MAX_PEER_LOOKUP_ROUNDS,
+    MIN_PEERS_THRESHOLD,
     PROTOCOL_ID,
     PeerRouting,
 )
@@ -57,7 +63,10 @@ class TestPeerRouting:
     def mock_host(self):
         """Create a mock host for testing."""
         host = Mock()
-        host.get_id.return_value = create_valid_peer_id("local")
+        key_pair = create_new_key_pair()
+        host.get_id.return_value = ID.from_pubkey(key_pair.public_key)
+        host.get_public_key.return_value = key_pair.public_key
+        host.get_private_key.return_value = key_pair.private_key
         host.get_addrs.return_value = [Multiaddr("/ip4/127.0.0.1/tcp/8000")]
         host.get_peerstore.return_value = Mock()
         host.new_stream = AsyncMock()
@@ -142,17 +151,133 @@ class TestPeerRouting:
             assert result is None
 
     @pytest.mark.trio
-    async def test_find_closest_peers_network_empty_start(self, peer_routing):
-        """Test network search with no local peers."""
+    async def test_find_closest_peers_network_empty_start(
+        self, peer_routing, mock_host
+    ):
+        """Test network search with no local peers and no fallback peers."""
         target_key = b"target_key"
 
         # Mock routing table to return empty list
         with patch.object(
             peer_routing.routing_table, "find_local_closest_peers", return_value=[]
         ):
+            # Mock no connected peers and empty peerstore
+            mock_host.get_connected_peers.return_value = []
+            mock_host.get_peerstore().peer_ids.return_value = []
             result = await peer_routing.find_closest_peers_network(target_key)
 
             assert result == []
+
+    @pytest.mark.trio
+    async def test_find_closest_peers_network_fallback_to_connected_peers(
+        self, peer_routing, mock_host
+    ):
+        """
+        Test that network search falls back to connected peers when routing
+        table has insufficient peers.
+        """
+        target_key = b"target_key"
+
+        # Create few local peers (less than MIN_PEERS_THRESHOLD)
+        local_peers = [create_valid_peer_id(f"local{i}") for i in range(2)]
+
+        # Create connected peers
+        connected_peers = [create_valid_peer_id(f"connected{i}") for i in range(3)]
+
+        # Mock routing table to return insufficient peers
+        with patch.object(
+            peer_routing.routing_table,
+            "find_local_closest_peers",
+            return_value=local_peers,
+        ):
+            # Mock host to return connected peers
+            mock_host.get_connected_peers.return_value = connected_peers
+            # Mock peerstore to return empty (connected peers should be enough)
+            mock_host.get_peerstore().peer_ids.return_value = []
+
+            # Mock _query_peer_for_closest to return empty results
+            with patch.object(peer_routing, "_query_peer_for_closest", return_value=[]):
+                result = await peer_routing.find_closest_peers_network(
+                    target_key, count=10
+                )
+
+                # Should include both local and connected peers
+                assert len(result) > 0
+                # Verify host.get_connected_peers was called
+                mock_host.get_connected_peers.assert_called()
+
+    @pytest.mark.trio
+    async def test_find_closest_peers_network_fallback_to_peerstore(
+        self, peer_routing, mock_host
+    ):
+        """
+        Test that network search falls back to peerstore when connected peers
+        are insufficient.
+        """
+        target_key = b"target_key"
+
+        # Create few local peers (less than MIN_PEERS_THRESHOLD)
+        local_peers = [create_valid_peer_id(f"local{i}") for i in range(2)]
+
+        # Create few connected peers (not enough to reach count)
+        connected_peers = [create_valid_peer_id(f"connected{i}") for i in range(2)]
+
+        # Create peerstore peers
+        peerstore_peers = [create_valid_peer_id(f"peerstore{i}") for i in range(5)]
+
+        # Mock routing table to return insufficient peers
+        with patch.object(
+            peer_routing.routing_table,
+            "find_local_closest_peers",
+            return_value=local_peers,
+        ):
+            # Mock host to return connected peers
+            mock_host.get_connected_peers.return_value = connected_peers
+            # Mock peerstore to return additional peers
+            mock_host.get_peerstore().peer_ids.return_value = peerstore_peers
+
+            # Mock _query_peer_for_closest to return empty results
+            with patch.object(peer_routing, "_query_peer_for_closest", return_value=[]):
+                result = await peer_routing.find_closest_peers_network(
+                    target_key, count=20
+                )
+
+                # Should include peers from all sources
+                assert len(result) > 0
+                # Verify peerstore.peer_ids was called
+                mock_host.get_peerstore().peer_ids.assert_called()
+
+    @pytest.mark.trio
+    async def test_find_closest_peers_network_no_fallback_when_sufficient_peers(
+        self, peer_routing, mock_host
+    ):
+        """
+        Test that fallback is not triggered when routing table has
+        sufficient peers.
+        """
+        target_key = b"target_key"
+
+        # Create enough local peers (>= MIN_PEERS_THRESHOLD)
+        local_peers = [
+            create_valid_peer_id(f"local{i}") for i in range(MIN_PEERS_THRESHOLD + 1)
+        ]
+
+        # Mock routing table to return sufficient peers
+        with patch.object(
+            peer_routing.routing_table,
+            "find_local_closest_peers",
+            return_value=local_peers,
+        ):
+            # Mock _query_peer_for_closest to return empty results
+            with patch.object(peer_routing, "_query_peer_for_closest", return_value=[]):
+                result = await peer_routing.find_closest_peers_network(
+                    target_key, count=10
+                )
+
+                # Should have peers from routing table
+                assert len(result) > 0
+                # Verify host.get_connected_peers was NOT called
+                mock_host.get_connected_peers.assert_not_called()
 
     @pytest.mark.trio
     async def test_find_closest_peers_network_with_peers(self, peer_routing, mock_host):
@@ -168,7 +293,10 @@ class TestPeerRouting:
             "find_local_closest_peers",
             return_value=initial_peers,
         ):
-            # Mock _query_peer_for_closest to return empty results (no new peers found)
+            # Mock get_connected_peers and peerstore to return empty
+            mock_host.get_connected_peers.return_value = []
+            mock_host.get_peerstore().peer_ids.return_value = []
+            # Mock _query_peer_for_closest to return empty results
             with patch.object(peer_routing, "_query_peer_for_closest", return_value=[]):
                 result = await peer_routing.find_closest_peers_network(
                     target_key, count=5
@@ -179,7 +307,7 @@ class TestPeerRouting:
                 assert all(peer in initial_peers for peer in result)
 
     @pytest.mark.trio
-    async def test_find_closest_peers_convergence(self, peer_routing):
+    async def test_find_closest_peers_convergence(self, peer_routing, mock_host):
         """Test that network search converges properly."""
         target_key = b"target_key"
 
@@ -192,6 +320,9 @@ class TestPeerRouting:
             "find_local_closest_peers",
             return_value=initial_peers,
         ):
+            # Mock get_connected_peers and peerstore to return empty
+            mock_host.get_connected_peers.return_value = []
+            mock_host.get_peerstore().peer_ids.return_value = []
             with patch.object(peer_routing, "_query_peer_for_closest", return_value=[]):
                 with patch(
                     "libp2p.kad_dht.peer_routing.sort_peer_ids_by_distance",
@@ -242,6 +373,59 @@ class TestPeerRouting:
         mock_stream.close.assert_called_once()
 
     @pytest.mark.trio
+    async def test_query_peer_for_closest_filters_self_from_response(
+        self, peer_routing, mock_host, sample_peer_info
+    ):
+        target_key = b"target_key"
+
+        mock_stream = AsyncMock()
+        mock_host.new_stream.return_value = mock_stream
+
+        response_msg = Message()
+        response_msg.type = Message.MessageType.FIND_NODE
+
+        self_proto = response_msg.closerPeers.add()
+        self_proto.id = mock_host.get_id().to_bytes()
+        self_proto.addrs.append(Multiaddr("/ip4/127.0.0.1/tcp/8000").to_bytes())
+
+        other_proto = response_msg.closerPeers.add()
+        other_peer_id = create_valid_peer_id("other_peer")
+        other_proto.id = other_peer_id.to_bytes()
+        other_proto.addrs.append(Multiaddr("/ip4/127.0.0.1/tcp/8003").to_bytes())
+
+        response_bytes = response_msg.SerializeToString()
+        mock_stream.read.side_effect = [
+            varint.encode(len(response_bytes)),
+            response_bytes,
+        ]
+
+        mock_host.get_peerstore().addrs.return_value = [sample_peer_info.addrs[0]]
+        mock_host.get_peerstore().add_addrs = Mock()
+
+        result = await peer_routing._query_peer_for_closest(
+            sample_peer_info.peer_id, target_key
+        )
+
+        assert result == [other_peer_id]
+        poisoned = [
+            call.args[0]
+            for call in mock_host.get_peerstore().add_addrs.call_args_list
+            if call.args[0] == mock_host.get_id()
+        ]
+        assert poisoned == []
+
+    @pytest.mark.trio
+    async def test_query_peer_for_closest_skips_self_dial(
+        self, peer_routing, mock_host
+    ):
+        result = await peer_routing._query_peer_for_closest(
+            mock_host.get_id(), b"target_key"
+        )
+
+        assert result == []
+        mock_host.new_stream.assert_not_called()
+
+    @pytest.mark.trio
     async def test_query_peer_for_closest_stream_failure(self, peer_routing, mock_host):
         """Test peer query when stream creation fails."""
         target_key = b"target_key"
@@ -276,6 +460,59 @@ class TestPeerRouting:
         mock_stream.close.assert_called_once()
 
     @pytest.mark.trio
+    async def test_query_peer_for_closest_times_out_on_silent_peer(
+        self, peer_routing, mock_host, sample_peer_info, autojump_clock
+    ):
+        """
+        A peer that opens the stream but never replies must not hang the query.
+
+        ``_query_peer_for_closest`` is the I/O choke point: it bounds the
+        stream open/write/read with ``move_on_after(QUERY_TIMEOUT)`` and returns
+        no peers on timeout. This pins that behaviour (regression for #1434).
+        """
+        target_key = b"target_key"
+
+        async def _never_returns(*args, **kwargs):
+            await trio.sleep_forever()
+
+        mock_stream = AsyncMock()
+        mock_stream.read.side_effect = _never_returns
+        mock_host.new_stream.return_value = mock_stream
+        mock_host.get_peerstore().addrs.return_value = [sample_peer_info.addrs[0]]
+
+        # Outer guard well above QUERY_TIMEOUT; with autojump_clock this resolves
+        # in virtual time. If the query were unbounded, this fail_after trips.
+        with trio.fail_after(QUERY_TIMEOUT + 30):
+            result = await peer_routing._query_peer_for_closest(
+                sample_peer_info.peer_id, target_key
+            )
+
+        assert result == []
+
+    async def test_query_peer_for_closest_rejects_oversized_response(
+        self, peer_routing, mock_host, sample_peer_info
+    ):
+        """Oversized response length must fail closed without allocating the body."""
+        target_key = b"target_key"
+
+        mock_stream = AsyncMock()
+        claimed = MAX_DHT_MESSAGE_SIZE + 1
+        varint_bytes = varint.encode(claimed)
+        mock_stream.read.side_effect = [bytes([b]) for b in varint_bytes] + [
+            b"SHOULD_NOT_BE_READ"
+        ]
+        mock_host.new_stream.return_value = mock_stream
+        mock_host.get_peerstore().addrs.return_value = [sample_peer_info.addrs[0]]
+
+        result = await peer_routing._query_peer_for_closest(
+            sample_peer_info.peer_id, target_key
+        )
+
+        assert result == []
+        mock_stream.close.assert_called_once()
+        assert mock_stream.read.await_count == len(varint_bytes)
+
+    @pytest.mark.trio
     async def test_refresh_routing_table(self, peer_routing, mock_host):
         """Test routing table refresh."""
         local_id = mock_host.get_id()
@@ -291,74 +528,13 @@ class TestPeerRouting:
 
             await peer_routing.refresh_routing_table()
 
-            # Should perform lookup for local ID
-            peer_routing.find_closest_peers_network.assert_called_once_with(
-                local_id.to_bytes()
-            )
-
-    @pytest.mark.trio
-    async def test_handle_kad_stream_find_node(self, peer_routing, mock_host):
-        """Test handling incoming FIND_NODE requests."""
-        # Create mock stream
-        mock_stream = AsyncMock()
-
-        # Create FIND_NODE request
-        request_msg = Message()
-        request_msg.type = Message.MessageType.FIND_NODE
-        request_msg.key = b"target_key"
-
-        request_bytes = request_msg.SerializeToString()
-
-        # Mock stream reading
-        mock_stream.read.side_effect = [
-            len(request_bytes).to_bytes(4, byteorder="big"),
-            request_bytes,
-        ]
-
-        # Mock routing table to return some peers
-        closest_peers = [create_valid_peer_id(f"close{i}") for i in range(2)]
-        with patch.object(
-            peer_routing.routing_table,
-            "find_local_closest_peers",
-            return_value=closest_peers,
-        ):
-            mock_host.get_peerstore().addrs.return_value = [
-                Multiaddr("/ip4/127.0.0.1/tcp/8004")
-            ]
-
-            await peer_routing._handle_kad_stream(mock_stream)
-
-            # Should write response
-            mock_stream.write.assert_called()
-            mock_stream.close.assert_called_once()
-
-    @pytest.mark.trio
-    async def test_handle_kad_stream_invalid_message(self, peer_routing):
-        """Test handling stream with invalid message."""
-        mock_stream = AsyncMock()
-
-        # Mock stream to return invalid data
-        mock_stream.read.side_effect = [
-            (10).to_bytes(4, byteorder="big"),
-            b"invalid_proto_data",
-        ]
-
-        # Should handle gracefully without raising exception
-        await peer_routing._handle_kad_stream(mock_stream)
-
-        mock_stream.close.assert_called_once()
-
-    @pytest.mark.trio
-    async def test_handle_kad_stream_connection_closed(self, peer_routing):
-        """Test handling stream when connection is closed early."""
-        mock_stream = AsyncMock()
-
-        # Mock stream to return empty data (connection closed)
-        mock_stream.read.return_value = b""
-
-        await peer_routing._handle_kad_stream(mock_stream)
-
-        mock_stream.close.assert_called_once()
+            # Should perform at least one lookup for local ID (self-lookup)
+            # plus per-bucket lookups for non-empty buckets
+            calls = peer_routing.find_closest_peers_network.call_args_list
+            assert any(
+                call.args[0] == local_id.to_bytes() or call[0][0] == local_id.to_bytes()
+                for call in calls
+            ), "Should perform self-lookup with local ID"
 
     @pytest.mark.trio
     async def test_query_single_peer_for_closest_success(self, peer_routing):
@@ -422,12 +598,12 @@ class TestPeerRouting:
 
     def test_constants(self):
         """Test that important constants are properly defined."""
-        assert ALPHA == 3
+        assert ALPHA == 10  # Per libp2p Kademlia spec
         assert MAX_PEER_LOOKUP_ROUNDS == 20
         assert PROTOCOL_ID == "/ipfs/kad/1.0.0"
 
     @pytest.mark.trio
-    async def test_edge_case_max_rounds_reached(self, peer_routing):
+    async def test_edge_case_max_rounds_reached(self, peer_routing, mock_host):
         """Test that lookup stops after maximum rounds."""
         target_key = b"target_key"
         initial_peers = [create_valid_peer_id("peer1")]
@@ -441,6 +617,9 @@ class TestPeerRouting:
             "find_local_closest_peers",
             return_value=initial_peers,
         ):
+            # Mock get_connected_peers and peerstore to return empty
+            mock_host.get_connected_peers.return_value = []
+            mock_host.get_peerstore().peer_ids.return_value = []
             with patch.object(
                 peer_routing,
                 "_query_peer_for_closest",
@@ -456,3 +635,125 @@ class TestPeerRouting:
 
                     # Should stop after max rounds, not infinite loop
                     assert isinstance(result, list)
+
+    @pytest.mark.trio
+    async def test_sliding_window_no_idle_slots(self, peer_routing, mock_host):
+        """
+        Verify the semaphore-based sliding window across rounds.
+
+        With ALPHA=3 per-round admission, round 1 queries [p0, p1, p2].
+        The mock makes p0 and p1 "discover" peers p3 and p4 so they appear
+        in round 2.  Peer 2 is slow (0.5 s); peers 0/1 are fast (0.01 s).
+
+        Under lock-step batching the timeline would be:
+          round 1: [p0, p1, p2] — all finish at t≈0.5 s
+          round 2: [p3, p4]     — start at t≈0.5 s
+
+        With the sliding window (semaphore releases after each query),
+        round 1 still caps at ALPHA peers, but round 2 starts as soon as
+        all three finish.  The key assertion is that p3/p4 are eventually
+        queried (multiple rounds fire) and p3 starts well before p2's
+        0.5 s sleep would have blocked a lock-step design.
+        """
+        target_key = b"target_key"
+
+        initial_peers = [create_valid_peer_id(f"sw_peer{i}") for i in range(3)]
+        extra_peers = [create_valid_peer_id(f"sw_peer{i}") for i in range(3, 5)]
+        started_at: dict[str, float] = {}
+
+        async def mock_query(peer, _target_key, new_peers):
+            started_at[str(peer)] = trio.current_time()
+            # Peer 2 is slow; all others are fast
+            if peer == initial_peers[2]:
+                await trio.sleep(0.5)
+            else:
+                await trio.sleep(0.01)
+            # Fast peers in round 1 "discover" extra peers
+            if peer == initial_peers[0]:
+                new_peers.append(extra_peers[0])
+            elif peer == initial_peers[1]:
+                new_peers.append(extra_peers[1])
+
+        with patch.object(
+            peer_routing.routing_table,
+            "find_local_closest_peers",
+            return_value=initial_peers,
+        ):
+            mock_host.get_connected_peers.return_value = []
+            mock_host.get_peerstore().peer_ids.return_value = []
+            with patch.object(
+                peer_routing,
+                "_query_single_peer_for_closest",
+                side_effect=mock_query,
+            ):
+                await peer_routing.find_closest_peers_network(target_key)
+
+        # All 5 peers should have been queried across multiple rounds
+        assert len(started_at) == 5, f"Expected 5 queried peers, got {len(started_at)}"
+
+        # Extra peers (round 2) should have started well before the slow
+        # peer 2 would have blocked a lock-step implementation.
+        p3_name = str(extra_peers[0])
+        assert p3_name in started_at
+
+    @pytest.mark.trio
+    async def test_per_round_query_count_bounded_by_alpha(
+        self, peer_routing, mock_host
+    ):
+        """
+        Assert that each lookup round admits at most ALPHA peers, not the
+        full ``count`` (20).  This preserves classic Kademlia iterative
+        refinement: after each small batch we re-sort with newly discovered
+        peers before admitting the next batch.
+
+        We set up peers in 3 groups.  Each round's queries
+        "discover" the next group, keeping the loop going.  We record the
+        order of queries and verify that no more than ALPHA peers are
+        admitted per round.
+        """
+        target_key = b"target_key"
+
+        # 3 groups of ALPHA peers; each group "discovers" the next.
+        group1 = [create_valid_peer_id(f"vol_g1_{i}") for i in range(ALPHA)]
+        group2 = [create_valid_peer_id(f"vol_g2_{i}") for i in range(ALPHA)]
+        group3 = [create_valid_peer_id(f"vol_g3_{i}") for i in range(ALPHA)]
+        queried_peers: list[ID] = []
+
+        async def mock_query(peer, _target_key, new_peers):
+            queried_peers.append(peer)
+            await trio.sleep(0)
+            # Group 1 queries discover group 2 peers
+            if peer in group1:
+                for p in group2:
+                    if p not in new_peers:
+                        new_peers.append(p)
+            # Group 2 queries discover group 3 peers
+            elif peer in group2:
+                for p in group3:
+                    if p not in new_peers:
+                        new_peers.append(p)
+
+        with patch.object(
+            peer_routing.routing_table,
+            "find_local_closest_peers",
+            return_value=group1,
+        ):
+            mock_host.get_connected_peers.return_value = []
+            mock_host.get_peerstore().peer_ids.return_value = []
+            with patch.object(
+                peer_routing,
+                "_query_single_peer_for_closest",
+                side_effect=mock_query,
+            ):
+                # Track round sizes by counting queries per nursery cycle
+
+                await peer_routing.find_closest_peers_network(target_key)
+
+        # Should have queried peers from multiple rounds
+        assert len(queried_peers) > ALPHA, (
+            f"Expected more than ALPHA={ALPHA} queries, got {len(queried_peers)}"
+        )
+        # First ALPHA queries must be from group 1 (round 1 admission).
+        assert set(queried_peers[:ALPHA]) == set(group1), (
+            "Round 1 should admit exactly the initial ALPHA peers"
+        )

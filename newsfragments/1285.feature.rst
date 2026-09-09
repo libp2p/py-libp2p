@@ -1,0 +1,1 @@
+Added semaphore-based stream concurrency limiting at the Swarm level so ``new_stream`` queues when the limit is reached instead of raising immediately, and stream resources are properly released on close.

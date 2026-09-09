@@ -1,0 +1,510 @@
+{
+  "meta": {
+    "format": "filecoin_protocol_support_matrix.v1",
+    "sources": {
+      "lotus": {
+        "repo": "https://github.com/filecoin-project/lotus",
+        "version": "v1.35.0"
+      },
+      "forest": {
+        "repo": "https://github.com/ChainSafe/forest",
+        "version": "0.32.2"
+      }
+    },
+    "status_values": [
+      "implemented",
+      "partial",
+      "missing",
+      "out_of_scope"
+    ],
+    "priority_values": [
+      "P1",
+      "P2",
+      "P3"
+    ]
+  },
+  "rows": [
+    {
+      "id": "identify",
+      "concern": "identify",
+      "status": "implemented",
+      "priority": null,
+      "upstream_evidence": [
+        {
+          "project": "lotus",
+          "file": "node/hello/hello.go",
+          "url": "https://github.com/filecoin-project/lotus/blob/v1.35.0/node/hello/hello.go",
+          "note": "Hello handling depends on identify-populated protocol state."
+        },
+        {
+          "project": "forest",
+          "file": "src/libp2p/service.rs",
+          "url": "https://github.com/ChainSafe/forest/blob/v0.32.2/src/libp2p/service.rs",
+          "note": "Discovery flow evaluates identify protocol support for hello and chain exchange."
+        }
+      ],
+      "py_libp2p_evidence": [
+        {
+          "file": "examples/filecoin/filecoin_ping_identify_demo.py",
+          "note": "Runs identify and reports advertised Filecoin protocol support."
+        }
+      ],
+      "current_practical_support": "Supported for peer diagnostics and advertised protocol inspection against Filecoin peers.",
+      "failure_modes": [
+        "Advertised protocol support does not imply full Filecoin hello or chain exchange runtime behavior."
+      ],
+      "recommended_next_step": "Keep identify as the primary diagnostics surface and track runtime protocol parity separately."
+    },
+    {
+      "id": "ping",
+      "concern": "ping",
+      "status": "implemented",
+      "priority": null,
+      "upstream_evidence": [
+        {
+          "project": "forest",
+          "file": "src/libp2p/service.rs",
+          "url": "https://github.com/ChainSafe/forest/blob/v0.32.2/src/libp2p/service.rs",
+          "note": "Forest records ping results in the libp2p service."
+        }
+      ],
+      "py_libp2p_evidence": [
+        {
+          "file": "examples/filecoin/filecoin_ping_identify_demo.py",
+          "note": "Runs ping and reports RTT summaries."
+        }
+      ],
+      "current_practical_support": "Supported for connectivity and latency diagnostics against Filecoin peers.",
+      "failure_modes": [
+        "Ping validates transport reachability only and does not prove Filecoin protocol interoperability."
+      ],
+      "recommended_next_step": "Keep ping in the diagnostics toolchain without widening its scope."
+    },
+    {
+      "id": "hello_protocol_id",
+      "concern": "hello protocol ID",
+      "status": "implemented",
+      "priority": null,
+      "upstream_evidence": [
+        {
+          "project": "lotus",
+          "file": "node/hello/hello.go",
+          "url": "https://github.com/filecoin-project/lotus/blob/v1.35.0/node/hello/hello.go",
+          "note": "Lotus hello protocol constant."
+        },
+        {
+          "project": "forest",
+          "file": "src/libp2p/hello/mod.rs",
+          "url": "https://github.com/ChainSafe/forest/blob/v0.32.2/src/libp2p/hello/mod.rs",
+          "note": "Forest hello protocol constant."
+        }
+      ],
+      "py_libp2p_evidence": [
+        {
+          "file": "libp2p/filecoin/constants.py",
+          "note": "Exports FIL_HELLO_PROTOCOL."
+        }
+      ],
+      "current_practical_support": "The hello protocol ID is available for diagnostics and protocol-list inspection.",
+      "failure_modes": [
+        "Constant parity alone does not provide the hello request/response behavior."
+      ],
+      "recommended_next_step": "Keep the constant stable and use it as the anchor for future hello behavior work."
+    },
+    {
+      "id": "hello_runtime",
+      "concern": "hello runtime / wire behavior",
+      "status": "missing",
+      "priority": "P1",
+      "upstream_evidence": [
+        {
+          "project": "lotus",
+          "file": "node/hello/hello.go",
+          "url": "https://github.com/filecoin-project/lotus/blob/v1.35.0/node/hello/hello.go",
+          "note": "Lotus exchanges typed hello and latency messages over CBOR."
+        },
+        {
+          "project": "forest",
+          "file": "src/libp2p/hello/behaviour.rs",
+          "url": "https://github.com/ChainSafe/forest/blob/v0.32.2/src/libp2p/hello/behaviour.rs",
+          "note": "Forest wraps hello request/response behavior and timeouts."
+        },
+        {
+          "project": "forest",
+          "file": "src/libp2p/hello/message.rs",
+          "url": "https://github.com/ChainSafe/forest/blob/v0.32.2/src/libp2p/hello/message.rs",
+          "note": "Forest defines typed hello request and response messages."
+        }
+      ],
+      "py_libp2p_evidence": [
+        {
+          "file": "examples/filecoin/filecoin_ping_identify_demo.py",
+          "note": "Current demo checks advertised protocol support only."
+        }
+      ],
+      "current_practical_support": "py-libp2p can detect hello support but cannot speak the hello wire protocol today.",
+      "failure_modes": [
+        "No hello codec or request/response service.",
+        "No genesis or heaviest-tipset validation path.",
+        "No latency response handling."
+      ],
+      "recommended_next_step": "Implement a typed hello codec and request/response behavior before claiming runtime interoperability."
+    },
+    {
+      "id": "chain_exchange_protocol_id",
+      "concern": "chain exchange protocol ID",
+      "status": "implemented",
+      "priority": null,
+      "upstream_evidence": [
+        {
+          "project": "lotus",
+          "file": "chain/exchange/protocol.go",
+          "url": "https://github.com/filecoin-project/lotus/blob/v1.35.0/chain/exchange/protocol.go",
+          "note": "Lotus chain exchange protocol constant."
+        },
+        {
+          "project": "forest",
+          "file": "src/libp2p/chain_exchange/mod.rs",
+          "url": "https://github.com/ChainSafe/forest/blob/v0.32.2/src/libp2p/chain_exchange/mod.rs",
+          "note": "Forest chain exchange protocol constant."
+        }
+      ],
+      "py_libp2p_evidence": [
+        {
+          "file": "libp2p/filecoin/constants.py",
+          "note": "Exports FIL_CHAIN_EXCHANGE_PROTOCOL."
+        }
+      ],
+      "current_practical_support": "The chain exchange protocol ID is available for diagnostics and protocol-list inspection.",
+      "failure_modes": [
+        "Constant parity alone does not provide chain exchange request/response support."
+      ],
+      "recommended_next_step": "Keep the protocol ID stable and track runtime behavior separately."
+    },
+    {
+      "id": "chain_exchange_runtime",
+      "concern": "chain exchange request/response behavior",
+      "status": "missing",
+      "priority": "P1",
+      "upstream_evidence": [
+        {
+          "project": "lotus",
+          "file": "chain/exchange/server.go",
+          "url": "https://github.com/filecoin-project/lotus/blob/v1.35.0/chain/exchange/server.go",
+          "note": "Lotus serves validated chain exchange responses."
+        },
+        {
+          "project": "lotus",
+          "file": "chain/exchange/client.go",
+          "url": "https://github.com/filecoin-project/lotus/blob/v1.35.0/chain/exchange/client.go",
+          "note": "Lotus validates and consumes chain exchange responses."
+        },
+        {
+          "project": "forest",
+          "file": "src/libp2p/chain_exchange/behaviour.rs",
+          "url": "https://github.com/ChainSafe/forest/blob/v0.32.2/src/libp2p/chain_exchange/behaviour.rs",
+          "note": "Forest wires chain exchange into request/response behavior."
+        },
+        {
+          "project": "forest",
+          "file": "src/libp2p/chain_exchange/message.rs",
+          "url": "https://github.com/ChainSafe/forest/blob/v0.32.2/src/libp2p/chain_exchange/message.rs",
+          "note": "Forest defines typed chain exchange request and response messages."
+        }
+      ],
+      "py_libp2p_evidence": [
+        {
+          "file": "examples/filecoin/filecoin_ping_identify_demo.py",
+          "note": "Current demo checks advertised protocol support only."
+        }
+      ],
+      "current_practical_support": "py-libp2p can confirm that a peer advertises chain exchange but does not implement the typed request/response behavior.",
+      "failure_modes": [
+        "No chain exchange codec or message models.",
+        "No server/provider path.",
+        "No client-side response validation path."
+      ],
+      "recommended_next_step": "Treat full chain exchange as a dedicated follow-up module rather than broadening Module 2 beyond diagnostics."
+    },
+    {
+      "id": "gossipsub_protocol_negotiation",
+      "concern": "gossipsub protocol negotiation",
+      "status": "implemented",
+      "priority": null,
+      "upstream_evidence": [
+        {
+          "project": "lotus",
+          "file": "node/modules/lp2p/pubsub.go",
+          "url": "https://github.com/filecoin-project/lotus/blob/v1.35.0/node/modules/lp2p/pubsub.go",
+          "note": "Lotus configures Filecoin gossipsub defaults."
+        },
+        {
+          "project": "forest",
+          "file": "src/libp2p/behaviour.rs",
+          "url": "https://github.com/ChainSafe/forest/blob/v0.32.2/src/libp2p/behaviour.rs",
+          "note": "Forest builds gossipsub behavior with Filecoin defaults."
+        }
+      ],
+      "py_libp2p_evidence": [
+        {
+          "file": "libp2p/filecoin/pubsub.py",
+          "note": "Exports the Filecoin gossipsub protocol preference set."
+        },
+        {
+          "file": "examples/filecoin/filecoin_pubsub_demo.py",
+          "note": "Observer snapshot reports the negotiated Filecoin-oriented protocol set."
+        }
+      ],
+      "current_practical_support": "The Filecoin pubsub preset exposes the /meshsub/2.0.0, 1.2.0, 1.1.0, and 1.0.0 family expected by Filecoin nodes.",
+      "failure_modes": [
+        "Negotiation parity does not imply full scoring, gater, or allowlist parity."
+      ],
+      "recommended_next_step": "Keep protocol negotiation stable and track deeper pubsub behavior gaps separately."
+    },
+    {
+      "id": "filecoin_topic_naming",
+      "concern": "Filecoin topic naming",
+      "status": "implemented",
+      "priority": null,
+      "upstream_evidence": [
+        {
+          "project": "lotus",
+          "file": "build/params_shared_funcs.go",
+          "url": "https://github.com/filecoin-project/lotus/blob/v1.35.0/build/params_shared_funcs.go",
+          "note": "Lotus shared helpers define blocks, messages, and DHT naming."
+        },
+        {
+          "project": "forest",
+          "file": "src/libp2p/service.rs",
+          "url": "https://github.com/ChainSafe/forest/blob/v0.32.2/src/libp2p/service.rs",
+          "note": "Forest subscribes to Filecoin block and message topics by network suffix."
+        }
+      ],
+      "py_libp2p_evidence": [
+        {
+          "file": "libp2p/filecoin/constants.py",
+          "note": "Exposes blocks, messages, and DHT helper functions."
+        },
+        {
+          "file": "libp2p/filecoin/networks.py",
+          "note": "Maps network aliases to the effective genesis-network suffix."
+        },
+        {
+          "file": "libp2p/filecoin/cli.py",
+          "note": "CLI surfaces the effective topics and DHT name."
+        }
+      ],
+      "current_practical_support": "Topic and DHT naming are fully available for mainnet and calibnet, including the historical mainnet->testnetnet mapping.",
+      "failure_modes": [],
+      "recommended_next_step": "Keep the helper layer pinned to upstream snapshots and update it only after explicit parity review."
+    },
+    {
+      "id": "filecoin_message_id",
+      "concern": "Filecoin message ID function",
+      "status": "implemented",
+      "priority": null,
+      "upstream_evidence": [
+        {
+          "project": "lotus",
+          "file": "node/modules/lp2p/pubsub.go",
+          "url": "https://github.com/filecoin-project/lotus/blob/v1.35.0/node/modules/lp2p/pubsub.go",
+          "note": "Lotus derives message IDs from Blake2b-256 over payload bytes."
+        },
+        {
+          "project": "forest",
+          "file": "src/libp2p/behaviour.rs",
+          "url": "https://github.com/ChainSafe/forest/blob/v0.32.2/src/libp2p/behaviour.rs",
+          "note": "Forest configures gossipsub message IDs from Blake2b-256(data)."
+        }
+      ],
+      "py_libp2p_evidence": [
+        {
+          "file": "libp2p/filecoin/constants.py",
+          "note": "Defines filecoin_message_id()."
+        },
+        {
+          "file": "libp2p/filecoin/pubsub.py",
+          "note": "Installs filecoin_message_id() into the Filecoin pubsub preset."
+        }
+      ],
+      "current_practical_support": "The Filecoin DX layer uses the expected Blake2b-256(data) message ID strategy.",
+      "failure_modes": [
+        "Message ID parity does not validate Filecoin block or message semantics."
+      ],
+      "recommended_next_step": "Keep this function stable as the message identity anchor for Filecoin-compatible observation."
+    },
+    {
+      "id": "score_thresholds",
+      "concern": "score thresholds",
+      "status": "implemented",
+      "priority": null,
+      "upstream_evidence": [
+        {
+          "project": "lotus",
+          "file": "node/modules/lp2p/pubsub.go",
+          "url": "https://github.com/filecoin-project/lotus/blob/v1.35.0/node/modules/lp2p/pubsub.go",
+          "note": "Lotus score thresholds."
+        },
+        {
+          "project": "forest",
+          "file": "src/libp2p/gossip_params.rs",
+          "url": "https://github.com/ChainSafe/forest/blob/v0.32.2/src/libp2p/gossip_params.rs",
+          "note": "Forest score thresholds."
+        }
+      ],
+      "py_libp2p_evidence": [
+        {
+          "file": "libp2p/filecoin/constants.py",
+          "note": "Exports the threshold constants."
+        },
+        {
+          "file": "libp2p/filecoin/pubsub.py",
+          "note": "Builds the Filecoin score params from those thresholds."
+        },
+        {
+          "file": "libp2p/filecoin/cli.py",
+          "note": "filecoin-dx preset reports the effective threshold values."
+        }
+      ],
+      "current_practical_support": "The Filecoin DX layer exposes the same threshold values for publish, gossip, graylist, accept-PX, and opportunistic graft decisions.",
+      "failure_modes": [
+        "Threshold parity alone does not deliver upstream topic-score behavior."
+      ],
+      "recommended_next_step": "Keep filecoin-dx preset as the authoritative runtime snapshot for the current score surface."
+    },
+    {
+      "id": "full_topic_scoring_parity",
+      "concern": "full topic scoring parity",
+      "status": "partial",
+      "priority": "P2",
+      "upstream_evidence": [
+        {
+          "project": "lotus",
+          "file": "node/modules/lp2p/pubsub.go",
+          "url": "https://github.com/filecoin-project/lotus/blob/v1.35.0/node/modules/lp2p/pubsub.go",
+          "note": "Lotus configures richer topic scoring, peer gater, and allowlist behavior."
+        },
+        {
+          "project": "forest",
+          "file": "src/libp2p/gossip_params.rs",
+          "url": "https://github.com/ChainSafe/forest/blob/v0.32.2/src/libp2p/gossip_params.rs",
+          "note": "Forest carries topic-score parameters for Filecoin topics."
+        }
+      ],
+      "py_libp2p_evidence": [
+        {
+          "file": "libp2p/filecoin/pubsub.py",
+          "note": "Stores upstream topic-score constants but only applies threshold gating at runtime."
+        },
+        {
+          "file": "examples/filecoin/filecoin_pubsub_demo.py",
+          "note": "Observer demo reports its compatibility limits explicitly."
+        }
+      ],
+      "current_practical_support": "Runtime behavior is intentionally limited to threshold gating plus reference constants for future work.",
+      "failure_modes": [
+        "No peer gater parity.",
+        "No subscription allowlist parity.",
+        "No runtime use of the full topic-score reference values."
+      ],
+      "recommended_next_step": "Add richer scoring only when the project is ready to own the larger behavioral and test surface."
+    },
+    {
+      "id": "bootstrapper_px_direct_peers",
+      "concern": "bootstrapper / PX / direct-peer behavior",
+      "status": "partial",
+      "priority": "P2",
+      "upstream_evidence": [
+        {
+          "project": "lotus",
+          "file": "node/modules/lp2p/pubsub.go",
+          "url": "https://github.com/filecoin-project/lotus/blob/v1.35.0/node/modules/lp2p/pubsub.go",
+          "note": "Lotus changes mesh/PX behavior for bootstrappers and supports direct peers."
+        },
+        {
+          "project": "forest",
+          "file": "src/libp2p/service.rs",
+          "url": "https://github.com/ChainSafe/forest/blob/v0.32.2/src/libp2p/service.rs",
+          "note": "Forest redials bootstrap peers at the service layer."
+        }
+      ],
+      "py_libp2p_evidence": [
+        {
+          "file": "libp2p/filecoin/pubsub.py",
+          "note": "build_filecoin_gossipsub() exposes bootstrapper and direct-peer inputs."
+        },
+        {
+          "file": "libp2p/filecoin/bootstrap.py",
+          "note": "Runtime bootstrap helpers adapt canonical Filecoin bootstrap lists."
+        }
+      ],
+      "current_practical_support": "py-libp2p supports bootstrapper-flavored gossipsub presets, PX toggles, direct peers, and runtime bootstrap address selection.",
+      "failure_modes": [
+        "No peer-gater parity.",
+        "No Lotus-style allowlist behavior.",
+        "No service-level bootstrapper behavior beyond address helpers."
+      ],
+      "recommended_next_step": "Treat deeper bootstrapper semantics as a second-stage pubsub parity effort."
+    },
+    {
+      "id": "drand_f3_topics",
+      "concern": "drand / F3 topic handling",
+      "status": "missing",
+      "priority": "P3",
+      "upstream_evidence": [
+        {
+          "project": "lotus",
+          "file": "node/modules/lp2p/pubsub.go",
+          "url": "https://github.com/filecoin-project/lotus/blob/v1.35.0/node/modules/lp2p/pubsub.go",
+          "note": "Lotus adds drand and optional F3 topics to its pubsub surface."
+        },
+        {
+          "project": "forest",
+          "file": "src/libp2p/service.rs",
+          "url": "https://github.com/ChainSafe/forest/blob/v0.32.2/src/libp2p/service.rs",
+          "note": "Forest corpus provided here focuses on Filecoin block/message topics."
+        }
+      ],
+      "py_libp2p_evidence": [
+        {
+          "file": "libp2p/filecoin/pubsub.py",
+          "note": "Reference constants include drand topic-score values only."
+        },
+        {
+          "file": "examples/filecoin/filecoin_pubsub_demo.py",
+          "note": "Observer demo intentionally limits itself to Filecoin block/message topics."
+        }
+      ],
+      "current_practical_support": "The current DX layer intentionally stops at block/message topic support.",
+      "failure_modes": [
+        "No drand topic construction path.",
+        "No F3 topic support.",
+        "No allowlist or validation plumbing for these adjacent topics."
+      ],
+      "recommended_next_step": "Keep drand and F3 as a later expansion once the core Filecoin block/message flow is stable."
+    },
+    {
+      "id": "bitswap_note",
+      "concern": "bitswap note",
+      "status": "out_of_scope",
+      "priority": null,
+      "upstream_evidence": [
+        {
+          "project": "forest",
+          "file": "src/libp2p/service.rs",
+          "url": "https://github.com/ChainSafe/forest/blob/v0.32.2/src/libp2p/service.rs",
+          "note": "Forest includes bitswap in its broader libp2p service."
+        }
+      ],
+      "py_libp2p_evidence": [
+        {
+          "file": "docs/filecoin_architecture_positioning.rst",
+          "note": "Module 5 positioning deliberately scoped the Filecoin DX layer away from broader protocol claims."
+        }
+      ],
+      "current_practical_support": "Module 2 does not make Filecoin-specific bitswap claims; it remains focused on diagnostics, hello/chain exchange parity gaps, and Filecoin pubsub compatibility.",
+      "failure_modes": [],
+      "recommended_next_step": "Track Filecoin-specific bitswap questions in a separate interoperability or performance module if they become necessary."
+    }
+  ]
+}

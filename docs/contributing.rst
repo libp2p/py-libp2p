@@ -19,6 +19,10 @@ Next, install the development dependencies and set up the project. We recommend 
 virtual environment, such as `virtualenv <https://virtualenv.pypa.io/en/stable/>`_ or
 Python's built-in ``venv`` module. Instructions vary by platform:
 
+.. note::
+
+    py-libp2p contributor setup is currently supported on Python versions ``<= 3.13``.
+
 Linux Setup
 ^^^^^^^^^^^
 
@@ -42,22 +46,63 @@ Setup Steps
 
 Install the development dependencies using a virtual environment:
 
+**Option 1: Using the setup script (recommended):**
+
 .. code:: sh
 
     cd py-libp2p
-    python3 -m venv ./venv
-    . venv/bin/activate
-    python3 -m pip install -e ".[dev]"
+    ./scripts/setup_dev.sh
+
+.. note::
+
+    On Linux, if you are not already in a virtual environment, the script will create one
+    automatically and instruct you to activate it.
+
+**Option 2: Using uv (recommended, same as CI):**
+
+First, install ``uv`` if you haven't already:
+
+.. code:: sh
+
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+
+Or using pip:
+
+.. code:: sh
+
+    pip install uv
+
+Then set up the development environment:
+
+.. code:: sh
+
+    cd py-libp2p
+    uv sync --group dev
+    uv run pre-commit install
+
+**Option 3: Manual setup with pip:**
+
+.. code:: sh
+
+    cd py-libp2p
+    python3 -m venv .venv
+    . .venv/bin/activate
+    pip install --upgrade pip  # Ensure pip >= 25.1 for PEP 735 support
+    pip install --group dev -e .
     pre-commit install
+
+**Note:** This project uses PEP 735 ``[dependency-groups]`` which requires pip >= 25.1.
+If you have an older pip version, upgrade it first.
 
 An alternative using ``virtualenv``:
 
 .. code:: sh
 
     cd py-libp2p
-    virtualenv -p python venv
-    . venv/bin/activate
-    python -m pip install -e ".[dev]"
+    virtualenv -p python .venv
+    . .venv/bin/activate
+    pip install --upgrade pip  # Ensure pip >= 25.1 for PEP 735 support
+    pip install --group dev -e .
     pre-commit install
 
 macOS Setup
@@ -83,28 +128,64 @@ Setup Steps
 
 Install the development dependencies using a virtual environment:
 
+**Option 1: Using the setup script (recommended):**
+
 .. code:: sh
 
     cd py-libp2p
-    python3 -m venv ./venv
-    . venv/bin/activate
-    python3 -m pip install -e ".[dev]"
-    pre-commit install
+    ./scripts/setup_dev.sh
 
-On macOS, help the build command find and link against the ``gmp`` library:
+**Option 2: Using uv (recommended, same as CI):**
+
+First, install ``uv`` if you haven't already:
 
 .. code:: sh
 
-    CFLAGS="`pkg-config --cflags gmp`" LDFLAGS="`pkg-config --libs gmp`" python3 -m pip install -e ".[dev]"
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+
+Or using Homebrew:
+
+.. code:: sh
+
+    brew install uv
+
+Or using pip:
+
+.. code:: sh
+
+    pip install uv
+
+Then set up the development environment:
+
+.. code:: sh
+
+    cd py-libp2p
+    CFLAGS="$(pkg-config --cflags gmp)" LDFLAGS="$(pkg-config --libs gmp)" uv sync --group dev
+    uv run pre-commit install
+
+**Option 3: Manual setup with pip:**
+
+.. code:: sh
+
+    cd py-libp2p
+    python3 -m venv .venv
+    . .venv/bin/activate
+    pip install --upgrade pip  # Ensure pip >= 25.1 for PEP 735 support
+    CFLAGS="$(pkg-config --cflags gmp)" LDFLAGS="$(pkg-config --libs gmp)" pip install --group dev -e .
+    pre-commit install
+
+**Note:** This project uses PEP 735 ``[dependency-groups]`` which requires pip >= 25.1.
+If you have an older pip version, upgrade it first.
 
 An alternative using ``virtualenv``:
 
 .. code:: sh
 
     cd py-libp2p
-    virtualenv -p python venv
-    . venv/bin/activate
-    python -m pip install -e ".[dev]"
+    virtualenv -p python .venv
+    . .venv/bin/activate
+    pip install --upgrade pip  # Ensure pip >= 25.1 for PEP 735 support
+    pip install --group dev -e .
     pre-commit install
 
 Windows Development Setup
@@ -170,11 +251,36 @@ Setup Steps
         .\venv\Scripts\activate
 
 3. **Install Dependencies**
-   - Install the project and dev dependencies:
+
+   **Option A: Using uv (recommended, same as CI):**
+
+   First, install ``uv`` if you haven't already:
 
    .. code:: powershell
 
-        pip install -e ".[dev]"
+        # Using pip
+        pip install uv
+
+        # Or using winget
+        winget install --id=astral-sh.uv
+
+   Then set up the development environment:
+
+   .. code:: powershell
+
+        uv sync --group dev
+        uv run pre-commit install
+
+   **Option B: Using pip:**
+
+   .. code:: powershell
+
+        pip install --upgrade pip  # Ensure pip >= 25.1 for PEP 735 support
+        pip install --group dev -e .
+        pre-commit install
+
+   **Note:** This project uses PEP 735 ``[dependency-groups]`` which requires pip >= 25.1.
+   If you have an older pip version, upgrade it first.
 
 4. **Verify Setup**
    - Run the tests to ensure everything works:
@@ -231,6 +337,19 @@ This library uses type hints, which are enforced by the ``mypy`` tool (part of t
 ``pre-commit`` checks). All new code is required to land with type hints, with the
 exception of code within the ``tests`` directory.
 
+Path handling
+^^^^^^^^^^^^^
+
+Use the cross-platform path utilities in ``libp2p.utils.paths`` instead of ``os.path``
+or hard-coded separators. Prefer ``join_paths()`` over ``os.path.join()``,
+``get_script_dir(__file__)`` over ``os.path.dirname(__file__)``, and ``create_temp_file()``
+or ``get_temp_dir()`` over hard-coded ``/tmp/`` or ``C:\\``. This keeps the codebase
+working on Windows, macOS, and Linux. Run ``python scripts/audit_paths.py`` to check
+for path issues; the same audit runs in ``pre-commit`` and fails on P0/P1 issues.
+
+For the full API reference, see :mod:`libp2p.utils.paths`. A working example is
+available in :doc:`examples.path_handling`.
+
 Documentation
 ~~~~~~~~~~~~~
 
@@ -261,6 +380,7 @@ To add a new example (e.g., identify):
                "echo-demo=examples.echo.echo:main",
                "ping-demo=examples.ping.ping:main",
                "identify-demo=examples.identify.identify:main",
+               "circuit-relay-demo=examples.circuit_relay.relay_example:main"
            ],
        }
 
@@ -269,14 +389,15 @@ To add a new example (e.g., identify):
     .. code:: sh
 
         .....
-        Activate with `source /tmp/tmpb9ybjgtg/package-smoke-test/bin/activate`
+        Activate with ``source <temp-dir>/package-smoke-test/bin/activate``
+        (The exact path is shown by the script; use that path.)
         Press enter when the test has completed. The directory will be deleted.
 
     Then test the example:
 
     .. code:: sh
 
-        source /tmp/tmpb9ybjgtg/package-smoke-test/bin/activate
+        source <temp-dir>/package-smoke-test/bin/activate
         (package-smoke-test) $ identify-demo
 
 Pull Requests

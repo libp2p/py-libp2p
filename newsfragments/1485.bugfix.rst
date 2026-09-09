@@ -1,0 +1,5 @@
+Close a swarm's live connections when it shuts down so their sockets are released
+instead of leaking. ``Swarm.run()``'s service-manager shutdown now closes tracked
+connections (not just listeners), and the test host/swarm factories tear their
+swarms down deterministically via ``close()``, eliminating the bulk of the
+``ResourceWarning: unclosed socket`` warnings the suite emitted (issues #92, #1485).

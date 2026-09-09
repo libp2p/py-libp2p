@@ -5,11 +5,13 @@ import inspect
 from typing import (
     NamedTuple,
 )
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import multiaddr
 import trio
 
+from libp2p.crypto.rsa import create_new_key_pair
 from libp2p.custom_types import AsyncValidatorFn
 from libp2p.exceptions import (
     ValidationError,
@@ -17,9 +19,11 @@ from libp2p.exceptions import (
 from libp2p.network.stream.exceptions import (
     StreamEOF,
 )
+from libp2p.peer.envelope import Envelope, seal_record
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.peer.peer_record import PeerRecord
 from libp2p.pubsub.pb import (
     rpc_pb2,
 )
@@ -27,9 +31,7 @@ from libp2p.pubsub.pubsub import (
     PUBSUB_SIGNING_PREFIX,
     SUBSCRIPTION_CHANNEL_SIZE,
 )
-from libp2p.tools.constants import (
-    MAX_READ_LEN,
-)
+from libp2p.pubsub.rpc_queue import RpcQueue
 from libp2p.tools.utils import (
     connect,
 )
@@ -51,7 +53,7 @@ TESTING_DATA = b"data"
 
 @pytest.mark.trio
 async def test_subscribe_and_unsubscribe():
-    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs_fsub:
         await pubsubs_fsub[0].subscribe(TESTING_TOPIC)
         assert TESTING_TOPIC in pubsubs_fsub[0].topic_ids
 
@@ -61,7 +63,7 @@ async def test_subscribe_and_unsubscribe():
 
 @pytest.mark.trio
 async def test_re_subscribe():
-    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs_fsub:
         await pubsubs_fsub[0].subscribe(TESTING_TOPIC)
         assert TESTING_TOPIC in pubsubs_fsub[0].topic_ids
 
@@ -71,7 +73,7 @@ async def test_re_subscribe():
 
 @pytest.mark.trio
 async def test_re_unsubscribe():
-    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs_fsub:
         # Unsubscribe from topic we didn't even subscribe to
         assert "NOT_MY_TOPIC" not in pubsubs_fsub[0].topic_ids
         await pubsubs_fsub[0].unsubscribe("NOT_MY_TOPIC")
@@ -88,22 +90,139 @@ async def test_re_unsubscribe():
 
 
 @pytest.mark.trio
-async def test_peers_subscribe():
-    async with PubsubFactory.create_batch_with_floodsub(2) as pubsubs_fsub:
+async def test_reissue_when_listen_addrs_change():
+    async with PubsubFactory.create_batch_with_gossipsub(2) as pubsubs_fsub:
         await connect(pubsubs_fsub[0].host, pubsubs_fsub[1].host)
         await pubsubs_fsub[0].subscribe(TESTING_TOPIC)
-        # Yield to let 0 notify 1
-        await trio.sleep(1)
+        # Wait for subscription to propagate
+        await pubsubs_fsub[1].wait_for_subscription(
+            pubsubs_fsub[0].my_id, TESTING_TOPIC
+        )
         assert pubsubs_fsub[0].my_id in pubsubs_fsub[1].peer_topics[TESTING_TOPIC]
+
+        # Check whether signed-records were transfered properly in the subscribe call
+        envelope_b_sub = (
+            pubsubs_fsub[1]
+            .host.get_peerstore()
+            .get_peer_record(pubsubs_fsub[0].host.get_id())
+        )
+        assert isinstance(envelope_b_sub, Envelope)
+
+        # Simulate pubsubs_fsub[1].host listen addrs changing (different port)
+        new_addr = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/123")
+
+        # Patch just for the duration we force A to unsubscribe
+        with patch.object(pubsubs_fsub[0].host, "get_addrs", return_value=[new_addr]):
+            # Unsubscribe from A's side so that a new_record is issued
+            await pubsubs_fsub[0].unsubscribe(TESTING_TOPIC)
+            # Wait for unsubscription to propagate
+            with trio.fail_after(1.0):
+                while (
+                    TESTING_TOPIC in pubsubs_fsub[1].peer_topics
+                    and pubsubs_fsub[0].my_id
+                    in pubsubs_fsub[1].peer_topics[TESTING_TOPIC]
+                ):
+                    await trio.sleep(0.01)
+
+        # B should be holding A's new record with bumped seq
+        envelope_b_unsub = (
+            pubsubs_fsub[1]
+            .host.get_peerstore()
+            .get_peer_record(pubsubs_fsub[0].host.get_id())
+        )
+        assert isinstance(envelope_b_unsub, Envelope)
+
+        # This proves that a freshly signed record was issued rather than
+        # the latest-cached-one creating one.
+        assert envelope_b_sub.record().seq < envelope_b_unsub.record().seq
+
+
+@pytest.mark.trio
+async def test_peers_subscribe():
+    async with PubsubFactory.create_batch_with_gossipsub(2) as pubsubs_fsub:
+        await connect(pubsubs_fsub[0].host, pubsubs_fsub[1].host)
+        await pubsubs_fsub[0].subscribe(TESTING_TOPIC)
+        # Wait for subscription to propagate
+        await pubsubs_fsub[1].wait_for_subscription(
+            pubsubs_fsub[0].my_id, TESTING_TOPIC
+        )
+        assert pubsubs_fsub[0].my_id in pubsubs_fsub[1].peer_topics[TESTING_TOPIC]
+
+        # Check whether signed-records were transfered properly in the subscribe call
+        envelope_b_sub = (
+            pubsubs_fsub[1]
+            .host.get_peerstore()
+            .get_peer_record(pubsubs_fsub[0].host.get_id())
+        )
+        assert isinstance(envelope_b_sub, Envelope)
+
         await pubsubs_fsub[0].unsubscribe(TESTING_TOPIC)
-        # Yield to let 0 notify 1
-        await trio.sleep(1)
+        # Wait for unsubscription to propagate
+        with trio.fail_after(1.0):
+            while (
+                TESTING_TOPIC in pubsubs_fsub[1].peer_topics
+                and pubsubs_fsub[0].my_id in pubsubs_fsub[1].peer_topics[TESTING_TOPIC]
+            ):
+                await trio.sleep(0.01)
         assert pubsubs_fsub[0].my_id not in pubsubs_fsub[1].peer_topics[TESTING_TOPIC]
+
+        envelope_b_unsub = (
+            pubsubs_fsub[1]
+            .host.get_peerstore()
+            .get_peer_record(pubsubs_fsub[0].host.get_id())
+        )
+        assert isinstance(envelope_b_unsub, Envelope)
+
+        # This proves that the latest-cached-record was re-issued rather than
+        # freshly creating one.
+        assert envelope_b_sub.record().seq == envelope_b_unsub.record().seq
+
+
+@pytest.mark.trio
+async def test_peer_subscribe_fail_upon_invald_record_transfer():
+    async with PubsubFactory.create_batch_with_gossipsub(2) as pubsubs_fsub:
+        await connect(pubsubs_fsub[0].host, pubsubs_fsub[1].host)
+
+        # Corrupt host_a's local peer record
+        envelope = pubsubs_fsub[0].host.get_peerstore().get_local_record()
+        if envelope is not None:
+            true_record = envelope.record()
+        key_pair = create_new_key_pair()
+
+        if envelope is not None:
+            envelope.public_key = key_pair.public_key
+            pubsubs_fsub[0].host.get_peerstore().set_local_record(envelope)
+
+        await pubsubs_fsub[0].subscribe(TESTING_TOPIC)
+        # Give time for message to propagate (it should be rejected due to
+        # invalid record)
+        await trio.sleep(0.1)
+        assert pubsubs_fsub[0].my_id not in pubsubs_fsub[1].peer_topics.get(
+            TESTING_TOPIC, set()
+        )
+
+        # Create a corrupt envelope with correct signature but false peer-id
+        false_record = PeerRecord(
+            ID.from_pubkey(key_pair.public_key), true_record.addrs
+        )
+        false_envelope = seal_record(
+            false_record, pubsubs_fsub[0].host.get_private_key()
+        )
+
+        pubsubs_fsub[0].host.get_peerstore().set_local_record(false_envelope)
+
+        await pubsubs_fsub[0].subscribe(TESTING_TOPIC)
+        # Give time for message to propagate (it should be rejected due to
+        # invalid record)
+        await trio.sleep(0.1)
+        assert pubsubs_fsub[0].my_id not in pubsubs_fsub[1].peer_topics.get(
+            TESTING_TOPIC, set()
+        )
 
 
 @pytest.mark.trio
 async def test_get_hello_packet():
-    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs_fsub:
 
         def _get_hello_packet_topic_ids():
             packet = pubsubs_fsub[0].get_hello_packet()
@@ -124,7 +243,7 @@ async def test_get_hello_packet():
 
 @pytest.mark.trio
 async def test_set_and_remove_topic_validator():
-    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs_fsub:
         is_sync_validator_called = False
 
         def sync_validator(peer_id: ID, msg: rpc_pb2.Message) -> bool:
@@ -208,7 +327,7 @@ async def test_get_msg_validators():
         await trio.lowlevel.checkpoint()
         return True
 
-    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs_fsub:
         topic_1 = "TEST_VALIDATOR_1"
         topic_2 = "TEST_VALIDATOR_2"
         topic_3 = "TEST_VALIDATOR_3"
@@ -276,7 +395,7 @@ async def test_validate_msg_with_throttle_condition(
                 async with lock:
                     state["concurrency_counter"] -= 1
 
-    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs_fsub:
 
         def passed_sync_validator(peer_id: ID, msg: rpc_pb2.Message) -> bool:
             return True
@@ -363,7 +482,7 @@ async def test_continuously_read_stream(monkeypatch, nursery, security_protocol)
             yield Events(event_push_msg, event_handle_subscription, event_handle_rpc)
 
     async with (
-        PubsubFactory.create_batch_with_floodsub(
+        PubsubFactory.create_batch_with_gossipsub(
             1, security_protocol=security_protocol
         ) as pubsubs_fsub,
         net_stream_pair_factory(security_protocol=security_protocol) as stream_pair,
@@ -438,7 +557,7 @@ async def test_continuously_read_stream(monkeypatch, nursery, security_protocol)
 
 @pytest.mark.trio
 async def test_handle_subscription():
-    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs_fsub:
         assert len(pubsubs_fsub[0].peer_topics) == 0
         sub_msg_0 = rpc_pb2.RPC.SubOpts(subscribe=True, topicid=TESTING_TOPIC)
         peer_ids = [IDFactory() for _ in range(2)]
@@ -470,7 +589,7 @@ async def test_handle_subscription():
 
 @pytest.mark.trio
 async def test_handle_talk():
-    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs_fsub:
         sub = await pubsubs_fsub[0].subscribe(TESTING_TOPIC)
         msg_0 = make_pubsub_msg(
             origin_id=pubsubs_fsub[0].my_id,
@@ -496,28 +615,266 @@ async def test_handle_talk():
 @pytest.mark.trio
 async def test_message_all_peers(monkeypatch, security_protocol):
     async with (
-        PubsubFactory.create_batch_with_floodsub(
+        PubsubFactory.create_batch_with_gossipsub(
             1, security_protocol=security_protocol
         ) as pubsubs_fsub,
-        net_stream_pair_factory(security_protocol=security_protocol) as stream_pair,
     ):
         peer_id = IDFactory()
-        mock_peers = {peer_id: stream_pair[0]}
+        mock_peers = {peer_id: object()}
+        mock_peer_queues = {peer_id: RpcQueue()}
         with monkeypatch.context() as m:
             m.setattr(pubsubs_fsub[0], "peers", mock_peers)
+            m.setattr(pubsubs_fsub[0], "peer_queues", mock_peer_queues)
 
             empty_rpc = rpc_pb2.RPC()
             empty_rpc_bytes = empty_rpc.SerializeToString()
-            empty_rpc_bytes_len_prefixed = encode_varint_prefixed(empty_rpc_bytes)
             await pubsubs_fsub[0].message_all_peers(empty_rpc_bytes)
-            assert (
-                await stream_pair[1].read(MAX_READ_LEN)
-            ) == empty_rpc_bytes_len_prefixed
+            queued_rpc = await mock_peer_queues[peer_id].pop()
+            assert queued_rpc is not None
+            assert queued_rpc.SerializeToString() == empty_rpc_bytes
+
+
+@pytest.mark.trio
+async def test_subscribe_announce_retries_on_queue_full(monkeypatch):
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs_fsub:
+        pubsub = pubsubs_fsub[0]
+        peer_id = IDFactory()
+        queue = RpcQueue(max_size=1)
+        assert queue.push(rpc_pb2.RPC())
+
+        with monkeypatch.context() as m:
+            m.setattr(pubsub, "peers", {peer_id: object()})
+            m.setattr(pubsub, "peer_queues", {peer_id: queue})
+            m.setattr("libp2p.pubsub.pubsub.random.randint", lambda _a, _b: 0)
+
+            await pubsub.subscribe(TESTING_TOPIC)
+
+            # Free one slot; retry should enqueue subscribe announcement.
+            assert await queue.pop() is not None
+            with trio.fail_after(2):
+                retry_rpc = await queue.pop()
+
+        assert retry_rpc is not None
+        assert len(retry_rpc.subscriptions) == 1
+        assert retry_rpc.subscriptions[0].topicid == TESTING_TOPIC
+        assert retry_rpc.subscriptions[0].subscribe is True
+
+
+@pytest.mark.trio
+async def test_subscribe_announce_retry_stops_after_unsubscribe(monkeypatch):
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs_fsub:
+        pubsub = pubsubs_fsub[0]
+        peer_id = IDFactory()
+        queue = RpcQueue(max_size=1)
+        assert queue.push(rpc_pb2.RPC())
+
+        with monkeypatch.context() as m:
+            m.setattr(pubsub, "peers", {peer_id: object()})
+            m.setattr(pubsub, "peer_queues", {peer_id: queue})
+            m.setattr("libp2p.pubsub.pubsub.random.randint", lambda _a, _b: 0)
+
+            await pubsub.subscribe(TESTING_TOPIC)
+            await pubsub.unsubscribe(TESTING_TOPIC)
+
+            # Free slot and ensure no stale subscribe retry is enqueued.
+            assert await queue.pop() is not None
+            with trio.move_on_after(0.2):
+                await queue.pop()
+            assert len(queue) == 0
+
+
+@pytest.mark.trio
+async def test_unsubscribe_announce_retries_on_queue_full(monkeypatch):
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs_fsub:
+        pubsub = pubsubs_fsub[0]
+        peer_id = IDFactory()
+        queue = RpcQueue(max_size=1)
+
+        with monkeypatch.context() as m:
+            m.setattr(pubsub, "peers", {peer_id: object()})
+            m.setattr(pubsub, "peer_queues", {peer_id: queue})
+            m.setattr("libp2p.pubsub.pubsub.random.randint", lambda _a, _b: 0)
+
+            await pubsub.subscribe(TESTING_TOPIC)
+
+            # Drain any queued subscribe announce before preparing queue-full case.
+            while len(queue) > 0:
+                assert await queue.pop() is not None
+
+            # Fill queue so unsubscribe announce is dropped and scheduled for retry.
+            assert queue.push(rpc_pb2.RPC())
+            await pubsub.unsubscribe(TESTING_TOPIC)
+
+            # Free one slot; retry should enqueue unsubscribe announcement.
+            assert await queue.pop() is not None
+            with trio.fail_after(2):
+                retry_rpc = await queue.pop()
+
+        assert retry_rpc is not None
+        assert len(retry_rpc.subscriptions) == 1
+        assert retry_rpc.subscriptions[0].topicid == TESTING_TOPIC
+        assert retry_rpc.subscriptions[0].subscribe is False
+
+
+@pytest.mark.trio
+async def test_schedule_announce_retry_deduplicates_task_spawn(monkeypatch):
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs_fsub:
+        pubsub = pubsubs_fsub[0]
+        peer_id = IDFactory()
+        announce = rpc_pb2.RPC.SubOpts(subscribe=True, topicid=TESTING_TOPIC)
+        calls: list[tuple[object, tuple[object, ...]]] = []
+
+        def fake_run_task(fn, *args):
+            calls.append((fn, args))
+
+        with monkeypatch.context() as m:
+            m.setattr(pubsub.manager, "run_task", fake_run_task)
+            pubsub._schedule_announce_retry(peer_id, announce)
+            pubsub._schedule_announce_retry(peer_id, announce)
+
+        assert len(calls) == 1
+        assert (peer_id, TESTING_TOPIC, True) in pubsub._pending_announce_retries
+        pubsub._pending_announce_retries.clear()
+
+
+@pytest.mark.trio
+async def test_announce_retry_key_cleared_on_dead_peer(monkeypatch):
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs_fsub:
+        pubsub = pubsubs_fsub[0]
+        peer_id = IDFactory()
+        queue = RpcQueue(max_size=1)
+        assert queue.push(rpc_pb2.RPC())
+
+        with monkeypatch.context() as m:
+            m.setattr(pubsub, "peers", {peer_id: object()})
+            m.setattr(pubsub, "peer_queues", {peer_id: queue})
+            m.setattr("libp2p.pubsub.pubsub.random.randint", lambda _a, _b: 0)
+
+            await pubsub.subscribe(TESTING_TOPIC)
+            key = (peer_id, TESTING_TOPIC, True)
+            assert key in pubsub._pending_announce_retries
+
+            pubsub._handle_dead_peer(peer_id)
+
+            assert key not in pubsub._pending_announce_retries
+            assert peer_id not in pubsub.peer_queues
+
+
+@pytest.mark.trio
+async def test_dead_peer_clears_subscriptions_of_half_registered_peer():
+    """A peer dropping before its outbound stream exists must not leak state."""
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs_fsub:
+        pubsub = pubsubs_fsub[0]
+        peer_id = IDFactory()
+
+        # Subscriptions arrive on the peer's inbound stream, so `peer_topics`
+        # can hold a peer that never made it into `peers`.
+        pubsub.handle_subscription(
+            peer_id, rpc_pb2.RPC.SubOpts(subscribe=True, topicid=TESTING_TOPIC)
+        )
+        assert peer_id in pubsub.peer_topics[TESTING_TOPIC]
+        assert peer_id not in pubsub.peers
+
+        pubsub._handle_dead_peer(peer_id)
+
+        assert peer_id not in pubsub.peer_topics[TESTING_TOPIC]
+
+
+@pytest.mark.trio
+async def test_router_replay_hooks_default_to_noop():
+    """A router that implements neither hook (floodsub) sends nothing."""
+    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
+        pubsub = pubsubs_fsub[0]
+        peer_id = IDFactory()
+        pubsub.peers[peer_id] = MagicMock()
+        pubsub.peer_topics[TESTING_TOPIC] = {peer_id}
+
+        with patch.object(pubsub, "write_msg", new=AsyncMock()) as write_msg:
+            await pubsub.router.flush_pending_messages(peer_id)
+            await pubsub._send_recent_messages_to_new_peer(peer_id)
+
+        write_msg.assert_not_awaited()
+
+
+@pytest.mark.trio
+async def test_announce_retry_exits_when_announce_rpc_is_oversized(monkeypatch):
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs_fsub:
+        pubsub = pubsubs_fsub[0]
+        peer_id = IDFactory()
+        queue = RpcQueue(max_size=4, max_message_size=1)
+        announce = rpc_pb2.RPC.SubOpts(subscribe=True, topicid=TESTING_TOPIC)
+
+        with monkeypatch.context() as m:
+            m.setattr(pubsub, "peers", {peer_id: object()})
+            m.setattr(pubsub, "peer_queues", {peer_id: queue})
+            m.setattr("libp2p.pubsub.pubsub.random.randint", lambda _a, _b: 0)
+
+            pubsub._schedule_announce_retry(peer_id, announce)
+
+            with trio.fail_after(2):
+                while (
+                    peer_id,
+                    TESTING_TOPIC,
+                    True,
+                ) in pubsub._pending_announce_retries:
+                    await trio.sleep(0.01)
+
+
+@pytest.mark.trio
+async def test_announce_retry_stops_after_max_attempts(monkeypatch):
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs_fsub:
+        pubsub = pubsubs_fsub[0]
+        peer_id = IDFactory()
+        queue = RpcQueue(max_size=1)
+        assert queue.push(rpc_pb2.RPC())
+        announce = rpc_pb2.RPC.SubOpts(subscribe=True, topicid=TESTING_TOPIC)
+
+        with monkeypatch.context() as m:
+            m.setattr(pubsub, "peers", {peer_id: object()})
+            m.setattr(pubsub, "peer_queues", {peer_id: queue})
+            m.setattr("libp2p.pubsub.pubsub.random.randint", lambda _a, _b: 0)
+            m.setattr("libp2p.pubsub.pubsub._ANNOUNCE_RETRY_MAX_ATTEMPTS", 2)
+
+            pubsub._schedule_announce_retry(peer_id, announce)
+
+            with trio.fail_after(2):
+                while (
+                    peer_id,
+                    TESTING_TOPIC,
+                    True,
+                ) in pubsub._pending_announce_retries:
+                    await trio.sleep(0.01)
+
+        assert len(queue) == 1
+
+
+@pytest.mark.trio
+async def test_schedule_announce_retry_noop_when_manager_stopped(monkeypatch):
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs_fsub:
+        pubsub = pubsubs_fsub[0]
+        peer_id = IDFactory()
+        announce = rpc_pb2.RPC.SubOpts(subscribe=True, topicid=TESTING_TOPIC)
+        calls: list[tuple[object, tuple[object, ...]]] = []
+
+        def fake_run_task(fn, *args):
+            calls.append((fn, args))
+
+        with monkeypatch.context() as m:
+            m.setattr(
+                type(pubsub.manager),
+                "is_running",
+                property(lambda _manager: False),
+            )
+            m.setattr(pubsub.manager, "run_task", fake_run_task)
+            pubsub._schedule_announce_retry(peer_id, announce)
+
+        assert len(calls) == 0
+        assert (peer_id, TESTING_TOPIC, True) not in pubsub._pending_announce_retries
 
 
 @pytest.mark.trio
 async def test_subscribe_and_publish():
-    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs_fsub:
         pubsub = pubsubs_fsub[0]
 
         list_data = [b"d0", b"d1"]
@@ -549,7 +906,7 @@ async def test_subscribe_and_publish():
 
 @pytest.mark.trio
 async def test_subscribe_and_publish_full_channel():
-    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs_fsub:
         pubsub = pubsubs_fsub[0]
 
         extra_data_0 = b"extra_data_0"
@@ -590,7 +947,7 @@ async def test_publish_push_msg_is_called(monkeypatch):
         msgs.append(msg)
         await trio.lowlevel.checkpoint()
 
-    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs_fsub:
         with monkeypatch.context() as m:
             m.setattr(pubsubs_fsub[0], "push_msg", push_msg)
 
@@ -610,7 +967,7 @@ async def test_publish_push_msg_is_called(monkeypatch):
 
 @pytest.mark.trio
 async def test_push_msg(monkeypatch):
-    async with PubsubFactory.create_batch_with_floodsub(2) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(2) as pubsubs_fsub:
         msg_0 = make_pubsub_msg(
             origin_id=pubsubs_fsub[0].my_id,
             topic_ids=[TESTING_TOPIC],
@@ -699,16 +1056,38 @@ async def test_push_msg(monkeypatch):
 
 @pytest.mark.trio
 async def test_strict_signing():
-    async with PubsubFactory.create_batch_with_floodsub(
+    async with PubsubFactory.create_batch_with_gossipsub(
         2, strict_signing=True
     ) as pubsubs_fsub:
         await connect(pubsubs_fsub[0].host, pubsubs_fsub[1].host)
+        # Wait for pubsub peers to be connected
+        await pubsubs_fsub[0].wait_for_peer(pubsubs_fsub[1].my_id)
+        await pubsubs_fsub[1].wait_for_peer(pubsubs_fsub[0].my_id)
+
         await pubsubs_fsub[0].subscribe(TESTING_TOPIC)
         await pubsubs_fsub[1].subscribe(TESTING_TOPIC)
-        await trio.sleep(1)
+        # Wait for both subscriptions to propagate
+        await pubsubs_fsub[0].wait_for_subscription(
+            pubsubs_fsub[1].my_id, TESTING_TOPIC
+        )
+        await pubsubs_fsub[1].wait_for_subscription(
+            pubsubs_fsub[0].my_id, TESTING_TOPIC
+        )
+
+        # Wait for gossipsub mesh to form (heartbeat-driven)
+        with trio.fail_after(5.0):
+            while (
+                TESTING_TOPIC not in pubsubs_fsub[0].router.mesh
+                or pubsubs_fsub[1].my_id
+                not in pubsubs_fsub[0].router.mesh[TESTING_TOPIC]
+            ):
+                await trio.sleep(0.01)
 
         await pubsubs_fsub[0].publish(TESTING_TOPIC, TESTING_DATA)
-        await trio.sleep(1)
+        # Wait for message to be seen by both peers
+        with trio.fail_after(2.0):
+            while pubsubs_fsub[1].seen_messages.length() < 1:
+                await trio.sleep(0.01)
 
         assert pubsubs_fsub[0].seen_messages.length() == 1
         assert pubsubs_fsub[1].seen_messages.length() == 1
@@ -716,7 +1095,7 @@ async def test_strict_signing():
 
 @pytest.mark.trio
 async def test_strict_signing_failed_validation(monkeypatch):
-    async with PubsubFactory.create_batch_with_floodsub(
+    async with PubsubFactory.create_batch_with_gossipsub(
         2, strict_signing=True
     ) as pubsubs_fsub:
         msg = make_pubsub_msg(
@@ -777,7 +1156,7 @@ async def test_strict_signing_failed_validation(monkeypatch):
 @pytest.mark.trio
 async def test_blacklist_basic_operations():
     """Test basic blacklist operations: add, remove, check, clear."""
-    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs_fsub:
         pubsub = pubsubs_fsub[0]
 
         # Create test peer IDs
@@ -833,7 +1212,7 @@ async def test_blacklist_basic_operations():
 @pytest.mark.trio
 async def test_blacklist_blocks_new_peer_connections(monkeypatch):
     """Test that blacklisted peers are rejected when trying to connect."""
-    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs_fsub:
         pubsub = pubsubs_fsub[0]
 
         # Create a blacklisted peer ID
@@ -887,7 +1266,7 @@ async def test_blacklist_blocks_new_peer_connections(monkeypatch):
 @pytest.mark.trio
 async def test_blacklist_blocks_messages_from_blacklisted_originator():
     """Test that messages from blacklisted originator (from field) are rejected."""
-    async with PubsubFactory.create_batch_with_floodsub(2) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(2) as pubsubs_fsub:
         pubsub = pubsubs_fsub[0]
         blacklisted_originator = pubsubs_fsub[1].my_id  # Use existing peer ID
 
@@ -935,7 +1314,7 @@ async def test_blacklist_blocks_messages_from_blacklisted_originator():
 @pytest.mark.trio
 async def test_blacklist_allows_non_blacklisted_peers():
     """Test that non-blacklisted peers can send messages normally."""
-    async with PubsubFactory.create_batch_with_floodsub(3) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(3) as pubsubs_fsub:
         pubsub = pubsubs_fsub[0]
         allowed_peer = pubsubs_fsub[1].my_id
         blacklisted_peer = pubsubs_fsub[2].my_id
@@ -1000,7 +1379,7 @@ async def test_blacklist_allows_non_blacklisted_peers():
 @pytest.mark.trio
 async def test_blacklist_integration_with_existing_functionality():
     """Test that blacklisting works correctly with existing pubsub functionality."""
-    async with PubsubFactory.create_batch_with_floodsub(2) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(2) as pubsubs_fsub:
         pubsub = pubsubs_fsub[0]
         other_peer = pubsubs_fsub[1].my_id
 
@@ -1050,7 +1429,7 @@ async def test_blacklist_integration_with_existing_functionality():
 @pytest.mark.trio
 async def test_blacklist_blocks_messages_from_blacklisted_source():
     """Test that messages from blacklisted source (forwarder) are rejected."""
-    async with PubsubFactory.create_batch_with_floodsub(2) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(2) as pubsubs_fsub:
         pubsub = pubsubs_fsub[0]
         blacklisted_forwarder = pubsubs_fsub[1].my_id
 
@@ -1103,13 +1482,13 @@ async def test_blacklist_tears_down_existing_connection():
     removes it from both places.
     """
     # Create two pubsub instances (floodsub), so they can connect to each other
-    async with PubsubFactory.create_batch_with_floodsub(2) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(2) as pubsubs_fsub:
         pubsub0, pubsub1 = pubsubs_fsub
 
         # 1) Connect peer1 to peer0
         await connect(pubsub0.host, pubsub1.host)
-        # Give handle_peer_queue some time to run
-        await trio.sleep(0.1)
+        # Wait for peer to be added to pubsub
+        await pubsub0.wait_for_peer(pubsub1.my_id)
 
         # After connect, pubsub0.peers should contain pubsub1.my_id
         assert pubsub1.my_id in pubsub0.peers
@@ -1125,8 +1504,10 @@ async def test_blacklist_tears_down_existing_connection():
         # 3) Now blacklist peer1
         pubsub0.add_to_blacklist(pubsub1.my_id)
 
-        # Allow the asynchronous teardown task (_teardown_if_connected) to run
-        await trio.sleep(0.1)
+        # Wait for the asynchronous teardown task (_teardown_if_connected) to complete
+        with trio.fail_after(5.0):
+            while pubsub1.my_id in pubsub0.peers:
+                await trio.sleep(0.01)
 
         # 4a) pubsub0.peers should no longer contain peer1
         assert pubsub1.my_id not in pubsub0.peers
@@ -1138,3 +1519,65 @@ async def test_blacklist_tears_down_existing_connection():
         else:
             # It’s also fine if the entire topic entry was pruned
             assert TESTING_TOPIC not in pubsub0.peer_topics
+
+
+@pytest.mark.trio
+async def test_get_message_id():
+    """Test that the get_message_id method provides correct message ID construction."""
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs_fsub:
+        pubsub = pubsubs_fsub[0]
+
+        # Create a test message
+        msg = make_pubsub_msg(
+            origin_id=pubsub.my_id,
+            topic_ids=[TESTING_TOPIC],
+            data=TESTING_DATA,
+            seqno=b"\x00\x00\x00\x00\x00\x00\x00\x01",
+        )
+
+        # Test that get_message_id returns the same result as the internal method
+        public_msg_id = pubsub.get_message_id(msg)
+        internal_msg_id = pubsub._msg_id_constructor(msg)
+
+        assert public_msg_id == internal_msg_id
+
+        # Test that it works with different message ID constructors
+        def custom_msg_id_constructor(msg):
+            return msg.data + msg.from_id
+
+        # Create a new pubsub instance with custom constructor
+        async with PubsubFactory.create_batch_with_gossipsub(
+            1, msg_id_constructor=custom_msg_id_constructor
+        ) as custom_pubsubs:
+            custom_pubsub = custom_pubsubs[0]
+
+            custom_msg_id = custom_pubsub.get_message_id(msg)
+            expected_custom_id = msg.data + msg.from_id
+
+            assert custom_msg_id == expected_custom_id
+
+
+@pytest.mark.trio
+async def test_handle_peer_queue_exception_handling():
+    """Test that _handle_new_peer_safe gracefully handles exceptions."""
+    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
+        pubsub = pubsubs_fsub[0]
+
+        original_handle_new_peer = pubsub._handle_new_peer
+
+        async def mock_handle_new_peer(peer_id):
+            raise Exception("Protocol negotiation failed")
+
+        pubsub._handle_new_peer = mock_handle_new_peer
+
+        test_peer = IDFactory()
+
+        # Directly call the safe wrapper that's used by handle_peer_queue
+        await pubsub._handle_new_peer_safe(test_peer)
+
+        # The key test: service should still be running despite the exception
+        assert pubsub.manager.is_running, (
+            "Pubsub service should continue running even when peer negotiation fails"
+        )
+
+        pubsub._handle_new_peer = original_handle_new_peer

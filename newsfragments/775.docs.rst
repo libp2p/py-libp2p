@@ -1,1 +1,0 @@
-Clarified the requirement for a trailing newline in newsfragments to pass lint checks.

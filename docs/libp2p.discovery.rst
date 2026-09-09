@@ -10,6 +10,9 @@ Subpackages
    libp2p.discovery.bootstrap
    libp2p.discovery.events
    libp2p.discovery.mdns
+   libp2p.discovery.random_walk
+   libp2p.discovery.rendezvous
+   libp2p.discovery.upnp
 
 Submodules
 ----------

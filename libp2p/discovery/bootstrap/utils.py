@@ -6,7 +6,7 @@ from multiaddr import Multiaddr
 
 from libp2p.peer.peerinfo import InvalidAddrError, PeerInfo, info_from_p2p_addr
 
-logger = logging.getLogger("libp2p.discovery.bootstrap.utils")
+logger = logging.getLogger(__name__)
 
 
 def validate_bootstrap_addresses(addrs: list[str]) -> list[str]:
@@ -29,7 +29,7 @@ def validate_bootstrap_addresses(addrs: list[str]) -> list[str]:
             valid_addrs.append(addr_str)
             logger.debug(f"Valid bootstrap address: {addr_str}")
 
-        except (InvalidAddrError, ValueError, Exception) as e:
+        except (InvalidAddrError, ValueError, TypeError) as e:
             logger.warning(f"Invalid bootstrap address '{addr_str}': {e}")
             continue
 

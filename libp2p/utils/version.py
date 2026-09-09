@@ -3,7 +3,7 @@ from importlib.metadata import (
 )
 import logging
 
-logger = logging.getLogger("libp2p.utils.version")
+logger = logging.getLogger(__name__)
 
 
 def get_agent_version() -> str:

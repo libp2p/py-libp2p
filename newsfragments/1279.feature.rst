@@ -1,0 +1,3 @@
+Added a new ``libp2p.filecoin`` DX package with pinned Filecoin protocol/topic/bootstrap
+constants, runtime bootstrap helpers, Filecoin pubsub preset builders, a new ``filecoin-dx``
+CLI, and a Filecoin pubsub demo workflow.

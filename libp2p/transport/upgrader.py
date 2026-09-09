@@ -1,9 +1,7 @@
 from libp2p.abc import (
-    IListener,
     IMuxedConn,
     IRawConnection,
     ISecureConn,
-    ITransport,
 )
 from libp2p.custom_types import (
     TMuxerOptions,
@@ -15,6 +13,9 @@ from libp2p.peer.id import (
 from libp2p.protocol_muxer.exceptions import (
     MultiselectClientError,
     MultiselectError,
+)
+from libp2p.protocol_muxer.multiselect import (
+    DEFAULT_NEGOTIATE_TIMEOUT,
 )
 from libp2p.security.exceptions import (
     HandshakeFailure,
@@ -39,13 +40,12 @@ class TransportUpgrader:
         self,
         secure_transports_by_protocol: TSecurityOptions,
         muxer_transports_by_protocol: TMuxerOptions,
+        negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     ):
         self.security_multistream = SecurityMultistream(secure_transports_by_protocol)
-        self.muxer_multistream = MuxerMultistream(muxer_transports_by_protocol)
-
-    def upgrade_listener(self, transport: ITransport, listeners: IListener) -> None:
-        """Upgrade multiaddr listeners to libp2p-transport listeners."""
-        # TODO: Figure out what to do with this function.
+        self.muxer_multistream = MuxerMultistream(
+            muxer_transports_by_protocol, negotiate_timeout
+        )
 
     async def upgrade_security(
         self,
@@ -57,10 +57,19 @@ class TransportUpgrader:
         try:
             if is_initiator:
                 if peer_id is None:
-                    raise ValueError("peer_id must be provided for outbout connection")
-                return await self.security_multistream.secure_outbound(
+                    raise ValueError("peer_id must be provided for outbound connection")
+                secure_conn = await self.security_multistream.secure_outbound(
                     raw_conn, peer_id
                 )
+                # Validate the authenticated peer ID matches the expected peer ID.
+                authenticated_peer_id = secure_conn.get_remote_peer()
+                if authenticated_peer_id != peer_id:
+                    await secure_conn.close()
+                    raise SecurityUpgradeFailure(
+                        f"Peer ID mismatch: expected {peer_id}, "
+                        f"got {authenticated_peer_id}"
+                    )
+                return secure_conn
             return await self.security_multistream.secure_inbound(raw_conn)
         except (MultiselectError, MultiselectClientError) as error:
             raise SecurityUpgradeFailure(

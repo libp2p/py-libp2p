@@ -1,0 +1,1 @@
+Fixed Kademlia DHT provider advertisement so a failure to open the ADD_PROVIDER stream no longer raises a secondary ``UnboundLocalError``; the underlying connection error is logged instead.

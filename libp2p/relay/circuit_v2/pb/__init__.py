@@ -5,6 +5,11 @@ Contains generated protobuf code for circuit_v2 relay protocol.
 """
 
 # Import the classes to be accessible directly from the package
+
+from .dcutr_pb2 import (
+    HolePunch,
+)
+
 from .circuit_pb2 import (
     HopMessage,
     Limit,
@@ -13,4 +18,4 @@ from .circuit_pb2 import (
     StopMessage,
 )
 
-__all__ = ["HopMessage", "Limit", "Reservation", "Status", "StopMessage"]
+__all__ = ["HopMessage", "Limit", "Reservation", "Status", "StopMessage", "HolePunch"]

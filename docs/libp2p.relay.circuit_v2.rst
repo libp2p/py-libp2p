@@ -60,6 +60,14 @@ libp2p.relay.circuit_v2.protocol_buffer module
    :show-inheritance:
    :undoc-members:
 
+libp2p.relay.circuit_v2.performance_tracker module
+---------------------------------------------------
+
+.. automodule:: libp2p.relay.circuit_v2.performance_tracker
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
 Module contents
 ---------------
 

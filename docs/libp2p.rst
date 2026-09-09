@@ -7,22 +7,30 @@ Subpackages
 .. toctree::
    :maxdepth: 4
 
+   libp2p.bitswap
    libp2p.crypto
    libp2p.discovery
+   libp2p.filecoin
    libp2p.host
    libp2p.identity
    libp2p.io
    libp2p.kad_dht
    libp2p.network
+   libp2p.observability
    libp2p.peer
+   libp2p.perf
    libp2p.protocol_muxer
    libp2p.pubsub
+   libp2p.request_response
+   libp2p.rcmgr
+   libp2p.records
    libp2p.relay
    libp2p.security
    libp2p.stream_muxer
    libp2p.tools
    libp2p.transport
    libp2p.utils
+   libp2p.metrics
 
 Submodules
 ----------
@@ -51,14 +59,6 @@ libp2p.custom_types module
    :undoc-members:
    :show-inheritance:
    :exclude-members: INetStream, IMuxedConn, ISecureTransport
-
-libp2p.utils module
--------------------
-
-.. automodule:: libp2p.utils
-   :members:
-   :undoc-members:
-   :show-inheritance:
 
 Module contents
 ---------------

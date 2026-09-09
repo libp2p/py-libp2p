@@ -13,3 +13,7 @@ class MultiselectError(BaseLibp2pError):
 
 class MultiselectClientError(BaseLibp2pError):
     """Raised when an error occurs in protocol selection process."""
+
+
+class ProtocolNotSupportedError(MultiselectClientError):
+    """Raised when a peer explicitly reports that a protocol is unsupported."""

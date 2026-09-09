@@ -2,12 +2,94 @@
 Utility functions for Kademlia DHT implementation.
 """
 
-import base58
-import multihash
+import hashlib
+import logging
 
+import base58
+import multibase
+
+from libp2p.abc import IHost
+from libp2p.encoding_config import get_default_encoding
+from libp2p.peer.envelope import consume_envelope
 from libp2p.peer.id import (
     ID,
 )
+
+from .pb.kademlia_pb2 import (
+    Message,
+)
+
+logger = logging.getLogger(__name__)
+
+
+def maybe_consume_signed_record(
+    msg: Message | Message.Peer, host: IHost, peer_id: ID | None = None
+) -> bool:
+    """
+    Attempt to parse and store a signed-peer-record (Envelope) received during
+    DHT communication. If the record is invalid, the peer-id does not match, or
+    updating the peerstore fails, the function logs an error and returns False.
+
+    Parameters
+    ----------
+    msg : Message | Message.Peer
+        The protobuf message received during DHT communication. Can either be a
+        top-level `Message` containing `senderRecord` or a `Message.Peer`
+        containing `signedRecord`.
+    host : IHost
+        The local host instance, providing access to the peerstore for storing
+        verified peer records.
+    peer_id : ID | None, optional
+        The expected peer ID for record validation. If provided, the peer ID
+        inside the record must match this value.
+
+    Returns
+    -------
+    bool
+        True if a valid signed peer record was successfully consumed and stored,
+        False otherwise.
+
+    """
+    if isinstance(msg, Message):
+        if msg.HasField("senderRecord"):
+            try:
+                # Convert the signed-peer-record(Envelope) from
+                # protobuf bytes
+                envelope, record = consume_envelope(
+                    msg.senderRecord,
+                    "libp2p-peer-record",
+                )
+                if peer_id is not None and record.peer_id != peer_id:
+                    return False
+                # Use the default  TTL of 2 hours (7200 seconds)
+                if not host.get_peerstore().consume_peer_record(envelope, 7200):
+                    logger.error("Failed to update the Certified-Addr-Book")
+                    return False
+            except Exception as e:
+                logger.error("Failed to update the Certified-Addr-Book: %s", e)
+                return False
+    else:
+        if msg.HasField("signedRecord"):
+            try:
+                # Convert the signed-peer-record(Envelope) from
+                # protobuf bytes
+                envelope, record = consume_envelope(
+                    msg.signedRecord,
+                    "libp2p-peer-record",
+                )
+                if not record.peer_id.to_bytes() == msg.id:
+                    return False
+                # Use the default TTL of 2 hours (7200 seconds)
+                if not host.get_peerstore().consume_peer_record(envelope, 7200):
+                    logger.error("Failed to update the Certified-Addr-Book")
+                    return False
+            except Exception as e:
+                logger.error(
+                    "Failed to update the Certified-Addr-Book: %s",
+                    e,
+                )
+                return False
+    return True
 
 
 def create_key_from_binary(binary_data: bytes) -> bytes:
@@ -21,7 +103,8 @@ def create_key_from_binary(binary_data: bytes) -> bytes:
     bytes: The resulting key.
 
     """
-    return multihash.digest(binary_data, "sha2-256").digest
+    # Hash the data with SHA-256 to produce a 32-byte key
+    return hashlib.sha256(binary_data).digest()
 
 
 def xor_distance(key1: bytes, key2: bytes) -> int:
@@ -48,18 +131,46 @@ def xor_distance(key1: bytes, key2: bytes) -> int:
     return k1 ^ k2
 
 
+def bytes_to_multibase(data: bytes, encoding: str | None = None) -> str:
+    """
+    Convert bytes to multibase-encoded string.
+
+    :param data: Bytes to encode
+    :param encoding: Encoding to use. When *None* the process-wide default
+        from :mod:`libp2p.encoding_config` is used.
+    :return: Multibase-encoded string
+    """
+    if encoding is None:
+        encoding = get_default_encoding()
+    return multibase.encode(encoding, data).decode()
+
+
+def multibase_to_bytes(multibase_str: str) -> bytes:
+    """
+    Convert multibase-encoded string to bytes.
+
+    Args:
+        multibase_str: Multibase-encoded string
+    Returns:
+        Decoded bytes
+    Raises:
+        multibase.InvalidMultibaseStringError: If string is not valid multibase
+        multibase.DecodingError: If decoding fails
+
+    """
+    if not multibase.is_encoded(multibase_str):
+        # Fallback to base58 for backward compatibility
+        return base58.b58decode(multibase_str)
+    result = multibase.decode(multibase_str)
+    # py-multibase may return bytes or (encoding, bytes) depending on
+    # version — handle both.
+    return result[1] if isinstance(result, tuple) else result
+
+
+# Keep old function for backward compatibility
 def bytes_to_base58(data: bytes) -> str:
-    """
-    Convert bytes to base58 encoded string.
-
-    params: data: Input bytes
-
-    Returns
-    -------
-        str: Base58 encoded string
-
-    """
-    return base58.b58encode(data).decode("utf-8")
+    """Deprecated: Use bytes_to_multibase instead."""
+    return base58.b58encode(data).decode()
 
 
 def sort_peer_ids_by_distance(target_key: bytes, peer_ids: list[ID]) -> list[ID]:
@@ -74,11 +185,13 @@ def sort_peer_ids_by_distance(target_key: bytes, peer_ids: list[ID]) -> list[ID]
         List[ID]: Sorted list of peer IDs from closest to furthest
 
     """
+    # Hash the target key to map it into the DHT keyspace
+    target_hash = hashlib.sha256(target_key).digest()
 
     def get_distance(peer_id: ID) -> int:
         # Hash the peer ID bytes to get a key for distance calculation
-        peer_hash = multihash.digest(peer_id.to_bytes(), "sha2-256").digest
-        return xor_distance(target_key, peer_hash)
+        peer_hash = hashlib.sha256(peer_id.to_bytes()).digest()
+        return xor_distance(target_hash, peer_hash)
 
     return sorted(peer_ids, key=get_distance)
 

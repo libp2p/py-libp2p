@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced WebSocket Client</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .section {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .section h2 {
+            margin-top: 0;
+            color: #ffd700;
+            border-bottom: 2px solid #ffd700;
+            padding-bottom: 10px;
+        }
+
+        .form-group {
+            margin: 15px 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        label {
+            font-weight: 600;
+            min-width: 100px;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 5px;
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+            font-size: 1em;
+        }
+
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            background: #ffd700;
+            color: #333;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 1em;
+        }
+
+        button:hover:not(:disabled) {
+            background: #ffed4e;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+
+        .status {
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-weight: 600;
+            text-align: center;
+        }
+
+        .status.connected {
+            background: rgba(40, 167, 69, 0.3);
+            border: 1px solid #28a745;
+        }
+
+        .status.disconnected {
+            background: rgba(220, 53, 69, 0.3);
+            border: 1px solid #dc3545;
+        }
+
+        .status.connecting {
+            background: rgba(23, 162, 184, 0.3);
+            border: 1px solid #17a2b8;
+        }
+
+        #messages {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 5px;
+            padding: 15px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            line-height: 1.4;
+        }
+
+        .message {
+            margin: 5px 0;
+            padding: 5px;
+            border-radius: 3px;
+        }
+
+        .message.info {
+            background: rgba(23, 162, 184, 0.2);
+            border-left: 3px solid #17a2b8;
+        }
+
+        .message.success {
+            background: rgba(40, 167, 69, 0.2);
+            border-left: 3px solid #28a745;
+        }
+
+        .message.error {
+            background: rgba(220, 53, 69, 0.2);
+            border-left: 3px solid #dc3545;
+        }
+
+        .message.echo {
+            background: rgba(255, 193, 7, 0.2);
+            border-left: 3px solid #ffc107;
+        }
+
+        .message.ping {
+            background: rgba(108, 117, 125, 0.2);
+            border-left: 3px solid #6c757d;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .stat-card .label {
+            font-size: 0.9em;
+            opacity: 0.8;
+            margin-bottom: 5px;
+        }
+
+        .stat-card .value {
+            font-size: 1.5em;
+            font-weight: 700;
+            color: #ffd700;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Enhanced WebSocket Client</h1>
+
+        <div class="section">
+            <h2>🔌 Connection</h2>
+            <div class="form-group">
+                <label for="serverUrl">Server Multiaddr:</label>
+                <input type="text" id="serverUrl" value="/ip4/127.0.0.1/tcp/8080/ws/p2p/12D3KooWExample" placeholder="/ip4/127.0.0.1/tcp/8080/ws/p2p/...">
+            </div>
+            <div class="form-group">
+                <button id="connectBtn">Connect</button>
+                <button id="disconnectBtn" disabled>Disconnect</button>
+            </div>
+            <div id="connectionStatus" class="status disconnected">Disconnected</div>
+        </div>
+
+        <div class="section">
+            <h2>📡 Echo Protocol</h2>
+            <div class="form-group">
+                <label for="echoMessage">Message:</label>
+                <input type="text" id="echoMessage" value="Hello WebSocket!" placeholder="Enter message to echo">
+            </div>
+            <div class="form-group">
+                <button id="sendEchoBtn" disabled>Send Echo</button>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>🏓 Ping Protocol</h2>
+            <div class="form-group">
+                <button id="sendPingBtn" disabled>Send Ping</button>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>📊 Statistics</h2>
+            <div class="stats">
+                <div class="stat-card">
+                    <div class="label">Messages Sent</div>
+                    <div class="value" id="messagesSent">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">Messages Received</div>
+                    <div class="value" id="messagesReceived">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">Echo Tests</div>
+                    <div class="value" id="echoTests">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">Ping Tests</div>
+                    <div class="value" id="pingTests">0</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>📝 Activity Log</h2>
+            <div id="messages"></div>
+        </div>
+    </div>
+
+    <script>
+        class WebSocketClient {
+            constructor() {
+                this.ws = null;
+                this.stats = {
+                    messagesSent: 0,
+                    messagesReceived: 0,
+                    echoTests: 0,
+                    pingTests: 0
+                };
+
+                this.initializeElements();
+                this.setupEventListeners();
+                this.updateUI(false);
+            }
+
+            initializeElements() {
+                this.serverUrlInput = document.getElementById('serverUrl');
+                this.connectBtn = document.getElementById('connectBtn');
+                this.disconnectBtn = document.getElementById('disconnectBtn');
+                this.connectionStatus = document.getElementById('connectionStatus');
+                this.echoMessageInput = document.getElementById('echoMessage');
+                this.sendEchoBtn = document.getElementById('sendEchoBtn');
+                this.sendPingBtn = document.getElementById('sendPingBtn');
+                this.messagesDiv = document.getElementById('messages');
+
+                this.messagesSentEl = document.getElementById('messagesSent');
+                this.messagesReceivedEl = document.getElementById('messagesReceived');
+                this.echoTestsEl = document.getElementById('echoTests');
+                this.pingTestsEl = document.getElementById('pingTests');
+            }
+
+            setupEventListeners() {
+                this.connectBtn.addEventListener('click', () => this.connect());
+                this.disconnectBtn.addEventListener('click', () => this.disconnect());
+                this.sendEchoBtn.addEventListener('click', () => this.sendEcho());
+                this.sendPingBtn.addEventListener('click', () => this.sendPing());
+
+                this.echoMessageInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') this.sendEcho();
+                });
+            }
+
+            updateUI(isConnected) {
+                this.connectBtn.disabled = isConnected;
+                this.disconnectBtn.disabled = !isConnected;
+                this.sendEchoBtn.disabled = !isConnected;
+                this.sendPingBtn.disabled = !isConnected;
+
+                this.connectionStatus.textContent = isConnected ? 'Connected' : 'Disconnected';
+                this.connectionStatus.className = `status ${isConnected ? 'connected' : 'disconnected'}`;
+            }
+
+            updateStats(type) {
+                this.stats[type]++;
+                document.getElementById(type).textContent = this.stats[type];
+            }
+
+            log(message, type = 'info') {
+                const messageEl = document.createElement('div');
+                messageEl.className = `message ${type}`;
+                messageEl.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+                this.messagesDiv.appendChild(messageEl);
+                this.messagesDiv.scrollTop = this.messagesDiv.scrollHeight;
+            }
+
+            connect() {
+                const serverUrl = this.serverUrlInput.value;
+                if (!serverUrl) {
+                    this.log('Please enter a server URL', 'error');
+                    return;
+                }
+
+                this.log(`Connecting to ${serverUrl}...`, 'info');
+                this.connectionStatus.textContent = 'Connecting...';
+                this.connectionStatus.className = 'status connecting';
+
+                try {
+                    this.ws = new WebSocket(serverUrl);
+
+                    this.ws.onopen = () => {
+                        this.log('Connected to WebSocket server', 'success');
+                        this.updateUI(true);
+                        this.updateStats('messagesReceived');
+                    };
+
+                    this.ws.onmessage = (event) => {
+                        this.updateStats('messagesReceived');
+                        try {
+                            const data = JSON.parse(event.data);
+                            if (data.protocol === 'echo') {
+                                this.log(`Echo Response: ${data.message}`, 'echo');
+                                this.updateStats('echoTests');
+                            } else if (data.protocol === 'ping') {
+                                this.log(`Ping Response: ${data.message} (Latency: ${data.latency})`, 'ping');
+                                this.updateStats('pingTests');
+                            } else if (data.type === 'welcome') {
+                                this.log(`Welcome: ${data.message}`, 'success');
+                                this.log(`Available protocols: ${data.protocols.join(', ')}`, 'info');
+                            } else {
+                                this.log(`Received: ${event.data}`, 'info');
+                            }
+                        } catch (e) {
+                            this.log(`Received raw: ${event.data}`, 'info');
+                        }
+                    };
+
+                    this.ws.onclose = (event) => {
+                        this.log(`Connection closed. Code: ${event.code}, Reason: ${event.reason}`, 'error');
+                        this.updateUI(false);
+                        this.ws = null;
+                    };
+
+                    this.ws.onerror = (error) => {
+                        this.log(`WebSocket error: ${error.message || error}`, 'error');
+                        this.updateUI(false);
+                    };
+                } catch (e) {
+                    this.log(`Failed to create WebSocket: ${e.message || e}`, 'error');
+                    this.updateUI(false);
+                }
+            }
+
+            disconnect() {
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.close(1000, 'Client initiated disconnect');
+                    this.log('Disconnecting from WebSocket server...', 'info');
+                } else {
+                    this.log('No active WebSocket connection to disconnect', 'error');
+                    this.updateUI(false);
+                }
+            }
+
+            sendMessage(protocol, message) {
+                if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+                    this.log('WebSocket not connected. Please connect first', 'error');
+                    return;
+                }
+
+                const payload = {
+                    protocol: protocol,
+                    message: message
+                };
+
+                this.ws.send(JSON.stringify(payload));
+                this.log(`Sent [${protocol}]: ${message}`, 'info');
+                this.updateStats('messagesSent');
+            }
+
+            sendEcho() {
+                const message = this.echoMessageInput.value;
+                this.sendMessage('echo', message);
+            }
+
+            sendPing() {
+                this.sendMessage('ping', 'ping');
+            }
+        }
+
+        // Initialize the client when the page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            new WebSocketClient();
+        });
+    </script>
+</body>
+</html>

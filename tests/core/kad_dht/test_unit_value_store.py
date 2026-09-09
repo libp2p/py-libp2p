@@ -15,6 +15,7 @@ from unittest.mock import (
 
 import pytest
 
+from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.kad_dht.value_store import (
     DEFAULT_TTL,
     ValueStore,
@@ -22,9 +23,13 @@ from libp2p.kad_dht.value_store import (
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.records.record import make_put_record
 
+# Create a real key pair for signing
+key_pair = create_new_key_pair()
 mock_host = Mock()
-peer_id = ID.from_base58("QmTest123")
+mock_host.get_private_key.return_value = key_pair.private_key
+peer_id = ID.from_pubkey(key_pair.public_key)
 
 
 class TestValueStore:
@@ -54,8 +59,8 @@ class TestValueStore:
         store.put(key, value)
 
         assert key in store.store
-        stored_value, validity = store.store[key]
-        assert stored_value == value
+        stored_value_record, validity = store.store[key]
+        assert stored_value_record.value == value
         assert validity is not None
         assert validity > time.time()  # Should be in the future
 
@@ -69,7 +74,7 @@ class TestValueStore:
         store.put(key, value, validity=custom_validity)
 
         stored_value, validity = store.store[key]
-        assert stored_value == value
+        assert stored_value.value == value
         assert validity == custom_validity
 
     def test_put_overwrite_existing(self):
@@ -84,7 +89,7 @@ class TestValueStore:
 
         assert len(store.store) == 1
         stored_value, _ = store.store[key]
-        assert stored_value == value2
+        assert stored_value.value == value2
 
     def test_get_existing_valid_value(self):
         """Test retrieving an existing, non-expired value."""
@@ -95,7 +100,8 @@ class TestValueStore:
         store.put(key, value)
         retrieved_value = store.get(key)
 
-        assert retrieved_value == value
+        assert retrieved_value is not None
+        assert retrieved_value.value == value
 
     def test_get_nonexistent_key(self):
         """Test retrieving a non-existent key returns None."""
@@ -114,7 +120,8 @@ class TestValueStore:
         expired_validity = time.time() - 1  # 1 second ago
 
         # Manually insert expired value
-        store.store[key] = (value, expired_validity)
+        record = make_put_record(key, value)
+        store.store[key] = (record, expired_validity)
 
         retrieved_value = store.get(key)
 
@@ -169,8 +176,9 @@ class TestValueStore:
         value = b"test_value"
         expired_validity = time.time() - 1
 
+        record = make_put_record(key, value)
         # Manually insert expired value
-        store.store[key] = (value, expired_validity)
+        store.store[key] = (record, expired_validity)
 
         result = store.has(key)
 
@@ -201,9 +209,12 @@ class TestValueStore:
         value = b"value"
         expired_validity = time.time() - 1
 
+        record2 = make_put_record(key2, value)
+        record3 = make_put_record(key3, value)
+
         store.put(key1, value)  # Valid
-        store.store[key2] = (value, expired_validity)  # Expired
-        store.store[key3] = (value, expired_validity)  # Expired
+        store.store[key2] = (record2, expired_validity)  # Expired
+        store.store[key3] = (record3, expired_validity)  # Expired
 
         expired_count = store.cleanup_expired()
 
@@ -226,7 +237,8 @@ class TestValueStore:
         # Valid expiration
         store.put(key2, value, validity=time.time() + 3600)
         # Expired
-        store.store[key3] = (value, time.time() - 1)
+        record3 = make_put_record(key3, value)
+        store.store[key3] = (record3, time.time() - 1)
 
         expired_count = store.cleanup_expired()
 
@@ -254,7 +266,9 @@ class TestValueStore:
 
         store.put(key1, value)
         store.put(key2, value)
-        store.store[key3] = (value, time.time() - 1)  # Expired
+
+        record3 = make_put_record(key3, value)
+        store.store[key3] = (record3, time.time() - 1)  # Expired
 
         keys = store.get_keys()
 
@@ -281,7 +295,9 @@ class TestValueStore:
 
         store.put(key1, value)
         store.put(key2, value)
-        store.store[key3] = (value, time.time() - 1)  # Expired
+
+        record3 = make_put_record(key3, value)
+        store.store[key3] = (record3, time.time() - 1)  # Expired
 
         size = store.size()
 
@@ -296,7 +312,8 @@ class TestValueStore:
         store.put(key, value)
         retrieved_value = store.get(key)
 
-        assert retrieved_value == value
+        assert retrieved_value is not None
+        assert retrieved_value.value == value
 
     def test_edge_case_empty_value(self):
         """Test handling of empty value."""
@@ -307,7 +324,8 @@ class TestValueStore:
         store.put(key, value)
         retrieved_value = store.get(key)
 
-        assert retrieved_value == value
+        assert retrieved_value is not None
+        assert retrieved_value.value == value
 
     def test_edge_case_large_key_value(self):
         """Test handling of large keys and values."""
@@ -318,7 +336,8 @@ class TestValueStore:
         store.put(key, value)
         retrieved_value = store.get(key)
 
-        assert retrieved_value == value
+        assert retrieved_value is not None
+        assert retrieved_value.value == value
 
     def test_edge_case_negative_validity(self):
         """Test handling of negative validity time."""
@@ -382,12 +401,15 @@ class TestValueStore:
         value = b"value"
         current_time = time.time()
 
+        record1 = make_put_record(key1, value)
+        record2 = make_put_record(key2, value)
+        record3 = make_put_record(key3, value)
         # Just expired
-        store.store[key1] = (value, current_time - 0.001)
+        store.store[key1] = (record1, current_time - 0.001)
         # Valid for a longer time to account for test execution time
-        store.store[key2] = (value, current_time + 1.0)
+        store.store[key2] = (record2, current_time + 1.0)
         # Exactly current time (should be expired)
-        store.store[key3] = (value, current_time)
+        store.store[key3] = (record3, current_time)
 
         # Small delay to ensure time has passed
         time.sleep(0.002)
@@ -411,7 +433,7 @@ class TestValueStore:
         stored_tuple = store.store[key]
         assert isinstance(stored_tuple, tuple)
         assert len(stored_tuple) == 2
-        assert stored_tuple[0] == value
+        assert stored_tuple[0].value == value
         assert stored_tuple[1] == validity
 
     @pytest.mark.trio
@@ -426,6 +448,178 @@ class TestValueStore:
         result = await store._store_at_peer(peer_id, key, value)
 
         assert result is True
+
+    @pytest.mark.trio
+    async def test_store_at_peer_propagates_signature_and_author(self):
+        """
+        _store_at_peer must include signature and author from the locally-stored
+        signed record in the outbound PUT_VALUE message.
+
+        This ensures signed-record authenticity is preserved when replicating
+        values to remote peers, matching go-libp2p interoperability requirements.
+        """
+        import varint
+
+        from libp2p.kad_dht.pb.kademlia_pb2 import Message
+
+        # Build a host with a real key pair so put() creates a genuine signed record
+        kp = create_new_key_pair()
+        remote_peer_id = ID.from_base58("QmRemote123456789")
+        local_peer_id = ID.from_pubkey(kp.public_key)
+
+        # Capture the bytes written to the mock stream
+        written: list[bytes] = []
+
+        mock_stream = Mock()
+
+        async def _write(data: bytes) -> None:
+            written.append(data)
+
+        async def _read(n: int) -> bytes:
+            # Simulate a minimal valid PUT_VALUE acknowledgement
+            resp = Message()
+            resp.type = Message.MessageType.PUT_VALUE
+            resp.key = b"test_key"
+            raw = resp.SerializeToString()
+            length = varint.encode(len(raw))
+            # Return one byte at a time for the varint reader, then the body
+            full = length + raw
+            if not hasattr(_read, "_buf"):
+                _read._buf = iter(full)  # type: ignore[attr-defined]
+            byte_val = next(_read._buf, b"")  # type: ignore[attr-defined]
+            return bytes([byte_val]) if isinstance(byte_val, int) else byte_val
+
+        mock_stream.write = Mock(side_effect=_write)
+        mock_stream.read = Mock(side_effect=_read)
+        mock_stream.close = Mock(return_value=None)
+
+        # Patch close to be awaitable
+        async def _close() -> None:
+            pass
+
+        mock_stream.close = _close
+
+        h = Mock()
+        h.get_private_key.return_value = kp.private_key
+        h.get_peerstore.return_value = Mock()
+
+        # env_to_send_in_RPC is called; return empty bytes to keep test simple
+        from libp2p.peer.peerstore import env_to_send_in_RPC
+
+        original_env = env_to_send_in_RPC
+
+        import libp2p.kad_dht.value_store as vs_module
+
+        vs_module.env_to_send_in_RPC = Mock(return_value=(b"", None))  # type: ignore[attr-defined]
+
+        async def _new_stream(*_args: object, **_kwargs: object) -> object:
+            return mock_stream
+
+        h.new_stream = _new_stream
+
+        try:
+            store = ValueStore(host=h, local_peer_id=local_peer_id)
+            key = b"test_key"
+            value = b"test_value"
+
+            # Store locally first (creates signed record)
+            store.put(key, value)
+
+            # Confirm the local record has signature and author set
+            local_record, _ = store.store[key]
+            assert local_record.signature, "put() must produce a non-empty signature"
+            assert local_record.author, "put() must populate the author field"
+
+            # Now replicate to a remote peer
+            await store._store_at_peer(remote_peer_id, key, value)
+
+            # Reconstruct the serialized message from what was written
+            # written[0] is the varint length prefix, written[1] is the proto body
+            assert len(written) >= 2, "Expected varint + proto body to be written"
+            sent_msg = Message()
+            sent_msg.ParseFromString(written[1])
+
+            assert sent_msg.HasField("record"), "Outbound message must contain a record"
+            assert sent_msg.record.signature == local_record.signature, (
+                "Outbound record must carry the signature from the signed record"
+            )
+            assert sent_msg.record.author == local_record.author, (
+                "Outbound record must carry the author from the signed record"
+            )
+        finally:
+            vs_module.env_to_send_in_RPC = original_env  # type: ignore[attr-defined]
+
+    @pytest.mark.trio
+    async def test_store_at_peer_signs_record_without_prior_put(self):
+        """
+        When _store_at_peer is called without a prior put() (e.g. the get_value
+        propagation path), it must still produce a signed outbound record —
+        never a bare unsigned one.
+        """
+        import varint
+
+        from libp2p.kad_dht.pb.kademlia_pb2 import Message
+
+        kp = create_new_key_pair()
+        remote_peer_id = ID.from_base58("QmRemote999")
+        local_peer_id = ID.from_pubkey(kp.public_key)
+
+        written: list[bytes] = []
+
+        async def _write(data: bytes) -> None:
+            written.append(data)
+
+        mock_stream = Mock()
+        resp = Message()
+        resp.type = Message.MessageType.PUT_VALUE
+        resp.key = b"bare_key"
+        raw = resp.SerializeToString()
+        resp_bytes = varint.encode(len(raw)) + raw
+        resp_iter = iter(resp_bytes)
+
+        async def _read(n: int) -> bytes:
+            byte_val = next(resp_iter, b"")
+            return bytes([byte_val]) if isinstance(byte_val, int) else byte_val
+
+        mock_stream.write = Mock(side_effect=_write)
+        mock_stream.read = Mock(side_effect=_read)
+
+        async def _close() -> None:
+            pass
+
+        mock_stream.close = _close
+
+        h = Mock()
+        h.get_private_key.return_value = kp.private_key
+
+        import libp2p.kad_dht.value_store as vs_module
+
+        original_env = vs_module.env_to_send_in_RPC
+        vs_module.env_to_send_in_RPC = Mock(return_value=(b"", None))  # type: ignore[attr-defined]
+
+        async def _new_stream(*_args: object, **_kwargs: object) -> object:
+            return mock_stream
+
+        h.new_stream = _new_stream
+
+        try:
+            store = ValueStore(host=h, local_peer_id=local_peer_id)
+            key = b"bare_key"
+            value = b"bare_value"
+
+            # Do NOT call store.put() — _store_at_peer must sign the record itself
+            await store._store_at_peer(remote_peer_id, key, value)
+
+            assert len(written) >= 2
+            sent_msg = Message()
+            sent_msg.ParseFromString(written[1])
+            assert sent_msg.record.key == key
+            assert sent_msg.record.value == value
+            # The record must be signed even without a prior put()
+            assert sent_msg.record.signature, "record must be signed inline"
+            assert sent_msg.record.author, "record must carry author field"
+        finally:
+            vs_module.env_to_send_in_RPC = original_env  # type: ignore[attr-defined]
 
     @pytest.mark.trio
     async def test_get_from_peer_local_peer(self):
@@ -483,7 +677,11 @@ class TestValueStore:
 
         for i, key in enumerate(keys):
             expected_value = f"value_{i}".encode()
-            assert store.get(key) == expected_value
+
+            retrieved_value = store.get(key)
+
+            assert retrieved_value is not None
+            assert retrieved_value.value == expected_value
 
     def test_unicode_key_handling(self):
         """Test handling of unicode content in keys."""
@@ -501,4 +699,47 @@ class TestValueStore:
         for i, key in enumerate(unicode_keys):
             value = f"value_{i}".encode()
             store.put(key, value)
-            assert store.get(key) == value
+
+            retrieved_value = store.get(key)
+
+            assert retrieved_value is not None
+            assert retrieved_value.value == value
+
+    def test_max_varint_check_in_response_reading(self):
+        """
+        Verify that _get_from_peer and _query_peer_for_closest have max varint
+        byte limits to prevent DoS from malicious peers that send endless
+        continuation bytes in the varint length prefix.
+        """
+        import inspect
+
+        from libp2p.kad_dht.peer_routing import PeerRouting
+
+        # Check _get_from_peer source for max varint check / bounded reader
+        vs_source = inspect.getsource(ValueStore._get_from_peer)
+        has_max_varint = (
+            "max_varint" in vs_source
+            or "max_varint_bytes" in vs_source
+            or "read_varint_prefixed_bytes_limited" in vs_source
+        )
+
+        # Check _query_peer_for_closest source for max varint check / bounded reader
+        pr_source = inspect.getsource(PeerRouting._query_peer_for_closest)
+        has_max_varint_pr = (
+            "max_varint" in pr_source
+            or "max_varint_bytes" in pr_source
+            or "read_varint_prefixed_bytes_limited" in pr_source
+        )
+
+        assert has_max_varint, (
+            "_get_from_peer (value_store.py) has no max varint byte check. "
+            "A malicious peer could send endless continuation bytes "
+            "in the varint length prefix, causing the read loop to consume "
+            "memory/CPU indefinitely."
+        )
+        assert has_max_varint_pr, (
+            "_query_peer_for_closest (peer_routing.py) has no max varint byte check. "
+            "A malicious peer could send endless continuation bytes "
+            "in the varint length prefix, causing the read loop to consume "
+            "memory/CPU indefinitely."
+        )

@@ -12,13 +12,13 @@
 [![Build Status](https://img.shields.io/github/actions/workflow/status/libp2p/py-libp2p/tox.yml?branch=main&label=build%20status)](https://github.com/libp2p/py-libp2p/actions/workflows/tox.yml)
 [![Docs build](https://readthedocs.org/projects/py-libp2p/badge/?version=latest)](http://py-libp2p.readthedocs.io/en/latest/?badge=latest)
 
-> ⚠️ **Warning:** py-libp2p is an experimental and work-in-progress repo under development. We do not yet recommend using py-libp2p in production environments.
+> py-libp2p has moved beyond its experimental roots and is steadily progressing toward production readiness. The core features are stable, and we’re focused on refining performance, expanding protocol support, and ensuring smooth interop with other libp2p implementations. We welcome contributions and real-world usage feedback to help us reach full production maturity.
 
 Read more in the [documentation on ReadTheDocs](https://py-libp2p.readthedocs.io/). [View the release notes](https://py-libp2p.readthedocs.io/en/latest/release_notes.html).
 
 ## Maintainers
 
-Currently maintained by [@pacrob](https://github.com/pacrob), [@seetadev](https://github.com/seetadev) and [@dhuseby](https://github.com/dhuseby), looking for assistance!
+Currently maintained by [@pacrob](https://github.com/pacrob), [@seetadev](https://github.com/seetadev) and [@dhuseby](https://github.com/dhuseby). Please reach out to us for collaboration or active feedback. If you have questions, feel free to open a new [discussion](https://github.com/libp2p/py-libp2p/discussions). We are also available on the libp2p Discord — join us at #py-libp2p [sub-channel](https://discord.gg/d92MEugb).
 
 ## Feature Breakdown
 
@@ -30,23 +30,43 @@ ______________________________________________________________________
 
 ### Transports
 
-| **Transport**                          | **Status** |                                     **Source**                                      |
-| -------------------------------------- | :--------: | :---------------------------------------------------------------------------------: |
-| **`libp2p-tcp`**                       |     ✅     | [source](https://github.com/libp2p/py-libp2p/blob/main/libp2p/transport/tcp/tcp.py) |
-| **`libp2p-quic`**                      |     🌱     |                                                                                     |
-| **`libp2p-websocket`**                 |     ❌     |                                                                                     |
-| **`libp2p-webrtc-browser-to-server`**  |     ❌     |                                                                                     |
-| **`libp2p-webrtc-private-to-private`** |     ❌     |                                                                                     |
+| **Transport**                          | **Status** |                                      **Source**                                       |
+| -------------------------------------- | :--------: | :-----------------------------------------------------------------------------------: |
+| **`libp2p-tcp`**                       |     ✅     |  [source](https://github.com/libp2p/py-libp2p/blob/main/libp2p/transport/tcp/tcp.py)  |
+| **`libp2p-quic`**                      |     ✅     |     [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/transport/quic)     |
+| **`libp2p-websocket`**                 |     ✅     |  [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/transport/websocket)   |
+| **`libp2p-webtransport`**              |     🌱     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/transport/webtransport) |
+| **`libp2p-webrtc-browser-to-server`**  |     🌱     |                                                                                       |
+| **`libp2p-webrtc-private-to-private`** |     🌱     |                                                                                       |
+
+WebRTC-Direct (browser/server) uses the spec **STUN path** by default: inbound
+dials hit a shared UDP port and the listener infers the offer from the first
+STUN packet; outbound dials synthesise an ICE-Lite answer from the multiaddr
+with no default public STUN servers. This is the only signalling path that
+interoperates with go-libp2p / js-libp2p / browsers. An experimental HTTP
+`POST /sdp` harness (`WebRTCTransportConfig(enable_sdp_http_harness=True)`) is
+**for py↔py debugging only** and is *not* interoperable — leave it off in
+production.
+
+**Choosing a dial version.** The listener always accepts both v1 and v2; the
+dialer picks with `WebRTCTransportConfig(webrtc_direct_dial_version=1|2)`:
+
+- **v1** (default today) — the migration path (SDP ufrag/pwd munging). Kept the
+  default while [libp2p/specs#715](https://github.com/libp2p/specs/pull/715) is
+  unmerged so existing v1 peers keep working.
+- **v2** (recommended) — the specs#715 flow, no SDP munging. Prefer it for new
+  deployments; **browser dialling needs v2** once `NoSdpMangleUfrag` support is
+  widespread. The default flips to v2 once specs#715 lands.
 
 ______________________________________________________________________
 
 ### NAT Traversal
 
-| **NAT Traversal**             | **Status** |
-| ----------------------------- | :--------: |
-| **`libp2p-circuit-relay-v2`** |     ❌     |
-| **`libp2p-autonat`**          |     ❌     |
-| **`libp2p-hole-punching`**    |     ❌     |
+| **NAT Traversal**             | **Status** |                                   **Source**                                    |
+| ----------------------------- | :--------: | :-----------------------------------------------------------------------------: |
+| **`libp2p-circuit-relay-v2`** |     ✅     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/relay/circuit_v2) |
+| **`libp2p-autonat`**          |     ✅     |   [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/host/autonat)   |
+| **`libp2p-hole-punching`**    |     ✅     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/relay/circuit_v2) |
 
 ______________________________________________________________________
 
@@ -54,27 +74,27 @@ ______________________________________________________________________
 
 | **Secure Communication** | **Status** |                                  **Source**                                   |
 | ------------------------ | :--------: | :---------------------------------------------------------------------------: |
-| **`libp2p-noise`**       |     🌱     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/security/noise) |
-| **`libp2p-tls`**         |     ❌     |                                                                               |
+| **`libp2p-noise`**       |     ✅     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/security/noise) |
+| **`libp2p-tls`**         |     ✅     |                                                                               |
 
 ______________________________________________________________________
 
 ### Discovery
 
-| **Discovery**        | **Status** |
-| -------------------- | :--------: |
-| **`bootstrap`**      |     ❌     |
-| **`random-walk`**    |     ❌     |
-| **`mdns-discovery`** |     ❌     |
-| **`rendezvous`**     |     ❌     |
+| **Discovery**        | **Status** |                                      **Source**                                      |
+| -------------------- | :--------: | :----------------------------------------------------------------------------------: |
+| **`bootstrap`**      |     ✅     |  [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/discovery/bootstrap)  |
+| **`random-walk`**    |     ✅     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/discovery/random_walk) |
+| **`mdns-discovery`** |     ✅     |    [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/discovery/mdns)     |
+| **`rendezvous`**     |     ✅     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/discovery/rendezvous)  |
 
 ______________________________________________________________________
 
 ### Peer Routing
 
-| **Peer Routing**     | **Status** |
-| -------------------- | :--------: |
-| **`libp2p-kad-dht`** |     ❌     |
+| **Peer Routing**     | **Status** |                               **Source**                               |
+| -------------------- | :--------: | :--------------------------------------------------------------------: |
+| **`libp2p-kad-dht`** |     ✅     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/kad_dht) |
 
 ______________________________________________________________________
 
@@ -89,10 +109,10 @@ ______________________________________________________________________
 
 ### Stream Muxers
 
-| **Stream Muxers**  | **Status** |                                         **Status**                                         |
-| ------------------ | :--------: | :----------------------------------------------------------------------------------------: |
-| **`libp2p-yamux`** |     🌱     |                                                                                            |
-| **`libp2p-mplex`** |     🛠️     | [source](https://github.com/libp2p/py-libp2p/blob/main/libp2p/stream_muxer/mplex/mplex.py) |
+| **Stream Muxers**  | **Status** |                                    **Source**                                     |
+| ------------------ | :--------: | :-------------------------------------------------------------------------------: |
+| **`libp2p-yamux`** |     ✅     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/stream_muxer/yamux) |
+| **`libp2p-mplex`** |     ✅     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/stream_muxer/mplex) |
 
 ______________________________________________________________________
 
@@ -100,7 +120,7 @@ ______________________________________________________________________
 
 | **Storage**         | **Status** |
 | ------------------- | :--------: |
-| **`libp2p-record`** |     ❌     |
+| **`libp2p-record`** |     ✅     |
 
 ______________________________________________________________________
 
@@ -139,3 +159,7 @@ _(non-normative, useful for team notes, not a reference)_
 **Communication over one connection with multiple protocols**: X and Y can communicate over the same connection using different protocols and the multiplexer will appropriately route messages for a given protocol to a particular handler function for that protocol, which allows for each host to handle different protocols with separate functions. Furthermore, we can use multiple streams for a given protocol that allow for the same protocol and same underlying connection to be used for communication about separate topics between nodes X and Y.
 
 **Why use multiple streams?**: The purpose of using the same connection for multiple streams to communicate over is to avoid the overhead of having multiple connections between X and Y. In order for X and Y to differentiate between messages on different streams and different protocols, a multiplexer is used to encode the messages when a message will be sent and decode a message when a message is received. The multiplexer encodes the message by adding a header to the beginning of any message to be sent that contains the stream id (along with some other info). Then, the message is sent across the raw connection and the receiving host will use its multiplexer to decode the message, i.e. determine which stream id the message should be routed to.
+
+### Support
+
+<a href="https://filecoin.drips.network/app/projects/github/libp2p/py-libp2p" target="_blank"><img src="https://filecoin.drips.network/api/embed/project/https%3A%2F%2Fgithub.com%2Flibp2p%2Fpy-libp2p/support.png?background=light&style=drips&text=project&stat=support" alt="Support py-libp2p on drips.network" height="32"></a>

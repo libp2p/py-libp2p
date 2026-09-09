@@ -34,11 +34,11 @@ There is also a more interactive version of the example which runs as separate l
     ==== Starting Identify-Push Listener on port 8888 ====
 
     Listener host ready!
-    Listening on: /ip4/0.0.0.0/tcp/8888/p2p/QmUiN4R3fNrCoQugGgmmb3v35neMEjKFNrsbNGVDsRHWpM
+    Listening on: /ip4/127.0.0.1/tcp/8888/p2p/QmUiN4R3fNrCoQugGgmmb3v35neMEjKFNrsbNGVDsRHWpM
     Peer ID: QmUiN4R3fNrCoQugGgmmb3v35neMEjKFNrsbNGVDsRHWpM
 
     Run dialer with command:
-    identify-push-listener-dialer-demo -d /ip4/0.0.0.0/tcp/8888/p2p/QmUiN4R3fNrCoQugGgmmb3v35neMEjKFNrsbNGVDsRHWpM
+    identify-push-listener-dialer-demo -d /ip4/127.0.0.1/tcp/8888/p2p/QmUiN4R3fNrCoQugGgmmb3v35neMEjKFNrsbNGVDsRHWpM
 
     Waiting for incoming connections... (Ctrl+C to exit)
 
@@ -47,12 +47,12 @@ folder and paste it in:
 
 .. code-block:: console
 
-    $ identify-push-listener-dialer-demo -d /ip4/0.0.0.0/tcp/8888/p2p/QmUiN4R3fNrCoQugGgmmb3v35neMEjKFNrsbNGVDsRHWpM
+    $ identify-push-listener-dialer-demo -d /ip4/127.0.0.1/tcp/8888/p2p/QmUiN4R3fNrCoQugGgmmb3v35neMEjKFNrsbNGVDsRHWpM
 
     ==== Starting Identify-Push Dialer on port 8889 ====
 
     Dialer host ready!
-    Listening on: /ip4/0.0.0.0/tcp/8889/p2p/QmZyXwVuTaBcDeRsSkJpOpWrSt
+    Listening on: /ip4/127.0.0.1/tcp/8889/p2p/QmZyXwVuTaBcDeRsSkJpOpWrSt
 
     Connecting to peer: QmUiN4R3fNrCoQugGgmmb3v35neMEjKFNrsbNGVDsRHWpM
     Successfully connected to listener!

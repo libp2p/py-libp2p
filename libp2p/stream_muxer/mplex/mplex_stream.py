@@ -1,10 +1,10 @@
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from collections.abc import Awaitable, Callable
 from types import (
     TracebackType,
 )
 from typing import (
     TYPE_CHECKING,
+    Any,
 )
 
 import trio
@@ -15,6 +15,7 @@ from libp2p.abc import (
 from libp2p.stream_muxer.exceptions import (
     MuxedConnUnavailable,
 )
+from libp2p.stream_muxer.rw_lock import ReadWriteLock
 
 from .constants import (
     HeaderTags,
@@ -32,72 +33,6 @@ if TYPE_CHECKING:
     from libp2p.stream_muxer.mplex.mplex import (
         Mplex,
     )
-
-
-class ReadWriteLock:
-    """
-    A read-write lock that allows multiple concurrent readers
-    or one exclusive writer, implemented using Trio primitives.
-    """
-
-    def __init__(self) -> None:
-        self._readers = 0
-        self._readers_lock = trio.Lock()  # Protects access to _readers count
-        self._writer_lock = trio.Semaphore(1)  # Allows only one writer at a time
-
-    async def acquire_read(self) -> None:
-        """Acquire a read lock. Multiple readers can hold it simultaneously."""
-        try:
-            async with self._readers_lock:
-                if self._readers == 0:
-                    await self._writer_lock.acquire()
-                self._readers += 1
-        except trio.Cancelled:
-            raise
-
-    async def release_read(self) -> None:
-        """Release a read lock."""
-        async with self._readers_lock:
-            if self._readers == 1:
-                self._writer_lock.release()
-            self._readers -= 1
-
-    async def acquire_write(self) -> None:
-        """Acquire an exclusive write lock."""
-        try:
-            await self._writer_lock.acquire()
-        except trio.Cancelled:
-            raise
-
-    def release_write(self) -> None:
-        """Release the exclusive write lock."""
-        self._writer_lock.release()
-
-    @asynccontextmanager
-    async def read_lock(self) -> AsyncGenerator[None, None]:
-        """Context manager for acquiring and releasing a read lock safely."""
-        acquire = False
-        try:
-            await self.acquire_read()
-            acquire = True
-            yield
-        finally:
-            if acquire:
-                with trio.CancelScope() as scope:
-                    scope.shield = True
-                    await self.release_read()
-
-    @asynccontextmanager
-    async def write_lock(self) -> AsyncGenerator[None, None]:
-        """Context manager for acquiring and releasing a write lock safely."""
-        acquire = False
-        try:
-            await self.acquire_write()
-            acquire = True
-            yield
-        finally:
-            if acquire:
-                self.release_write()
 
 
 class MplexStream(IMuxedStream):
@@ -161,6 +96,8 @@ class MplexStream(IMuxedStream):
             self._buf.extend(data)
         payload = self._buf
         self._buf = self._buf[len(payload) :]
+        if len(payload) == 0:
+            self._raise_when_no_data()
         return bytes(payload)
 
     def _read_return_when_blocked(self) -> bytearray:
@@ -169,9 +106,22 @@ class MplexStream(IMuxedStream):
             try:
                 data = self.incoming_data_channel.receive_nowait()
                 buf.extend(data)
-            except (trio.WouldBlock, trio.EndOfChannel):
+            except (trio.WouldBlock, trio.EndOfChannel, trio.ClosedResourceError):
                 break
         return buf
+
+    def _raise_when_no_data(self) -> None:
+        """
+        Raise when a read finds no buffered data.
+
+        Prefer reset over EOF so a concurrent remote RESET does not look like a
+        clean close after the channel has been drained.
+        """
+        if self.event_reset.is_set():
+            raise MplexStreamReset
+        if self.event_remote_closed.is_set():
+            raise MplexStreamEOF
+        raise MplexStreamEOF
 
     async def read(self, n: int | None = None) -> bytes:
         """
@@ -179,8 +129,34 @@ class MplexStream(IMuxedStream):
         there are not enough bytes in the Mplex buffer. If `n is None`, read
         until EOF.
 
+        Already-buffered bytes (in `_buf` or the incoming channel) are returned
+        even after a remote reset. `MplexStreamReset` is raised only when a later
+        read finds no remaining data.
+
         :param n: number of bytes to read
         :return: bytes actually read
+        :raises TimeoutError: if read_deadline is set and operation times out
+        :raises MplexStreamReset: if stream has been reset and no data remains
+        :raises MplexStreamEOF: if stream has reached end of file
+        :raises ValueError: if n is negative
+        """
+        # Apply read deadline if set
+        return await self._with_timeout(
+            self.read_deadline, "Read", lambda: self._do_read(n)
+        )
+
+    async def _do_read(self, n: int | None = None) -> bytes:
+        """
+        Internal read implementation that performs the actual read operation.
+
+        Drains buffered data before raising reset so a MESSAGE that arrived
+        before (or concurrently with) a remote RESET remains readable.
+
+        :param n: number of bytes to read
+        :return: bytes actually read
+        :raises MplexStreamReset: if stream has been reset and no data remains
+        :raises MplexStreamEOF: if stream has reached end of file
+        :raises ValueError: if n is negative
         """
         async with self.rw_lock.read_lock():
             if n is not None and n < 0:
@@ -188,9 +164,16 @@ class MplexStream(IMuxedStream):
                     "the number of bytes to read `n` must be non-negative or "
                     f"`None` to indicate read until EOF, got n={n}"
                 )
-            if self.event_reset.is_set():
-                raise MplexStreamReset
             if n is None:
+                # After reset, return any already-queued bytes and do not wait
+                # for a clean EOF that will never arrive.
+                self._buf.extend(self._read_return_when_blocked())
+                if self.event_reset.is_set():
+                    if len(self._buf) == 0:
+                        raise MplexStreamReset
+                    payload = self._buf
+                    self._buf = bytearray()
+                    return bytes(payload)
                 return await self._read_until_eof()
             if len(self._buf) == 0:
                 data: bytes
@@ -199,47 +182,69 @@ class MplexStream(IMuxedStream):
                 try:
                     data = self.incoming_data_channel.receive_nowait()
                     self._buf.extend(data)
-                except trio.EndOfChannel:
-                    raise MplexStreamEOF
+                except (trio.EndOfChannel, trio.ClosedResourceError):
+                    # Send-side close -> EndOfChannel; local reset acloses the
+                    # receive end -> ClosedResourceError. Either way, no more data.
+                    self._raise_when_no_data()
                 except trio.WouldBlock:
+                    # If reset already happened and nothing is buffered, do not
+                    # wait for more data — the peer will not send after RESET.
+                    if self.event_reset.is_set():
+                        self._raise_when_no_data()
                     # We know `receive` will be blocked here. Wait for data here with
                     # `receive` and catch all kinds of errors here.
                     try:
                         data = await self.incoming_data_channel.receive()
                         self._buf.extend(data)
                     except trio.EndOfChannel:
-                        if self.event_reset.is_set():
-                            raise MplexStreamReset
-                        if self.event_remote_closed.is_set():
-                            raise MplexStreamEOF
+                        self._raise_when_no_data()
                     except trio.ClosedResourceError as error:
                         # Probably `incoming_data_channel` is closed in `reset` when
-                        # we are waiting for `receive`.
-                        if self.event_reset.is_set():
-                            raise MplexStreamReset
-                        raise Exception(
-                            "`incoming_data_channel` is closed but stream is not reset."
-                            "This should never happen."
-                        ) from error
+                        # we are waiting for `receive`. Drain any leftover buffer
+                        # first; only raise when nothing remains.
+                        if len(self._buf) == 0:
+                            if self.event_reset.is_set():
+                                raise MplexStreamReset
+                            raise Exception(
+                                "`incoming_data_channel` is closed but "
+                                "stream is not reset. This should never happen."
+                            ) from error
             self._buf.extend(self._read_return_when_blocked())
-            payload = self._buf[:n]
-            self._buf = self._buf[len(payload) :]
-            return bytes(payload)
+            # Return buffered data even if reset is set (Yamux-compatible).
+            if len(self._buf) > 0:
+                payload = self._buf[:n]
+                self._buf = self._buf[len(payload) :]
+                return bytes(payload)
+            self._raise_when_no_data()
+            return b""  # pragma: no cover — _raise_when_no_data always raises
 
     async def write(self, data: bytes) -> None:
         """
         Write to stream.
 
-        :return: number of bytes written
+        :param data: bytes to write
+        :raises TimeoutError: if write_deadline is set and operation times out
+        :raises MplexStreamClosed: if stream is closed for writing
+        """
+        # Check if stream is already closed before attempting operation
+        if self.event_local_closed.is_set():
+            raise MplexStreamClosed(f"cannot write to closed stream: data={data!r}")
+
+        # Apply write deadline if set
+        await self._with_timeout(
+            self.write_deadline, "Write", lambda: self._do_write(data)
+        )
+
+    async def _do_write(self, data: bytes) -> None:
+        """
+        Internal write implementation that performs the actual write operation.
+
+        :param data: bytes to write
         """
         async with self.rw_lock.write_lock():
             if self.event_local_closed.is_set():
                 raise MplexStreamClosed(f"cannot write to closed stream: data={data!r}")
-            flag = (
-                HeaderTags.MessageInitiator
-                if self.is_initiator
-                else HeaderTags.MessageReceiver
-            )
+            flag = self._get_header_flag("message")
             await self.muxed_conn.send_message(flag, data, self.stream_id)
 
     async def close(self) -> None:
@@ -251,9 +256,7 @@ class MplexStream(IMuxedStream):
             if self.event_local_closed.is_set():
                 return
 
-        flag = (
-            HeaderTags.CloseInitiator if self.is_initiator else HeaderTags.CloseReceiver
-        )
+        flag = self._get_header_flag("close")
 
         try:
             with trio.fail_after(5):  # timeout in seconds
@@ -287,11 +290,7 @@ class MplexStream(IMuxedStream):
             self.event_reset.set()
 
             if not self.event_remote_closed.is_set():
-                flag = (
-                    HeaderTags.ResetInitiator
-                    if self.is_initiator
-                    else HeaderTags.ResetReceiver
-                )
+                flag = self._get_header_flag("reset")
                 # Try to send reset message to the other side.
                 # Ignore if there is anything wrong.
                 try:
@@ -308,34 +307,110 @@ class MplexStream(IMuxedStream):
             if self.muxed_conn.streams is not None:
                 self.muxed_conn.streams.pop(self.stream_id, None)
 
-    # TODO deadline not in use
-    def set_deadline(self, ttl: int) -> bool:
+    def _validate_ttl(self, ttl: int) -> bool:
         """
-        Set deadline for muxed stream.
+        Validate TTL value for deadline operations.
 
-        :return: True if successful
+        :param ttl: timeout value to validate
+        :return: True if valid (non-negative), False otherwise
         """
+        return ttl >= 0
+
+    def _set_deadline_with_validation(self, ttl: int, deadline_attr: str) -> None:
+        """
+        Set deadline with validation for a specific deadline attribute.
+
+        :param ttl: timeout value
+        :param deadline_attr: attribute name to set ('read_deadline' or
+            'write_deadline')
+        :raises ValueError: if ttl is negative
+        """
+        if not self._validate_ttl(ttl):
+            raise ValueError(f"Deadline TTL must be non-negative, got {ttl}")
+        setattr(self, deadline_attr, ttl)
+
+    async def _with_timeout(
+        self,
+        timeout: int | None,
+        operation_name: str,
+        operation: Callable[[], Awaitable[Any]],
+    ) -> Any:
+        """
+        Execute an operation with optional timeout handling.
+
+        :param timeout: timeout in seconds, None for no timeout
+        :param operation_name: name of the operation for error messages
+        :param operation: callable to execute
+        :return: result of the operation
+        :raises TimeoutError: if operation times out
+        """
+        if timeout is None:
+            return await operation()
+
+        try:
+            with trio.fail_after(timeout):
+                return await operation()
+        except trio.TooSlowError:
+            raise TimeoutError(
+                f"{operation_name} operation timed out after {timeout} seconds"
+            )
+
+    def _get_header_flag(self, operation_type: str) -> HeaderTags:
+        """
+        Get appropriate header flag based on operation type and initiator status.
+
+        :param operation_type: type of operation ('message', 'close', 'reset')
+        :return: appropriate HeaderTags value
+        """
+        flag_map = {
+            "message": (HeaderTags.MessageInitiator, HeaderTags.MessageReceiver),
+            "close": (HeaderTags.CloseInitiator, HeaderTags.CloseReceiver),
+            "reset": (HeaderTags.ResetInitiator, HeaderTags.ResetReceiver),
+        }
+        initiator_flag, receiver_flag = flag_map[operation_type]
+        return initiator_flag if self.is_initiator else receiver_flag
+
+    def set_deadline(self, ttl: int) -> None:
+        """
+        Set deadline for both read and write operations on the muxed stream.
+
+        The deadline is enforced for the entire operation including lock acquisition.
+        If the operation takes longer than the specified timeout, a TimeoutError
+        is raised.
+
+        :param ttl: timeout in seconds for read and write operations
+        :raises ValueError: if ttl is negative
+        """
+        if not self._validate_ttl(ttl):
+            raise ValueError(f"Deadline TTL must be non-negative, got {ttl}")
         self.read_deadline = ttl
         self.write_deadline = ttl
-        return True
 
-    def set_read_deadline(self, ttl: int) -> bool:
+    def set_read_deadline(self, ttl: int) -> None:
         """
         Set read deadline for muxed stream.
 
-        :return: True if successful
-        """
-        self.read_deadline = ttl
-        return True
+        The deadline is enforced for the entire read operation including lock
+        acquisition. If the read operation takes longer than the specified timeout,
+        a TimeoutError is raised.
 
-    def set_write_deadline(self, ttl: int) -> bool:
+        :param ttl: timeout in seconds for read operations
+        :raises ValueError: if ttl is negative
+        """
+        self._set_deadline_with_validation(ttl, "read_deadline")
+
+    def set_write_deadline(self, ttl: int) -> None:
         """
         Set write deadline for muxed stream.
 
-        :return: True if successful
+        The deadline is enforced for the entire write operation including lock
+        acquisition. If the write operation takes longer than the specified timeout,
+        a TimeoutError is raised.
+
+        :param ttl: timeout in seconds for write operations
+        :raises ValueError: if ttl is negative
         """
-        self.write_deadline = ttl
-        return True
+        self._set_deadline_with_validation(ttl, "write_deadline")
 
     def get_remote_address(self) -> tuple[str, int] | None:
         """Delegate to the parent Mplex connection."""

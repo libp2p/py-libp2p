@@ -10,13 +10,15 @@ from collections.abc import (
 import functools
 import hashlib
 import logging
+import random
 import time
 from typing import (
     NamedTuple,
+    Protocol,
     cast,
 )
 
-import base58
+import multibase
 import trio
 
 from libp2p.abc import (
@@ -35,12 +37,17 @@ from libp2p.custom_types import (
     TProtocol,
     ValidatorFn,
 )
+from libp2p.encoding_config import get_default_encoding
 from libp2p.exceptions import (
     ParseError,
     ValidationError,
 )
 from libp2p.io.exceptions import (
     IncompleteReadError,
+    IOException,
+)
+from libp2p.network.connection.exceptions import (
+    RawConnError,
 )
 from libp2p.network.exceptions import (
     SwarmException,
@@ -48,6 +55,7 @@ from libp2p.network.exceptions import (
 from libp2p.network.stream.exceptions import (
     StreamClosed,
     StreamEOF,
+    StreamError,
     StreamReset,
 )
 from libp2p.peer.id import (
@@ -56,7 +64,12 @@ from libp2p.peer.id import (
 from libp2p.peer.peerdata import (
     PeerDataError,
 )
-from libp2p.tools.async_service import (
+from libp2p.peer.peerstore import env_to_send_in_RPC
+from libp2p.pubsub.extensions import (
+    ExtensionsState,
+)
+from libp2p.pubsub.utils import maybe_consume_signed_record
+from libp2p.tools.anyio_service import (
     Service,
 )
 from libp2p.tools.timed_cache.last_seen_cache import (
@@ -74,6 +87,10 @@ from .pb import (
 from .pubsub_notifee import (
     PubsubNotifee,
 )
+from .rpc_queue import (
+    RpcQueue,
+    drop_rpc,
+)
 from .subscription import (
     TrioSubscriptionAPI,
 )
@@ -82,19 +99,136 @@ from .validators import (
     signature_validator,
 )
 
+# GossipSub v1.3+ protocol IDs. Extensions Control Message is only sent when
+# negotiating one of these protocols (per spec: extensions in first message).
+_MESHSUB_V13_PLUS = frozenset(
+    (
+        TProtocol("/meshsub/1.3.0"),
+        TProtocol("/meshsub/1.4.0"),
+        TProtocol("/meshsub/2.0.0"),
+    )
+)
+
+
+class _RouterWithExtensions(Protocol):
+    """Protocol for a router that supports GossipSub v1.3 extensions."""
+
+    extensions_state: ExtensionsState
+
+
 # Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/40e1c94708658b155f30cf99e4574f384756d83c/topic.go#L97  # noqa: E501
 SUBSCRIPTION_CHANNEL_SIZE = 32
+_ANNOUNCE_RETRY_MIN_DELAY_MS = 1
+_ANNOUNCE_RETRY_JITTER_MS = 1000
+_ANNOUNCE_RETRY_MAX_ATTEMPTS = 10
 
-logger = logging.getLogger("libp2p.pubsub")
+# Peer-registration retry policy. The network ``connected`` notifee can fire
+# before the muxer handshake completes, so a one-shot ``new_stream`` may fail;
+# pubsub keeps retrying with capped exponential backoff while the peer remains
+# connected so a peer is never silently left unregistered.
+_PEER_STREAM_BACKOFF_INITIAL = 0.5
+_PEER_STREAM_BACKOFF_MAX = 10.0
+
+logger = logging.getLogger(__name__)
 
 
 def get_peer_and_seqno_msg_id(msg: rpc_pb2.Message) -> bytes:
-    # NOTE: `string(from, seqno)` in Go
-    return msg.seqno + msg.from_id
+    # Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/ab876fc71c34e89a7f0c8f4e361720ca9fa8588a/pubsub.go#L1327-L1330  # noqa: E501
+    return msg.from_id + msg.seqno
 
 
-def get_content_addressed_msg_id(msg: rpc_pb2.Message) -> bytes:
-    return base64.b64encode(hashlib.sha256(msg.data).digest())
+def get_content_addressed_msg_id(
+    msg: rpc_pb2.Message, encoding: str | None = None
+) -> bytes:
+    """
+    Generate content-addressed message ID using multibase encoding.
+
+    :param msg: Pubsub message
+    :param encoding: Encoding to use. When *None* the process-wide default
+        from :mod:`libp2p.encoding_config` is used.
+    :return: Multibase-encoded message ID
+    """
+    if encoding is None:
+        encoding = get_default_encoding()
+    digest = hashlib.sha256(msg.data).digest()
+    return multibase.encode(encoding, digest)
+
+
+def get_topic_aware_msg_id(msg: rpc_pb2.Message) -> bytes:
+    """
+    Generate message ID that includes topic information for better deduplication
+    across topics. Useful for v1.4 multi-topic scenarios.
+    """
+    # Include topics in the hash for better separation
+    topic_str = "|".join(sorted(msg.topicIDs))
+    combined = msg.seqno + msg.from_id + topic_str.encode()
+    return hashlib.sha256(combined).digest()
+
+
+def get_timestamp_msg_id(msg: rpc_pb2.Message) -> bytes:
+    """
+    Generate message ID that includes timestamp for time-based deduplication.
+    Useful for v1.4 time-sensitive applications.
+    """
+    import time
+
+    timestamp = int(time.time() * 1000).to_bytes(8, byteorder="big")
+    return msg.seqno + msg.from_id + timestamp
+
+
+def get_secure_msg_id(msg: rpc_pb2.Message) -> bytes:
+    """
+    Generate cryptographically secure message ID using HMAC.
+    Useful for v1.4 security-sensitive applications.
+    """
+    # Use a combination of message content for HMAC
+    key = msg.from_id + msg.seqno
+    content = msg.data + "|".join(msg.topicIDs).encode()
+    return hashlib.sha256(key + content).digest()
+
+
+class MessageIDGenerator:
+    """
+    Abstract base class for message ID generators in GossipSub v1.4.
+
+    Allows for more sophisticated message ID generation strategies
+    that can maintain state or use external configuration.
+    """
+
+    def generate_id(self, msg: rpc_pb2.Message) -> bytes:
+        """Generate a message ID for the given message."""
+        raise NotImplementedError
+
+    def __call__(self, msg: rpc_pb2.Message) -> bytes:
+        """Make the generator callable like a function."""
+        return self.generate_id(msg)
+
+
+class CustomMessageIDGenerator(MessageIDGenerator):
+    """
+    Customizable message ID generator that allows users to provide
+    their own ID generation function.
+    """
+
+    def __init__(self, id_fn: Callable[[rpc_pb2.Message], bytes]):
+        self.id_fn = id_fn
+
+    def generate_id(self, msg: rpc_pb2.Message) -> bytes:
+        return self.id_fn(msg)
+
+
+class PeerAndSeqnoMessageIDGenerator(MessageIDGenerator):
+    """Standard peer+seqno message ID generator."""
+
+    def generate_id(self, msg: rpc_pb2.Message) -> bytes:
+        return msg.from_id + msg.seqno
+
+
+class ContentAddressedMessageIDGenerator(MessageIDGenerator):
+    """Content-addressed message ID generator using SHA256."""
+
+    def generate_id(self, msg: rpc_pb2.Message) -> bytes:
+        return base64.b64encode(hashlib.sha256(msg.data).digest())
 
 
 class TopicValidator(NamedTuple):
@@ -102,7 +236,90 @@ class TopicValidator(NamedTuple):
     is_async: bool
 
 
+class ValidationResult(NamedTuple):
+    """Result of message validation with caching metadata."""
+
+    is_valid: bool
+    timestamp: float
+    error_message: str | None = None
+
+
+class ValidationCache:
+    """Cache for validation results to avoid redundant validation."""
+
+    def __init__(self, ttl: int = 300, max_size: int = 1000):
+        """
+        Initialize validation cache.
+
+        :param ttl: Time-to-live for cache entries in seconds
+        :param max_size: Maximum number of entries to cache
+        """
+        self.ttl = ttl
+        self.max_size = max_size
+        self.cache: dict[bytes, ValidationResult] = {}
+        self.access_order: list[bytes] = []  # For LRU eviction
+
+    def get(self, msg_id: bytes) -> ValidationResult | None:
+        """Get cached validation result if still valid."""
+        if msg_id not in self.cache:
+            return None
+
+        result = self.cache[msg_id]
+        current_time = time.time()
+
+        # Check if result is still valid
+        if current_time - result.timestamp > self.ttl:
+            self._remove(msg_id)
+            return None
+
+        # Update access order for LRU
+        if msg_id in self.access_order:
+            self.access_order.remove(msg_id)
+        self.access_order.append(msg_id)
+
+        return result
+
+    def put(self, msg_id: bytes, result: ValidationResult) -> None:
+        """Cache a validation result."""
+        # Evict old entries if cache is full
+        while len(self.cache) >= self.max_size and self.access_order:
+            oldest = self.access_order.pop(0)
+            self.cache.pop(oldest, None)
+
+        self.cache[msg_id] = result
+        if msg_id in self.access_order:
+            self.access_order.remove(msg_id)
+        self.access_order.append(msg_id)
+
+    def _remove(self, msg_id: bytes) -> None:
+        """Remove entry from cache."""
+        self.cache.pop(msg_id, None)
+        if msg_id in self.access_order:
+            self.access_order.remove(msg_id)
+
+    def clear_expired(self) -> None:
+        """Clear expired entries from cache."""
+        current_time = time.time()
+        expired_keys = [
+            msg_id
+            for msg_id, result in self.cache.items()
+            if current_time - result.timestamp > self.ttl
+        ]
+        for msg_id in expired_keys:
+            self._remove(msg_id)
+
+
 MAX_CONCURRENT_VALIDATORS = 10
+
+
+class GossipsubEvent:
+    peer_id: str
+
+    publish: bool = False
+    subopts: bool = False
+    control: bool = False
+
+    message_size: int | None = None
 
 
 class Pubsub(Service, IPubsub):
@@ -121,8 +338,11 @@ class Pubsub(Service, IPubsub):
 
     peer_topics: dict[str, set[ID]]
     peers: dict[ID, INetStream]
+    peer_queues: dict[ID, RpcQueue]
 
     topic_validators: dict[str, TopicValidator]
+    validation_cache: ValidationCache
+    validation_timeout: float  # Timeout for async validators in seconds
 
     counter: int  # uint64
 
@@ -136,6 +356,11 @@ class Pubsub(Service, IPubsub):
     event_handle_peer_queue_started: trio.Event
     event_handle_dead_peer_queue_started: trio.Event
 
+    _msg_id_constructor: Callable[[rpc_pb2.Message], bytes]
+    _pending_announce_retries: set[tuple[ID, str, bool]]
+    # topics whose message-cache window we already replayed, per peer
+    _replayed_recent_topics: dict[ID, set[str]]
+
     def __init__(
         self,
         host: IHost,
@@ -144,10 +369,12 @@ class Pubsub(Service, IPubsub):
         seen_ttl: int = 120,
         sweep_interval: int = 60,
         strict_signing: bool = True,
-        msg_id_constructor: Callable[
-            [rpc_pb2.Message], bytes
-        ] = get_peer_and_seqno_msg_id,
+        msg_id_constructor: Callable[[rpc_pb2.Message], bytes]
+        | MessageIDGenerator = get_peer_and_seqno_msg_id,
         max_concurrent_validator_count: int = MAX_CONCURRENT_VALIDATORS,
+        validation_cache_ttl: int = 300,
+        validation_cache_size: int = 1000,
+        validation_timeout: float = 5.0,
     ) -> None:
         """
         Construct a new Pubsub object, which is responsible for handling all
@@ -162,7 +389,11 @@ class Pubsub(Service, IPubsub):
         self.host = host
         self.router = router
 
-        self._msg_id_constructor = msg_id_constructor
+        # Support both callable functions and MessageIDGenerator objects
+        if isinstance(msg_id_constructor, MessageIDGenerator):
+            self._msg_id_constructor = msg_id_constructor.generate_id
+        else:
+            self._msg_id_constructor = msg_id_constructor
 
         # Attach this new Pubsub object to the router
         self.router.attach(self)
@@ -209,13 +440,32 @@ class Pubsub(Service, IPubsub):
         # Create peers map, which maps peer_id (as string) to stream (to a given peer)
         self.peers = {}
 
+        # Per-peer outbound RPC queues
+        self.peer_queues = {}
+
         # Map of topic to topic validator
         self.topic_validators = {}
+
+        # Enhanced validation features (v2.0)
+        self.validation_cache = ValidationCache(
+            validation_cache_ttl, validation_cache_size
+        )
+        self.validation_timeout = validation_timeout
 
         self.counter = int(time.time())
 
         # Set of blacklisted peer IDs
         self.blacklisted_peers = set()
+
+        # Event-based waiting: maps for trio.Event instances
+        # Used by wait_for_peer / wait_for_subscription to avoid busy-waiting
+        self._peer_added_events: dict[ID, trio.Event] = {}
+        self._subscription_events: dict[tuple[ID, str], trio.Event] = {}
+        self._pending_announce_retries = set()
+        self._replayed_recent_topics = {}
+        # Peers with a background stream-registration retry task already in
+        # flight, so concurrent stream failures cannot pile up duplicate tasks.
+        self._peer_stream_retries_pending: set[ID] = set()
 
         self.event_handle_peer_queue_started = trio.Event()
         self.event_handle_dead_peer_queue_started = trio.Event()
@@ -223,6 +473,7 @@ class Pubsub(Service, IPubsub):
     async def run(self) -> None:
         self.manager.run_daemon_task(self.handle_peer_queue)
         self.manager.run_daemon_task(self.handle_dead_peer_queue)
+        self.manager.run_daemon_task(self._validation_cache_cleanup)
         await self.manager.wait_finished()
 
     @property
@@ -247,6 +498,10 @@ class Pubsub(Service, IPubsub):
             packet.subscriptions.extend(
                 [rpc_pb2.RPC.SubOpts(subscribe=True, topicid=topic_id)]
             )
+        # Add the sender's signedRecord in the RPC message
+        envelope_bytes, _ = env_to_send_in_RPC(self.host)
+        packet.senderRecord = envelope_bytes
+
         return packet
 
     async def continuously_read_stream(self, stream: INetStream) -> None:
@@ -263,15 +518,30 @@ class Pubsub(Service, IPubsub):
                 incoming: bytes = await read_varint_prefixed_bytes(stream)
                 rpc_incoming: rpc_pb2.RPC = rpc_pb2.RPC()
                 rpc_incoming.ParseFromString(incoming)
+
+                # Process the sender's signed-record if sent
+                if not maybe_consume_signed_record(rpc_incoming, self.host, peer_id):
+                    logger.error(
+                        "Received an invalid-signed-record, ignoring the incoming msg"
+                    )
+                    continue
+
+                event = GossipsubEvent()
+                event.peer_id = peer_id.pretty()
+                event.message_size = len(incoming)
+
                 if rpc_incoming.publish:
                     # deal with RPC.publish
+                    event.publish = True
                     for msg in rpc_incoming.publish:
                         if not self._is_subscribed_to_msg(msg):
                             continue
                         logger.debug(
                             "received `publish` message %s from peer %s", msg, peer_id
                         )
-                        self.manager.run_task(self.push_msg, peer_id, msg)
+                        # Only schedule task if service is still running
+                        if self.manager.is_running:
+                            self.manager.run_task(self.push_msg, peer_id, msg)
 
                 if rpc_incoming.subscriptions:
                     # deal with RPC.subscriptions
@@ -279,6 +549,7 @@ class Pubsub(Service, IPubsub):
                     # peers because a given node only needs its peers
                     # to know that it is subscribed to the topic (doesn't
                     # need everyone to know)
+                    event.subopts = True
                     for message in rpc_incoming.subscriptions:
                         logger.debug(
                             "received `subscriptions` message %s from peer %s",
@@ -291,6 +562,7 @@ class Pubsub(Service, IPubsub):
                 #   This is necessary because `control` is an optional field in pb2.
                 #   Ref: https://developers.google.com/protocol-buffers/docs/reference/python-generated#singular-fields-proto2  # noqa: E501
                 if rpc_incoming.HasField("control"):
+                    event.control = True
                     # Pass rpc to router so router could perform custom logic
                     logger.debug(
                         "received `control` message %s from peer %s",
@@ -298,10 +570,22 @@ class Pubsub(Service, IPubsub):
                         peer_id,
                     )
                     await self.router.handle_rpc(rpc_incoming, peer_id)
+
+                if stream.metric_send_channel is not None:
+                    await stream.metric_send_channel.send(event)
+
         except StreamEOF:
             logger.debug(
                 f"Stream closed for peer {peer_id}, exiting read loop cleanly."
             )
+        except StreamError as e:
+            # Socket closed during read - this is normal during shutdown
+            logger.debug(
+                f"Stream error for peer {peer_id} (normal during shutdown): {e}"
+            )
+        except (IOException, RawConnError) as e:
+            # Connection closed - normal during teardown
+            logger.debug(f"Connection closed for peer {peer_id} during read: {e}")
 
     def set_topic_validator(
         self, topic: str, validator: ValidatorFn, is_async_validator: bool
@@ -362,9 +646,7 @@ class Pubsub(Service, IPubsub):
                 pass
             del self.peers[peer_id]
         # Also remove from any subscription maps:
-        for _topic, peerset in self.peer_topics.items():
-            if peer_id in peerset:
-                peerset.discard(peer_id)
+        self._forget_all_subscriptions(peer_id)
 
     def remove_from_blacklist(self, peer_id: ID) -> None:
         """
@@ -423,7 +705,7 @@ class Pubsub(Service, IPubsub):
 
         try:
             await self.continuously_read_stream(stream)
-        except (StreamEOF, StreamReset, ParseError, IncompleteReadError) as error:
+        except (StreamError, ParseError, IncompleteReadError) as error:
             logger.debug(
                 "fail to read from peer %s, error=%s,"
                 "closing the stream and remove the peer from record",
@@ -437,7 +719,118 @@ class Pubsub(Service, IPubsub):
         await self.event_handle_peer_queue_started.wait()
         await self.event_handle_dead_peer_queue_started.wait()
 
+    async def wait_for_peer(self, peer_id: ID, timeout: float = 5.0) -> None:
+        """
+        Wait until a pubsub stream with the given peer has been established.
+
+        This method blocks until the given peer has been added to the pubsub
+        peers map, indicating that a pubsub protocol stream exists.
+        Use this instead of arbitrary trio.sleep() calls to avoid race conditions.
+
+        Uses an event-based approach: the task blocks until
+        ``_handle_new_peer`` fires the corresponding :class:`trio.Event`,
+        consuming zero CPU while waiting.
+
+        :param peer_id: the peer ID to wait for
+        :param timeout: maximum time to wait in seconds (default: 5.0)
+        :raises trio.TooSlowError: if the peer stream is not established within
+            the timeout
+
+        Example::
+
+            await connect(host1, host2)
+            await pubsub1.wait_for_peer(host2.get_id())
+            # Now safe to publish or check peer_topics
+        """
+        if peer_id in self.peers:
+            return
+        event = self._peer_added_events.setdefault(peer_id, trio.Event())
+        with trio.fail_after(timeout):
+            await event.wait()
+
+    async def wait_for_subscription(
+        self, peer_id: ID, topic_id: str, timeout: float = 5.0
+    ) -> None:
+        """
+        Wait until a specific peer has subscribed to a topic.
+
+        This method blocks until the given peer appears in the peer_topics map
+        for the specified topic, indicating that they have sent a subscription
+        message. Use this instead of arbitrary trio.sleep() calls to avoid
+        race conditions.
+
+        Uses an event-based approach: the task blocks until
+        ``handle_subscription`` fires the corresponding :class:`trio.Event`,
+        consuming zero CPU while waiting.
+
+        :param peer_id: the peer ID to wait for
+        :param topic_id: the topic to check subscription for
+        :param timeout: maximum time to wait in seconds (default: 5.0)
+        :raises trio.TooSlowError: if the peer does not subscribe within the timeout
+
+        Example::
+
+            await connect(host1, host2)
+            await pubsub1.wait_for_subscription(host2.get_id(), "my-topic")
+            # Now safe to assert subscription state
+        """
+        if topic_id in self.peer_topics and peer_id in self.peer_topics[topic_id]:
+            return
+        key = (peer_id, topic_id)
+        event = self._subscription_events.setdefault(key, trio.Event())
+        with trio.fail_after(timeout):
+            await event.wait()
+
+    async def wait_for_mesh(
+        self, peer_id: ID, topic_id: str, timeout: float = 5.0
+    ) -> None:
+        """
+        Wait until *peer_id* is in this node's GossipSub mesh for *topic_id*.
+
+        Delegates to the router's event-based ``wait_for_mesh``. Requires a
+        GossipSub router.
+
+        :param peer_id: the peer to wait for in the mesh
+        :param topic_id: the topic whose mesh to check
+        :param timeout: maximum time to wait in seconds (default: 5.0)
+        :raises TypeError: if the router does not support ``wait_for_mesh``
+        :raises trio.TooSlowError: if the peer is not in the mesh within timeout
+        """
+        wait = getattr(self.router, "wait_for_mesh", None)
+        if wait is None:
+            raise TypeError(
+                "wait_for_mesh requires a GossipSub router with mesh support"
+            )
+        await wait(peer_id, topic_id, timeout=timeout)
+
+    async def ensure_peer_stream(self, peer_id: ID, timeout: float = 15.0) -> bool:
+        """
+        Ensure a pubsub stream with *peer_id* is open (idempotent).
+
+        Useful when the application established the connection out-of-band —
+        e.g. ``connect_peer`` reusing an existing mDNS connection does not fire
+        a fresh ``connected`` notifee, so without this the peer would never be
+        registered with pubsub. Opens the stream and registers the peer with
+        the router, retrying while the peer stays connected until it succeeds
+        or *timeout* seconds elapse.
+
+        :param peer_id: the peer to register with pubsub
+        :param timeout: maximum seconds to keep retrying (default 15.0)
+        :return: True if the peer is registered with pubsub, False otherwise
+        """
+        if peer_id in self.peers:
+            return True
+        if self.is_peer_blacklisted(peer_id):
+            return False
+        await self._handle_new_peer_with_retry(peer_id, timeout)
+        return peer_id in self.peers
+
     async def _handle_new_peer(self, peer_id: ID) -> None:
+        # Check if we already have a pubsub stream with this peer to avoid duplicates
+        if peer_id in self.peers:
+            logger.debug("Peer %s already has pubsub stream, skipping", peer_id)
+            return
+
         if self.is_peer_blacklisted(peer_id):
             logger.debug("Rejecting blacklisted peer %s", peer_id)
             return
@@ -445,38 +838,288 @@ class Pubsub(Service, IPubsub):
         try:
             stream: INetStream = await self.host.new_stream(peer_id, self.protocols)
         except SwarmException as error:
-            logger.debug("fail to add new peer %s, error %s", peer_id, error)
-            return
+            # The `connected` notifee can fire before the muxer handshake
+            # completes, so a single stream open may legitimately fail. Raise so
+            # callers (e.g. `_handle_new_peer_with_retry`) can retry while the
+            # peer stays connected instead of silently never registering it.
+            logger.debug(
+                "fail to open pubsub stream to peer %s, error %s", peer_id, error
+            )
+            raise
 
-        # Send hello packet
+        # Build hello packet.
         hello = self.get_hello_packet()
+
+        # GossipSub v1.3 – Extensions Control Message injection.
+        # Per spec: "If a peer supports any extension, the Extensions control
+        # message MUST be included in the first message on the stream."
+        # Only inject when we negotiated v1.3+; peers on v1.1/v1.2 must not
+        # receive extension fields.
+        negotiated_protocol = stream.get_protocol()
+        router = self.router
+        if (
+            negotiated_protocol in _MESHSUB_V13_PLUS
+            and hasattr(router, "extensions_state")
+            and hasattr(router, "supports_v13_features")
+        ):
+            # We pass the peer_id because extensions_state needs to track
+            # "sent_extensions" per peer for the at-most-once rule.
+            # cast() tells static type-checkers the narrowed type without
+            # creating a runtime dependency on gossipsub.py from pubsub.py.
+            v13_router = cast(_RouterWithExtensions, router)
+            hello = v13_router.extensions_state.build_hello_extensions(peer_id, hello)
+
         try:
             await stream.write(encode_varint_prefixed(hello.SerializeToString()))
         except StreamClosed:
             logger.debug("Fail to add new peer %s: stream closed", peer_id)
-            return
+            raise
         try:
-            self.router.add_peer(peer_id, stream.get_protocol())
+            self.router.add_peer(peer_id, negotiated_protocol)
         except Exception as error:
             logger.debug("fail to add new peer %s, error %s", peer_id, error)
             return
 
         self.peers[peer_id] = stream
 
+        # Create per-peer outbound queue and spawn sending task
+        queue = RpcQueue()
+        self.peer_queues[peer_id] = queue
+        self.manager.run_task(self.handle_sending_messages, peer_id, stream, queue)
+
+        # Notify anyone waiting in wait_for_peer()
+        if peer_id in self._peer_added_events:
+            self._peer_added_events.pop(peer_id).set()
+
+        # Flush any messages that were queued while this peer's protocol
+        # identification was still in progress (identify-aware publishing).
+        try:
+            await self.router.flush_pending_messages(peer_id)
+        except Exception as error:
+            logger.debug(
+                "failed to flush pending messages for peer %s: %s",
+                peer_id,
+                error,
+            )
+
+        await self._send_recent_messages_to_new_peer(peer_id)
+
         logger.debug("added new peer %s", peer_id)
 
-    def _handle_dead_peer(self, peer_id: ID) -> None:
+    async def _send_recent_messages_to_new_peer(self, peer_id: ID) -> None:
+        """
+        Replay recent messages to a peer whose subscriptions we already hold.
+
+        The peer's subscriptions can land before ``_handle_new_peer`` registers
+        the outbound stream, and ``handle_subscription``'s catch-up is a no-op
+        in that ordering, so the replay has to run again once we can write.
+
+        :param peer_id: the peer that just became writable
+        """
+        subscribed_topics = [
+            topic for topic, peers in self.peer_topics.items() if peer_id in peers
+        ]
+        for topic in subscribed_topics:
+            await self._replay_recent_messages(peer_id, topic)
+
+    async def _replay_recent_messages(self, peer_id: ID, topic: str) -> None:
+        """
+        Replay the router's recent messages for a topic, once per subscription.
+
+        The gate keeps a peer that reconnects or re-announces from being handed
+        the whole message-cache window again. It is dropped when the peer
+        unsubscribes, disconnects, is blacklisted, or when the replay fails.
+
+        :param peer_id: the peer to replay messages to
+        :param topic: the topic to replay messages for
+        """
         if peer_id not in self.peers:
+            # Not writable yet, so the replay would be a no-op. Once the
+            # outbound stream is registered, `_handle_new_peer` replays.
+            return
+
+        replayed = self._replayed_recent_topics.setdefault(peer_id, set())
+        if topic in replayed:
+            return
+        replayed.add(topic)
+
+        try:
+            await self.router.send_recent_messages(peer_id, topic)
+        except Exception as error:
+            # Un-spend the gate so a later announcement can retry.
+            replayed.discard(topic)
+            logger.debug(
+                "failed to send recent messages for topic %s to peer %s: %s",
+                topic,
+                peer_id,
+                error,
+            )
+
+    async def _handle_new_peer_safe(self, peer_id: ID) -> None:
+        """
+        Safely handle new peer with exception handling.
+        This wrapper ensures that any exceptions during peer negotiation
+        don't crash the entire pubsub service. Kept for backward compatibility
+        and tests; the live peer queue now uses ``_handle_new_peer_with_retry``
+        which retries transient failures.
+        """
+        try:
+            await self._handle_new_peer(peer_id)
+        except Exception as error:
+            logger.info(f"Protocol negotiation failed for peer {peer_id}: {error}")
+
+    async def _handle_new_peer_with_retry(
+        self, peer_id: ID, timeout: float | None = None
+    ) -> None:
+        """
+        Open a pubsub stream to *peer_id*, retrying while it stays connected.
+
+        The network ``connected`` notifee fires as soon as the transport
+        connection is established, which can be before the muxer handshake
+        completes. A single ``new_stream`` attempt at that point frequently
+        fails; if pubsub never retried, the peer would silently never be
+        registered and messages to it would be dropped forever.
+
+        Retries with capped exponential backoff while the peer remains
+        connected (unbounded by design when *timeout* is ``None``, matching
+        go-libp2p's persistent mesh maintenance). Registration is idempotent
+        (``_handle_new_peer`` is a no-op once the peer is in ``self.peers``),
+        so concurrent retry tasks for the same peer are safe. If the peer
+        disconnects we give up — a fresh ``connected`` notifee will restart the
+        process on the next connection.
+
+        :param peer_id: the peer to register with pubsub
+        :param timeout: optional maximum seconds to keep retrying (``None`` for
+            unbounded retries while the peer stays connected)
+        """
+        delay = _PEER_STREAM_BACKOFF_INITIAL
+        deadline = None if timeout is None else trio.current_time() + timeout
+        while True:
+            try:
+                await self._handle_new_peer(peer_id)
+                return
+            except (SwarmException, StreamClosed) as error:
+                if not self._peer_is_connected(peer_id):
+                    logger.debug(
+                        "peer %s is no longer connected; giving up on pubsub "
+                        "stream registration: %s",
+                        peer_id,
+                        error,
+                    )
+                    return
+                if deadline is not None and trio.current_time() >= deadline:
+                    logger.debug(
+                        "timed out registering pubsub stream with peer %s", peer_id
+                    )
+                    return
+                logger.debug(
+                    "failed to open pubsub stream to peer %s (retrying in %.1fs): %s",
+                    peer_id,
+                    delay,
+                    error,
+                )
+                await trio.sleep(delay)
+                delay = min(delay * 2, _PEER_STREAM_BACKOFF_MAX)
+            except Exception as error:
+                # Non-retryable registration failure; do not spin forever.
+                logger.debug("failed to register pubsub peer %s: %s", peer_id, error)
+                return
+
+    def _peer_is_connected(self, peer_id: ID) -> bool:
+        """
+        Return True if the peer currently has an open (non-closed) connection.
+
+        A connection whose muxer handshake has not completed yet
+        (``muxed_conn`` not set) still counts as connected: the retry loop must
+        keep trying during that window instead of giving up.
+        """
+        try:
+            connections = self.host.get_network().get_connections(peer_id)
+        except Exception:
+            return False
+        for conn in connections:
+            muxed_conn = getattr(conn, "muxed_conn", None)
+            if muxed_conn is None or not getattr(muxed_conn, "is_closed", False):
+                return True
+        return False
+
+    def _schedule_peer_stream_retry(self, peer_id: ID) -> None:
+        """
+        Schedule a background stream-registration retry for *peer_id*.
+
+        Ensures at most one retry task per peer is in flight, so concurrent
+        stream failures (multiple connections churning) do not pile up
+        duplicate tasks.
+        """
+        if not self.manager.is_running:
+            return
+        if peer_id in self._peer_stream_retries_pending:
+            return
+        self._peer_stream_retries_pending.add(peer_id)
+        self.manager.run_task(self._peer_stream_retry_task, peer_id)
+
+    async def _peer_stream_retry_task(self, peer_id: ID) -> None:
+        try:
+            await self._handle_new_peer_with_retry(peer_id)
+        finally:
+            self._peer_stream_retries_pending.discard(peer_id)
+
+    def _handle_dead_peer(self, peer_id: ID) -> None:
+        # Runs before the `peers` check: subscriptions arrive on the peer's
+        # inbound stream, so a half-registered peer has state to clean up here.
+        self._clear_pending_announce_retries_for_peer(peer_id)
+        self._forget_all_subscriptions(peer_id)
+
+        if peer_id not in self.peers:
+            # A stream failed on a peer that never finished registering. If the
+            # peer is still connected, try again; otherwise there is nothing to
+            # clean up.
+            if self._peer_is_connected(peer_id):
+                self._schedule_peer_stream_retry(peer_id)
             return
         del self.peers[peer_id]
 
-        for topic in self.peer_topics:
-            if peer_id in self.peer_topics[topic]:
-                self.peer_topics[topic].discard(peer_id)
+        # Close the outbound queue so the sending task exits
+        if peer_id in self.peer_queues:
+            self.peer_queues.pop(peer_id).close()
 
         self.router.remove_peer(peer_id)
 
+        # The pubsub stream died but the peer is still connected — e.g. the
+        # stream was opened on a connection whose muxer handshake failed while
+        # a healthy connection exists (common when mDNS auto-connect races an
+        # explicit dial, producing multiple simultaneous connections).
+        # Re-establish the stream so messaging with this peer does not silently
+        # die.
+        if self._peer_is_connected(peer_id):
+            logger.debug(
+                "peer %s still connected after stream close; re-establishing "
+                "pubsub stream",
+                peer_id,
+            )
+            self._schedule_peer_stream_retry(peer_id)
+            return
+
         logger.debug("removed dead peer %s", peer_id)
+
+    def _forget_all_subscriptions(self, peer_id: ID) -> None:
+        for peers in self.peer_topics.values():
+            peers.discard(peer_id)
+        self._replayed_recent_topics.pop(peer_id, None)
+
+    def _forget_subscription(self, peer_id: ID, topic: str) -> None:
+        if topic in self.peer_topics:
+            self.peer_topics[topic].discard(peer_id)
+        replayed = self._replayed_recent_topics.get(peer_id)
+        if replayed is not None:
+            replayed.discard(topic)
+
+    def _clear_pending_announce_retries_for_peer(self, peer_id: ID) -> None:
+        # This is O(n) over pending retry keys. Keep this representation because
+        # retries are bounded and deduplicated per (peer, topic, subscribe).
+        self._pending_announce_retries = {
+            key for key in self._pending_announce_retries if key[0] != peer_id
+        }
 
     async def handle_peer_queue(self) -> None:
         """
@@ -487,19 +1130,65 @@ class Pubsub(Service, IPubsub):
         async with self.peer_receive_channel:
             self.event_handle_peer_queue_started.set()
             async for peer_id in self.peer_receive_channel:
-                # Add Peer
-                self.manager.run_task(self._handle_new_peer, peer_id)
+                # Add Peer - retry while connected so a registration that races
+                # the muxer handshake is not silently dropped.
+                self.manager.run_task(self._handle_new_peer_with_retry, peer_id)
 
     async def handle_dead_peer_queue(self) -> None:
         """
         Continuously read from dead peer channel and close the stream
         between that peer and remove peer info from pubsub and pubsub router.
+        Only removes the peer if there are no remaining active connections.
         """
         async with self.dead_peer_receive_channel:
             self.event_handle_dead_peer_queue_started.set()
             async for peer_id in self.dead_peer_receive_channel:
-                # Remove Peer
+                # Check if peer still has active connections before removing
+                # This prevents premature removal when multiple connections exist
+                network = self.host.get_network()
+                remaining_connections = network.get_connections(peer_id)
+                if remaining_connections:
+                    # Filter out closed connections. A connection whose muxer
+                    # handshake has not completed (``muxed_conn`` not set yet)
+                    # counts as active.
+                    active_connections = [
+                        c
+                        for c in remaining_connections
+                        if getattr(c, "muxed_conn", None) is None
+                        or not getattr(c.muxed_conn, "is_closed", False)
+                    ]
+                    if active_connections:
+                        logger.debug(
+                            "Peer %s still has %d active connections, not removing",
+                            peer_id,
+                            len(active_connections),
+                        )
+                        continue
+                # Remove Peer - no more active connections
                 self._handle_dead_peer(peer_id)
+
+    async def handle_sending_messages(
+        self, peer_id: ID, stream: INetStream, queue: RpcQueue
+    ) -> None:
+        """
+        Per-peer sending loop: pops RPCs from *queue*, splits them if needed,
+        and writes each chunk to *stream*.
+
+        Runs as a task spawned by :meth:`_handle_new_peer`.  Exits when the
+        queue is closed (peer disconnected) or the stream errors.
+        """
+        try:
+            while True:
+                rpc = await queue.pop()
+                if rpc is None:
+                    # Queue was closed
+                    return
+                ok = await self.write_msg(stream, rpc)
+                if not ok:
+                    return
+        except Exception:
+            logger.debug("sending loop for %s terminated with error", peer_id)
+            self._handle_dead_peer(peer_id)
 
     def handle_subscription(
         self, origin_id: ID, sub_message: rpc_pb2.RPC.SubOpts
@@ -513,15 +1202,51 @@ class Pubsub(Service, IPubsub):
         :param sub_message: RPC.SubOpts
         """
         if sub_message.subscribe:
+            was_newly_added = False
             if sub_message.topicid not in self.peer_topics:
                 self.peer_topics[sub_message.topicid] = {origin_id}
+                was_newly_added = True
             elif origin_id not in self.peer_topics[sub_message.topicid]:
                 # Add peer to topic
                 self.peer_topics[sub_message.topicid].add(origin_id)
+                was_newly_added = True
+
+            if was_newly_added:
+                # Notify anyone waiting in wait_for_subscription()
+                key = (origin_id, sub_message.topicid)
+                if key in self._subscription_events:
+                    self._subscription_events.pop(key).set()
+
+                # These hooks are async while `handle_subscription` is sync, so
+                # they have to be spawned.
+                if self.manager.is_running:
+                    # Flush any messages that were queued while waiting for this
+                    # peer's subscription (identify-aware publishing).
+                    self.manager.run_task(
+                        self.router.flush_pending_messages,
+                        origin_id,
+                    )
+
+                    # Also send recent messages from mcache for this topic.
+                    # This handles the case where messages were published before
+                    # this peer was even in pubsub.peers (race during connection
+                    # setup).
+                    self.manager.run_task(
+                        self._replay_recent_messages,
+                        origin_id,
+                        sub_message.topicid,
+                    )
+
+                    # Event-driven mesh first-fill (GossipSub GRAFT); no-op on
+                    # routers without a mesh. Avoids waiting on the next
+                    # heartbeat after subscribe-before-connect.
+                    self.manager.run_task(
+                        self.router.on_peer_subscribed,
+                        origin_id,
+                        sub_message.topicid,
+                    )
         else:
-            if sub_message.topicid in self.peer_topics:
-                if origin_id in self.peer_topics[sub_message.topicid]:
-                    self.peer_topics[sub_message.topicid].discard(origin_id)
+            self._forget_subscription(origin_id, sub_message.topicid)
 
     def notify_subscriptions(self, publish_message: rpc_pb2.Message) -> None:
         """
@@ -542,6 +1267,20 @@ class Pubsub(Service, IPubsub):
                     logger.warning(
                         "fail to deliver message to subscription for topic %s", topic
                     )
+
+    def _build_announce_rpc(
+        self, topic_id: str, subscribe: bool
+    ) -> tuple[rpc_pb2.RPC, rpc_pb2.RPC.SubOpts]:
+        packet = rpc_pb2.RPC()
+        subopt = rpc_pb2.RPC.SubOpts(subscribe=subscribe, topicid=topic_id)
+        packet.subscriptions.extend([subopt])
+        envelope_bytes, _ = env_to_send_in_RPC(self.host)
+        packet.senderRecord = envelope_bytes
+        return packet, subopt
+
+    def _announce_state_matches(self, topic_id: str, subscribe: bool) -> bool:
+        is_currently_subscribed = topic_id in self.subscribed_topics_receive
+        return subscribe == is_currently_subscribed
 
     async def subscribe(self, topic_id: str) -> ISubscriptionAPI:
         """
@@ -566,14 +1305,10 @@ class Pubsub(Service, IPubsub):
         self.subscribed_topics_send[topic_id] = send_channel
         self.subscribed_topics_receive[topic_id] = subscription
 
-        # Create subscribe message
-        packet: rpc_pb2.RPC = rpc_pb2.RPC()
-        packet.subscriptions.extend(
-            [rpc_pb2.RPC.SubOpts(subscribe=True, topicid=topic_id)]
-        )
-
+        # Create subscribe announcement
+        packet, subopt = self._build_announce_rpc(topic_id, subscribe=True)
         # Send out subscribe message to all peers
-        await self.message_all_peers(packet.SerializeToString())
+        await self.message_all_peers(packet.SerializeToString(), announce=subopt)
 
         # Tell router we are joining this topic
         await self.router.join(topic_id)
@@ -599,33 +1334,128 @@ class Pubsub(Service, IPubsub):
         # Only close the send side
         await send_channel.aclose()
 
-        # Create unsubscribe message
-        packet: rpc_pb2.RPC = rpc_pb2.RPC()
-        packet.subscriptions.extend(
-            [rpc_pb2.RPC.SubOpts(subscribe=False, topicid=topic_id)]
-        )
+        # Create unsubscribe announcement
+        packet, subopt = self._build_announce_rpc(topic_id, subscribe=False)
 
         # Send out unsubscribe message to all peers
-        await self.message_all_peers(packet.SerializeToString())
+        await self.message_all_peers(packet.SerializeToString(), announce=subopt)
 
         # Tell router we are leaving this topic
         await self.router.leave(topic_id)
 
-    async def message_all_peers(self, raw_msg: bytes) -> None:
+    async def message_all_peers(
+        self, raw_msg: bytes, announce: rpc_pb2.RPC.SubOpts | None = None
+    ) -> None:
         """
         Broadcast a message to peers.
 
         :param raw_msg: raw contents of the message to broadcast
         """
-        # Broadcast message
-        for stream in self.peers.values():
-            # Write message to stream
-            try:
-                await stream.write(encode_varint_prefixed(raw_msg))
-            except StreamClosed:
-                peer_id = stream.muxed_conn.peer_id
-                logger.debug("Fail to message peer %s: stream closed", peer_id)
-                self._handle_dead_peer(peer_id)
+        rpc_msg: rpc_pb2.RPC | None = None
+
+        # Broadcast message via per-peer outbound queues to preserve
+        # queue back-pressure/drop semantics.
+        for peer_id in tuple(self.peers):
+            queue = self.peer_queues.get(peer_id)
+            if queue is None:
+                logger.debug("No outbound queue for peer %s", peer_id)
+                continue
+
+            # Fast path for small RPCs: avoid split/clone overhead and
+            # enqueue the parsed RPC directly.
+            if len(raw_msg) <= queue.max_message_size:
+                if rpc_msg is None:
+                    rpc_msg = rpc_pb2.RPC()
+                    rpc_msg.ParseFromString(raw_msg)
+                self._enqueue_or_retry_announce(peer_id, queue, rpc_msg, announce)
+                continue
+
+            if rpc_msg is None:
+                rpc_msg = rpc_pb2.RPC()
+                rpc_msg.ParseFromString(raw_msg)
+
+            for part in queue.split_rpc(rpc_msg):
+                if part.ByteSize() > queue.max_message_size:
+                    # Intentional asymmetry: only queue-full drops schedule
+                    # announce retries. Oversized chunks are terminal here,
+                    # matching _run_announce_retry, which also bails out when
+                    # the announce RPC itself exceeds max_message_size.
+                    drop_rpc(peer_id, part)
+                    continue
+
+                ok = queue.push(part)
+                if not ok:
+                    drop_rpc(peer_id, part)
+                    if announce is not None:
+                        self._schedule_announce_retry(peer_id, announce)
+                    break
+
+    def _enqueue_or_retry_announce(
+        self,
+        peer_id: ID,
+        queue: RpcQueue,
+        rpc_msg: rpc_pb2.RPC,
+        announce: rpc_pb2.RPC.SubOpts | None,
+    ) -> None:
+        ok = queue.push(rpc_msg)
+        if ok:
+            return
+
+        drop_rpc(peer_id, rpc_msg)
+        if announce is not None:
+            self._schedule_announce_retry(peer_id, announce)
+
+    def _schedule_announce_retry(
+        self, peer_id: ID, announce: rpc_pb2.RPC.SubOpts
+    ) -> None:
+        if not self.manager.is_running:
+            return
+
+        key = (peer_id, announce.topicid, announce.subscribe)
+        if key in self._pending_announce_retries:
+            return
+        self._pending_announce_retries.add(key)
+        self.manager.run_task(
+            self._run_announce_retry, peer_id, announce.topicid, announce.subscribe
+        )
+
+    async def _run_announce_retry(
+        self, peer_id: ID, topic_id: str, subscribe: bool
+    ) -> None:
+        key = (peer_id, topic_id, subscribe)
+        try:
+            for _ in range(_ANNOUNCE_RETRY_MAX_ATTEMPTS):
+                if not self.manager.is_running:
+                    return
+
+                delay_ms = _ANNOUNCE_RETRY_MIN_DELAY_MS + random.randint(
+                    0, _ANNOUNCE_RETRY_JITTER_MS - 1
+                )
+                await trio.sleep(delay_ms / 1000)
+
+                if not self._announce_state_matches(topic_id, subscribe):
+                    return
+
+                queue = self.peer_queues.get(peer_id)
+                if queue is None:
+                    return
+
+                # Rebuild the announce RPC on every attempt so senderRecord and
+                # any host-address-derived record data stays fresh if listen
+                # addresses changed since the previous attempt.
+                retry_rpc, _ = self._build_announce_rpc(topic_id, subscribe)
+
+                if retry_rpc.ByteSize() > queue.max_message_size:
+                    drop_rpc(peer_id, retry_rpc)
+                    return
+
+                ok = queue.push(retry_rpc)
+                if ok:
+                    return
+
+                drop_rpc(peer_id, retry_rpc)
+        finally:
+            self._pending_announce_retries.discard(key)
 
     async def publish(self, topic_id: str | list[str], data: bytes) -> None:
         """
@@ -669,11 +1499,22 @@ class Pubsub(Service, IPubsub):
         msg: rpc_pb2.Message,
     ) -> None:
         """
-        Validate the received message.
+        Validate the received message with caching and timeout support.
 
         :param msg_forwarder: the peer who forward us the message.
         :param msg: the message.
         """
+        # Check validation cache first
+        msg_id = self._msg_id_constructor(msg)
+        cached_result = self.validation_cache.get(msg_id)
+        if cached_result is not None:
+            if not cached_result.is_valid:
+                error_msg = cached_result.error_message or "unknown error"
+                raise ValidationError(
+                    f"Cached validation failed for msg={msg}: {error_msg}"
+                )
+            return
+
         sync_topic_validators: list[SyncValidatorFn] = []
         async_topic_validators: list[AsyncValidatorFn] = []
         for topic_validator in self.get_msg_validators(msg):
@@ -686,26 +1527,61 @@ class Pubsub(Service, IPubsub):
                     cast(SyncValidatorFn, topic_validator.validator)
                 )
 
-        for validator in sync_topic_validators:
-            if not validator(msg_forwarder, msg):
-                raise ValidationError(f"Validation failed for msg={msg}")
+        validation_error = None
+        try:
+            # Run synchronous validators first
+            for validator in sync_topic_validators:
+                if not validator(msg_forwarder, msg):
+                    validation_error = "Synchronous validation failed"
+                    raise ValidationError(f"Validation failed for msg={msg}")
 
-        if len(async_topic_validators) > 0:
-            # Appends to lists are thread safe in CPython
-            results: list[bool] = []
+            # Run asynchronous validators with timeout
+            if len(async_topic_validators) > 0:
+                try:
+                    with trio.move_on_after(self.validation_timeout) as cancel_scope:
+                        # Appends to lists are thread safe in CPython
+                        results: list[bool] = []
 
-            async with trio.open_nursery() as nursery:
-                for async_validator in async_topic_validators:
-                    nursery.start_soon(
-                        self._run_async_validator,
-                        async_validator,
-                        msg_forwarder,
-                        msg,
-                        results,
-                    )
+                        async with trio.open_nursery() as nursery:
+                            for async_validator in async_topic_validators:
+                                nursery.start_soon(
+                                    self._run_async_validator,
+                                    async_validator,
+                                    msg_forwarder,
+                                    msg,
+                                    results,
+                                )
 
-            if not all(results):
-                raise ValidationError(f"Validation failed for msg={msg}")
+                        if not all(results):
+                            validation_error = "Asynchronous validation failed"
+                            raise ValidationError(f"Validation failed for msg={msg}")
+
+                    if cancel_scope.cancelled_caught:
+                        validation_error = "Validation timeout"
+                        raise ValidationError(f"Validation timeout for msg={msg}")
+
+                except ValidationError:
+                    raise
+                except Exception as e:
+                    validation_error = f"Validation error: {e}"
+                    raise ValidationError(f"Validation error for msg={msg}: {e}")
+
+            # Cache successful validation
+            self.validation_cache.put(
+                msg_id, ValidationResult(is_valid=True, timestamp=time.time())
+            )
+
+        except ValidationError:
+            # Cache failed validation
+            self.validation_cache.put(
+                msg_id,
+                ValidationResult(
+                    is_valid=False,
+                    timestamp=time.time(),
+                    error_message=validation_error,
+                ),
+            )
+            raise
 
     async def _run_async_validator(
         self,
@@ -746,6 +1622,18 @@ class Pubsub(Service, IPubsub):
         if self._is_msg_seen(msg):
             return
 
+        try:
+            scorer = getattr(self.router, "scorer", None)
+            if scorer is not None:
+                if not scorer.allow_publish(msg_forwarder, list(msg.topicIDs)):
+                    logger.debug(
+                        "Rejecting message from %s by publish score gate", msg_forwarder
+                    )
+                    return
+        except Exception:
+            # Router may not support scoring; ignore gracefully
+            pass
+
         # Check if signing is required and if so validate the signature
         if self.strict_signing:
             # Validate the signature of the message
@@ -758,24 +1646,38 @@ class Pubsub(Service, IPubsub):
         try:
             await self.validate_msg(msg_forwarder, msg)
         except ValidationError:
+            # Scoring: count invalid messages
+            try:
+                scorer = getattr(self.router, "scorer", None)
+                if scorer is not None:
+                    for topic in msg.topicIDs:
+                        scorer.on_invalid_message(msg_forwarder, topic)
+            except Exception:
+                pass
             logger.debug(
                 "Topic validation failed: sender %s sent data %s under topic IDs: %s %s:%s",  # noqa: E501
                 msg_forwarder,
                 msg.data.hex(),
                 msg.topicIDs,
-                base58.b58encode(msg.from_id).decode(),
+                ID(msg.from_id).to_base58(),
                 msg.seqno.hex(),
             )
             return
 
         self._mark_msg_seen(msg)
 
+        # Scoring: first delivery for this sender per topic
+        try:
+            scorer = getattr(self.router, "scorer", None)
+            if scorer is not None:
+                for topic in msg.topicIDs:
+                    scorer.on_first_delivery(msg_forwarder, topic)
+        except Exception:
+            pass
+
         # reject messages claiming to be from ourselves but not locally published
         self_id = self.host.get_id()
-        if (
-            base58.b58encode(msg.from_id).decode() == self_id
-            and msg_forwarder != self_id
-        ):
+        if ID(msg.from_id) == self_id and msg_forwarder != self_id:
             logger.debug(
                 "dropping message claiming to be from self but forwarded from %s",
                 msg_forwarder,
@@ -801,6 +1703,19 @@ class Pubsub(Service, IPubsub):
     def _is_subscribed_to_msg(self, msg: rpc_pb2.Message) -> bool:
         return any(topic in self.topic_ids for topic in msg.topicIDs)
 
+    def get_message_id(self, msg: rpc_pb2.Message) -> bytes:
+        """
+        Get the message ID for a given message using the configured
+        message ID constructor.
+
+        This method provides a public interface for external components (like routers)
+        to access message ID construction functionality.
+
+        :param msg: the message to get the ID for
+        :return: the message ID as bytes
+        """
+        return self._msg_id_constructor(msg)
+
     async def write_msg(self, stream: INetStream, rpc_msg: rpc_pb2.RPC) -> bool:
         """
         Write an RPC message to a stream with proper error handling.
@@ -808,10 +1723,10 @@ class Pubsub(Service, IPubsub):
         Implements WriteMsg similar to go-msgio which is used in go-libp2p
         Ref: https://github.com/libp2p/go-msgio/blob/master/protoio/uvarint_writer.go#L56
 
-
         :param stream: stream to write the message to
         :param rpc_msg: RPC message to write
-        :return: True if successful, False if stream was closed
+        :return: True if successful, False if stream was closed (StreamClosed)
+            or reset (StreamReset)
         """
         try:
             # Calculate message size first
@@ -835,8 +1750,19 @@ class Pubsub(Service, IPubsub):
             # Single write operation (like Go's s.Write(buf))
             await stream.write(bytes(buf))
             return True
-        except StreamClosed:
+        except (StreamClosed, StreamReset):
             peer_id = stream.muxed_conn.peer_id
-            logger.debug("Fail to write message to %s: stream closed", peer_id)
+            logger.debug("Fail to write message to %s: stream closed or reset", peer_id)
             self._handle_dead_peer(peer_id)
             return False
+
+    async def _validation_cache_cleanup(self) -> None:
+        """
+        Periodically clean up expired validation cache entries.
+        """
+        while self.manager.is_running:
+            await trio.sleep(60)  # Clean up every minute
+            try:
+                self.validation_cache.clear_expired()
+            except Exception as e:
+                logger.debug("Error during validation cache cleanup: %s", e)

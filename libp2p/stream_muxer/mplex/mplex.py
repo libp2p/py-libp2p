@@ -1,8 +1,18 @@
+from collections.abc import (
+    Awaitable,
+    Callable,
+)
+import inspect
 import logging
+from typing import (
+    Any,
+)
 
+import multiaddr
 import trio
 
 from libp2p.abc import (
+    ConnectionType,
     IMuxedConn,
     IMuxedStream,
     ISecureConn,
@@ -14,6 +24,7 @@ from libp2p.exceptions import (
     ParseError,
 )
 from libp2p.io.exceptions import (
+    ConnectionClosedError,
     IncompleteReadError,
 )
 from libp2p.network.connection.exceptions import (
@@ -46,7 +57,7 @@ MPLEX_PROTOCOL_ID = TProtocol("/mplex/6.7.0")
 # Ref: https://github.com/libp2p/go-mplex/blob/414db61813d9ad3e6f4a7db5c1b1612de343ace9/multiplex.go#L115  # noqa: E501
 MPLEX_MESSAGE_CHANNEL_SIZE = 8
 
-logger = logging.getLogger("libp2p.stream_muxer.mplex.mplex")
+logger = logging.getLogger(__name__)
 
 
 class Mplex(IMuxedConn):
@@ -66,15 +77,21 @@ class Mplex(IMuxedConn):
     event_shutting_down: trio.Event
     event_closed: trio.Event
     event_started: trio.Event
+    on_close: Callable[[], Awaitable[Any]] | None
+    _established: bool
 
-    def __init__(self, secured_conn: ISecureConn, peer_id: ID) -> None:
+    def __init__(
+        self,
+        secured_conn: ISecureConn,
+        peer_id: ID,
+        on_close: Callable[[], Awaitable[Any]] | None = None,
+    ) -> None:
         """
         Create a new muxed connection.
 
         :param secured_conn: an instance of ``ISecureConn``
-        :param generic_protocol_handler: generic protocol handler
-        for new muxed streams
         :param peer_id: peer_id of peer the connection is to
+        :param on_close: optional callback to be called when the connection closes
         """
         self.secured_conn = secured_conn
 
@@ -92,6 +109,24 @@ class Mplex(IMuxedConn):
         self.event_shutting_down = trio.Event()
         self.event_closed = trio.Event()
         self.event_started = trio.Event()
+        self.on_close = on_close
+        self._established = False
+
+    @property
+    def is_established(self) -> bool:
+        """
+        Check if the Mplex connection is fully established and ready for streams.
+
+        Returns True when:
+        - The event_started has been set
+        - The handle_incoming task is actively running
+        - The connection is not shutting down
+        """
+        return (
+            self._established
+            and self.event_started.is_set()
+            and not self.event_shutting_down.is_set()
+        )
 
     async def start(self) -> None:
         await self.handle_incoming()
@@ -104,10 +139,14 @@ class Mplex(IMuxedConn):
         """
         Close the stream muxer and underlying secured connection.
         """
-        if self.event_shutting_down.is_set():
-            return
-        # Set the `event_shutting_down`, to allow graceful shutdown.
-        self.event_shutting_down.set()
+        # Always close the underlying connection, even when the mux is already
+        # shutting down. The read loop's _cleanup() sets event_shutting_down on
+        # a peer-initiated EOF *without* closing our socket, so returning early
+        # here would leak it (#1487). secured_conn.close() is idempotent; this
+        # mirrors Yamux.close(), which closes the secured conn unconditionally.
+        if not self.event_shutting_down.is_set():
+            # Set the `event_shutting_down`, to allow graceful shutdown.
+            self.event_shutting_down.set()
         await self.secured_conn.close()
         # Blocked until `close` is finally set.
         await self.event_closed.wait()
@@ -166,7 +205,7 @@ class Mplex(IMuxedConn):
 
     async def send_message(
         self, flag: HeaderTags, data: bytes | None, stream_id: StreamID
-    ) -> int:
+    ) -> None:
         """
         Send a message over the connection.
 
@@ -182,8 +221,7 @@ class Mplex(IMuxedConn):
 
         _bytes = header + encode_varint_prefixed(data)
 
-        # type ignored TODO figure out return for this and write_to_stream
-        return await self.write_to_stream(_bytes)  # type: ignore
+        await self.write_to_stream(_bytes)
 
     async def write_to_stream(self, _bytes: bytes) -> None:
         """
@@ -194,7 +232,7 @@ class Mplex(IMuxedConn):
         """
         try:
             await self.secured_conn.write(_bytes)
-        except RawConnError as e:
+        except (RawConnError, ConnectionClosedError) as e:
             raise MplexUnavailable(
                 "failed to write message to the underlying connection"
             ) from e
@@ -204,6 +242,7 @@ class Mplex(IMuxedConn):
         Read a message off of the secured connection and add it to the
         corresponding message buffer.
         """
+        self._established = True
         self.event_started.set()
         while True:
             try:
@@ -223,14 +262,24 @@ class Mplex(IMuxedConn):
         """
         try:
             header = await decode_uvarint_from_stream(self.secured_conn)
-        except (ParseError, RawConnError, IncompleteReadError) as error:
+        except (
+            ParseError,
+            RawConnError,
+            ConnectionClosedError,
+            IncompleteReadError,
+        ) as error:
             raise MplexUnavailable(
                 "failed to read the header correctly from the underlying connection: "
                 f"{error}"
             )
         try:
             message = await read_varint_prefixed_bytes(self.secured_conn)
-        except (ParseError, RawConnError, IncompleteReadError) as error:
+        except (
+            ParseError,
+            RawConnError,
+            ConnectionClosedError,
+            IncompleteReadError,
+        ) as error:
             raise MplexUnavailable(
                 "failed to read the message body correctly from the underlying "
                 f"connection: {error}"
@@ -263,7 +312,7 @@ class Mplex(IMuxedConn):
             await self._handle_reset(stream_id)
         else:
             # Receives messages with an unknown flag
-            # TODO: logging
+            logger.warning("Received message with unknown flag: %d", flag)
             async with self.streams_lock:
                 if stream_id in self.streams:
                     stream = self.streams[stream_id]
@@ -287,13 +336,19 @@ class Mplex(IMuxedConn):
             if stream_id not in self.streams:
                 # We receive a message of the stream `stream_id` which is not accepted
                 #   before. It is abnormal. Possibly disconnect?
-                # TODO: Warn and emit logs about this.
+                logger.warning(
+                    "Received message for non-existent stream: %s", stream_id
+                )
                 return
             stream = self.streams[stream_id]
             send_channel = self.streams_msg_channels[stream_id]
         async with stream.close_lock:
             if stream.event_remote_closed.is_set():
-                # TODO: Warn "Received data from remote after stream was closed by them. (len = %d)"  # noqa: E501
+                logger.warning(
+                    "Received data from remote after stream was closed by them. "
+                    "(len = %d)",
+                    len(message),
+                )
                 return
         try:
             send_channel.send_nowait(message)
@@ -336,6 +391,8 @@ class Mplex(IMuxedConn):
                 return
             stream = self.streams[stream_id]
             send_channel = self.streams_msg_channels[stream_id]
+        # Close send_channel so the receive side sees EndOfChannel after any
+        # already-queued messages are drained (see MplexStream.read).
         await send_channel.aclose()
         async with stream.close_lock:
             if not stream.event_remote_closed.is_set():
@@ -362,7 +419,32 @@ class Mplex(IMuxedConn):
                 await send_channel.aclose()
         self.event_closed.set()
         await self.new_stream_send_channel.aclose()
+        # Call on_close callback if provided
+        if self.on_close:
+            logger.debug(f"Calling on_close for peer {self.peer_id}")
+            try:
+                if inspect.iscoroutinefunction(self.on_close):
+                    await self.on_close()
+                else:
+                    # Handle case where on_close is not a coroutine function
+                    result = self.on_close()
+                    if inspect.isawaitable(result):
+                        await result
+            except Exception as callback_error:
+                logger.error(f"Error in on_close callback: {callback_error}")
 
     def get_remote_address(self) -> tuple[str, int] | None:
         """Delegate to the underlying Mplex connection's secured_conn."""
         return self.secured_conn.get_remote_address()
+
+    def get_transport_addresses(self) -> list[multiaddr.Multiaddr]:
+        """
+        Get transport addresses by delegating to secured_conn.
+        """
+        return self.secured_conn.get_transport_addresses()
+
+    def get_connection_type(self) -> ConnectionType:
+        """
+        Get connection type by delegating to secured_conn.
+        """
+        return self.secured_conn.get_connection_type()

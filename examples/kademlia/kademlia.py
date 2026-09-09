@@ -4,6 +4,7 @@
 A basic example of using the Kademlia DHT implementation, with all setup logic inlined.
 This example demonstrates both value storage/retrieval and content server
 advertisement/discovery.
+It also shows how to use custom validators for namespaced keys.
 """
 
 import argparse
@@ -13,7 +14,6 @@ import random
 import secrets
 import sys
 
-import base58
 from multiaddr import (
     Multiaddr,
 )
@@ -32,15 +32,54 @@ from libp2p.kad_dht.kad_dht import (
     DHTMode,
     KadDHT,
 )
-from libp2p.kad_dht.utils import (
-    create_key_from_binary,
-)
-from libp2p.tools.async_service import (
+from libp2p.records.validator import Validator
+from libp2p.tools.anyio_service import (
     background_trio_service,
 )
 from libp2p.tools.utils import (
     info_from_p2p_addr,
 )
+from libp2p.utils.paths import get_script_dir, join_paths
+
+
+# Custom validator for the "example" namespace
+class ExampleValidator(Validator):
+    """
+    A simple validator for the 'example' namespace.
+
+    This validator accepts any value and always selects the first value
+    when comparing multiple values.
+    """
+
+    def validate(self, key: str, value: bytes) -> None:
+        """
+        Validate a key-value pair.
+
+        In a real application, you might check:
+        - Value format/schema
+        - Signatures
+        - Size limits
+        - etc.
+        """
+        # For this example, we accept any value
+        # You can add custom validation logic here
+        if not value:
+            raise ValueError("Value cannot be empty")
+
+    def select(self, key: str, values: list[bytes]) -> int:
+        """
+        Select the best value from a list of values.
+
+        Returns the index of the selected value.
+        In this example, we simply return the first value (index 0).
+
+        In a real application, you might:
+        - Compare timestamps
+        - Check version numbers
+        - Verify signatures and pick the most recent valid one
+        """
+        return 0
+
 
 # Configure logging
 logging.basicConfig(
@@ -53,8 +92,8 @@ logger = logging.getLogger("kademlia-example")
 # Configure DHT module loggers to inherit from the parent logger
 # This ensures all kademlia-example.* loggers use the same configuration
 # Get the directory where this script is located
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-SERVER_ADDR_LOG = os.path.join(SCRIPT_DIR, "server_node_addr.txt")
+SCRIPT_DIR = get_script_dir(__file__)
+SERVER_ADDR_LOG = join_paths(SCRIPT_DIR, "server_node_addr.txt")
 
 # Set the level for all child loggers
 for module in [
@@ -149,85 +188,100 @@ async def run_node(
 
         key_pair = create_new_key_pair(secrets.token_bytes(32))
         host = new_host(key_pair=key_pair)
-        listen_addr = Multiaddr(f"/ip4/127.0.0.1/tcp/{port}")
 
-        async with host.run(listen_addrs=[listen_addr]), trio.open_nursery() as nursery:
+        from libp2p.utils.address_validation import (
+            get_available_interfaces,
+            get_optimal_binding_address,
+        )
+
+        listen_addrs = get_available_interfaces(port)
+
+        async with host.run(listen_addrs=listen_addrs), trio.open_nursery() as nursery:
             # Start the peer-store cleanup task
             nursery.start_soon(host.get_peerstore().start_cleanup_task, 60)
 
             peer_id = host.get_id().pretty()
-            addr_str = f"/ip4/127.0.0.1/tcp/{port}/p2p/{peer_id}"
+
+            # Get all available addresses with peer ID
+            all_addrs = host.get_addrs()
+
+            logger.info("Listener ready, listening on:")
+            for addr in all_addrs:
+                logger.info(f"{addr}")
+
+            # Use optimal address for the bootstrap command
+            optimal_addr = get_optimal_binding_address(port)
+            optimal_addr_with_peer = f"{optimal_addr}/p2p/{host.get_id().to_string()}"
+            bootstrap_cmd = f"--bootstrap {optimal_addr_with_peer}"
+            logger.info("To connect to this node, use: %s", bootstrap_cmd)
+
             await connect_to_bootstrap_nodes(host, bootstrap_nodes)
             dht = KadDHT(host, dht_mode)
+
+            # Register a custom validator for the "example" namespace
+            # This allows us to store values with keys like "/example/my-key"
+            dht.register_validator("example", ExampleValidator())
+            logger.info("Registered custom 'example' namespace validator")
+
             # take all peer ids from the host and add them to the dht
             for peer_id in host.get_peerstore().peer_ids():
                 await dht.routing_table.add_peer(peer_id)
             logger.info(f"Connected to bootstrap nodes: {host.get_connected_peers()}")
-            bootstrap_cmd = f"--bootstrap {addr_str}"
-            logger.info("To connect to this node, use: %s", bootstrap_cmd)
 
             # Save server address in server mode
             if dht_mode == DHTMode.SERVER:
-                save_server_addr(addr_str)
+                save_server_addr(str(optimal_addr_with_peer))
 
             # Start the DHT service
             async with background_trio_service(dht):
                 logger.info(f"DHT service started in {dht_mode.value} mode")
-                val_key = create_key_from_binary(b"py-libp2p kademlia example value")
-                content = b"Hello from python node "
-                content_key = create_key_from_binary(content)
+
+                # Example 1: Simple Key-Value Storage with namespaced key
+                # Keys MUST be namespaced (e.g., /namespace/key) for validation
+                # The namespace must have a registered validator
+                key = "/example/my-example-key"
+                value = b"Hello from py-libp2p!"
+
+                # Example 2: Content Provider Advertisement
+                # Provider keys use a different storage mechanism (provider store)
+                # that doesn't go through the value validation path
+                content_id = "my-content-identifier"
 
                 if dht_mode == DHTMode.SERVER:
-                    # Store a value in the DHT
-                    msg = "Hello message from Sumanjeet"
-                    val_data = msg.encode()
-                    await dht.put_value(val_key, val_data)
-                    logger.info(
-                        f"Stored value '{val_data.decode()}'"
-                        f"with key: {base58.b58encode(val_key).decode()}"
-                    )
+                    # Store key-value pair in the DHT
+                    await dht.put_value(key, value)
+                    logger.info(f"Stored value: {value.decode()} with key: {key}")
 
-                    # Advertise as content server
-                    success = await dht.provider_store.provide(content_key)
+                    # Advertise as a provider for content
+                    success = await dht.provide(content_id)
                     if success:
-                        logger.info(
-                            "Successfully advertised as server"
-                            f"for content: {content_key.hex()}"
-                        )
+                        logger.info(f"Advertised as provider for content: {content_id}")
                     else:
-                        logger.warning("Failed to advertise as content server")
+                        logger.warning("Failed to advertise as provider")
 
                 else:
-                    # retrieve the value
-                    logger.info(
-                        "Looking up key: %s", base58.b58encode(val_key).decode()
-                    )
-                    val_data = await dht.get_value(val_key)
-                    if val_data:
-                        try:
-                            logger.info(f"Retrieved value: {val_data.decode()}")
-                        except UnicodeDecodeError:
-                            logger.info(f"Retrieved value (bytes): {val_data!r}")
+                    # Retrieve value from DHT using the same key
+                    logger.info(f"Looking up key: {key}")
+                    retrieved_value = await dht.get_value(key)
+                    if retrieved_value:
+                        logger.info(f"Retrieved value: {retrieved_value.decode()}")
                     else:
                         logger.warning("Failed to retrieve value")
 
-                    # Also check if we can find servers for our own content
-                    logger.info("Looking for servers of content: %s", content_key.hex())
-                    providers = await dht.provider_store.find_providers(content_key)
+                    # Find providers for content
+                    logger.info(f"Looking for providers of content: {content_id}")
+                    providers = await dht.find_providers(content_id)
                     if providers:
                         logger.info(
-                            "Found %d servers for content: %s",
-                            len(providers),
-                            [p.peer_id.pretty() for p in providers],
+                            f"Found {len(providers)} providers: "
+                            f"{[p.peer_id.pretty() for p in providers]}"
                         )
                     else:
-                        logger.warning(
-                            "No servers found for content %s", content_key.hex()
-                        )
+                        logger.warning("No providers found")
 
                 # Keep the node running
                 while True:
-                    logger.debug(
+                    logger.info(
                         "Status - Connected peers: %d,"
                         "Peers in store: %d, Values in store: %d",
                         len(dht.host.get_connected_peers()),

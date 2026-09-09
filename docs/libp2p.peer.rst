@@ -4,10 +4,26 @@ libp2p.peer package
 Submodules
 ----------
 
+libp2p.peer.envelope module
+---------------------------
+
+.. automodule:: libp2p.peer.envelope
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 libp2p.peer.id module
 ---------------------
 
 .. automodule:: libp2p.peer.id
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+libp2p.peer.peer_record module
+------------------------------
+
+.. automodule:: libp2p.peer.peer_record
    :members:
    :undoc-members:
    :show-inheritance:

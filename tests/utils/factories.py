@@ -51,6 +51,7 @@ from libp2p.host.routed_host import (
 from libp2p.io.abc import (
     ReadWriteCloser,
 )
+from libp2p.network.config import ConnectionConfig
 from libp2p.network.connection.raw_connection import (
     RawConnection,
 )
@@ -80,6 +81,9 @@ from libp2p.pubsub.pubsub import (
     Pubsub,
     get_peer_and_seqno_msg_id,
 )
+from libp2p.pubsub.score import (
+    ScoreParams,
+)
 from libp2p.security.insecure.transport import (
     PLAINTEXT_PROTOCOL_ID,
     InsecureTransport,
@@ -88,11 +92,18 @@ from libp2p.security.noise.messages import (
     NoiseHandshakePayload,
     make_handshake_payload_sig,
 )
+from libp2p.security.noise.patterns import (
+    PatternXX,
+)
 from libp2p.security.noise.transport import (
     PROTOCOL_ID as NOISE_PROTOCOL_ID,
     Transport as NoiseTransport,
 )
 import libp2p.security.secio.transport as secio
+from libp2p.security.tls.transport import (
+    PROTOCOL_ID as TLS_PROTOCOL_ID,
+    TLSTransport,
+)
 from libp2p.stream_muxer.mplex.mplex import (
     MPLEX_PROTOCOL_ID,
     Mplex,
@@ -104,7 +115,7 @@ from libp2p.stream_muxer.yamux.yamux import (
     Yamux,
     YamuxStream,
 )
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     background_trio_service,
 )
 from libp2p.tools.constants import (
@@ -147,7 +158,10 @@ def initialize_peerstore_with_our_keypair(self_id: ID, key_pair: KeyPair) -> Pee
 
 
 def noise_static_key_factory() -> PrivateKey:
-    return create_ed25519_key_pair().private_key
+    # Generate X25519 key for Noise static key (as per Noise spec)
+    from libp2p.crypto.x25519 import X25519PrivateKey
+
+    return X25519PrivateKey.new()
 
 
 def noise_handshake_payload_factory() -> NoiseHandshakePayload:
@@ -174,7 +188,6 @@ def noise_transport_factory(key_pair: KeyPair) -> ISecureTransport:
         libp2p_keypair=key_pair,
         noise_privkey=noise_static_key_factory(),
         early_data=None,
-        with_noise_pipes=False,
     )
 
 
@@ -192,6 +205,12 @@ def security_options_factory_factory(
             transport_factory = secio_transport_factory
         elif protocol_id == NOISE_PROTOCOL_ID:
             transport_factory = noise_transport_factory
+        elif protocol_id == TLS_PROTOCOL_ID:
+
+            def tls_transport_factory(key_pair):
+                return TLSTransport(key_pair)
+
+            transport_factory = tls_transport_factory
         else:
             raise Exception(f"security transport {protocol_id} is not supported")
         return {protocol_id: transport_factory(key_pair)}
@@ -231,23 +250,38 @@ async def raw_conn_factory(
 
     tcp_transport = TCP()
     listener = tcp_transport.create_listener(tcp_stream_handler)
-    await listener.listen(LISTEN_MADDR, nursery)
-    listening_maddr = listener.get_addrs()[0]
-    conn_0 = await tcp_transport.dial(listening_maddr)
-    await event.wait()
-    assert conn_0 is not None and conn_1 is not None
-    yield conn_0, conn_1
+    try:
+        await listener.listen(LISTEN_MADDR)
+        listening_maddr = listener.get_addrs()[0]
+        conn_0 = await tcp_transport.dial(listening_maddr)
+        await event.wait()
+        assert conn_0 is not None and conn_1 is not None
+        yield conn_0, conn_1
+    finally:
+        # Close both ends: conn_0 is the dial side, conn_1 the accepted server
+        # side. Closing the listener cancels the handler task but does not
+        # release conn_1's accepted socket, so close it explicitly too.
+        if conn_0 is not None:
+            await conn_0.close()
+        if conn_1 is not None:
+            await conn_1.close()
+
+        await listener.close()
 
 
 @asynccontextmanager
 async def noise_conn_factory(
     nursery: trio.Nursery,
 ) -> AsyncIterator[tuple[ISecureConn, ISecureConn]]:
+    # create_ed25519_key_pair() supplies the libp2p identity KeyPair only.
+    # The Noise static private key is not taken from that argument:
+    # noise_transport_factory always sets noise_privkey=noise_static_key_factory()
+    # (X25519). See noise_transport_factory above.
     local_transport = cast(
-        NoiseTransport, noise_transport_factory(create_secp256k1_key_pair())
+        NoiseTransport, noise_transport_factory(create_ed25519_key_pair())
     )
     remote_transport = cast(
-        NoiseTransport, noise_transport_factory(create_secp256k1_key_pair())
+        NoiseTransport, noise_transport_factory(create_ed25519_key_pair())
     )
 
     local_secure_conn: ISecureConn | None = None
@@ -277,6 +311,148 @@ async def noise_conn_factory(
         yield local_secure_conn, remote_secure_conn
 
 
+@asynccontextmanager
+async def pattern_handshake_factory(
+    nursery: trio.Nursery,
+    initiator_pattern: PatternXX,
+    responder_pattern: PatternXX,
+) -> AsyncIterator[tuple[ISecureConn, ISecureConn]]:
+    """
+    Create a real TCP connection pair and perform Noise XX handshake at pattern level.
+
+    This factory is used for testing PatternXX handshake functionality directly,
+    bypassing the Transport layer to test pattern-specific behavior.
+
+    Args:
+        nursery: Trio nursery for concurrent operations
+        initiator_pattern: PatternXX instance for the initiator side
+        responder_pattern: PatternXX instance for the responder side
+
+    Yields:
+        Tuple of (initiator_secure_conn, responder_secure_conn)
+
+    """
+    initiator_secure_conn: ISecureConn | None = None
+    responder_secure_conn: ISecureConn | None = None
+
+    # Use raw_conn_factory to get TCP connections
+    async with raw_conn_factory(nursery) as conns:
+        init_conn, resp_conn = conns
+
+        async def perform_initiator_handshake() -> None:
+            nonlocal initiator_secure_conn
+            initiator_secure_conn = await initiator_pattern.handshake_outbound(
+                init_conn, responder_pattern.local_peer
+            )
+
+        async def perform_responder_handshake() -> None:
+            nonlocal responder_secure_conn
+            responder_secure_conn = await responder_pattern.handshake_inbound(resp_conn)
+
+        # Perform handshake concurrently
+        async with trio.open_nursery() as handshake_nursery:
+            handshake_nursery.start_soon(perform_initiator_handshake)
+            handshake_nursery.start_soon(perform_responder_handshake)
+
+        # Wait for handshake to complete
+        if initiator_secure_conn is None or responder_secure_conn is None:
+            raise Exception(
+                "Handshake failed: "
+                f"initiator_secure_conn={initiator_secure_conn}, "
+                f"responder_secure_conn={responder_secure_conn}"
+            )
+
+        yield initiator_secure_conn, responder_secure_conn
+
+
+@asynccontextmanager
+async def transport_handshake_factory(
+    nursery: trio.Nursery,
+    initiator_transport: NoiseTransport,
+    responder_transport: NoiseTransport,
+) -> AsyncIterator[tuple[ISecureConn, ISecureConn]]:
+    """
+    Create a real TCP connection pair and perform Noise handshake at transport level.
+
+    This factory is used for testing Transport integration with real connections.
+    It uses transport.secure_outbound/inbound which internally use patterns.
+
+    Args:
+        nursery: Trio nursery for concurrent operations
+        initiator_transport: NoiseTransport instance for the initiator side
+        responder_transport: NoiseTransport instance for the responder side
+
+    Yields:
+        Tuple of (initiator_secure_conn, responder_secure_conn)
+
+    """
+    initiator_secure_conn: ISecureConn | None = None
+    responder_secure_conn: ISecureConn | None = None
+
+    # Use raw_conn_factory to get TCP connections
+    async with raw_conn_factory(nursery) as conns:
+        init_conn, resp_conn = conns
+
+        async def upgrade_initiator_conn() -> None:
+            nonlocal initiator_secure_conn
+            initiator_secure_conn = await initiator_transport.secure_outbound(
+                init_conn, responder_transport.local_peer
+            )
+
+        async def upgrade_responder_conn() -> None:
+            nonlocal responder_secure_conn
+            responder_secure_conn = await responder_transport.secure_inbound(resp_conn)
+
+        # Perform handshake concurrently
+        async with trio.open_nursery() as hshake_nursery:
+            hshake_nursery.start_soon(upgrade_initiator_conn)
+            hshake_nursery.start_soon(upgrade_responder_conn)
+
+        # Verify handshake completed
+        if initiator_secure_conn is None or responder_secure_conn is None:
+            raise Exception(
+                "Transport handshake failed: "
+                f"initiator_secure_conn={initiator_secure_conn}, "
+                f"responder_secure_conn={responder_secure_conn}"
+            )
+
+        yield initiator_secure_conn, responder_secure_conn
+
+
+@asynccontextmanager
+async def tls_conn_factory(
+    nursery: trio.Nursery,
+    client_transport: TLSTransport | None = None,
+    server_transport: TLSTransport | None = None,
+) -> AsyncIterator[tuple[ISecureConn, ISecureConn]]:
+    local_transport = client_transport or TLSTransport(create_secp256k1_key_pair())
+    remote_transport = server_transport or TLSTransport(create_secp256k1_key_pair())
+    # Interop-style handshakes work without a PKIX trust store (libp2p extension only).
+
+    local_secure_conn: ISecureConn | None = None
+    remote_secure_conn: ISecureConn | None = None
+
+    async def upgrade_local_conn(local_conn: IRawConnection) -> None:
+        nonlocal local_secure_conn
+        local_secure_conn = await local_transport.secure_outbound(
+            local_conn, remote_transport.local_peer
+        )
+
+    async def upgrade_remote_conn(remote_conn: IRawConnection) -> None:
+        nonlocal remote_secure_conn
+        remote_secure_conn = await remote_transport.secure_inbound(remote_conn)
+
+    async with raw_conn_factory(nursery) as (local_conn, remote_conn):
+        async with trio.open_nursery() as n:
+            n.start_soon(upgrade_local_conn, local_conn)
+            n.start_soon(upgrade_remote_conn, remote_conn)
+        if local_secure_conn is None or remote_secure_conn is None:
+            raise Exception(
+                "local or remote secure conn has not been successfully upgraded"
+            )
+        yield local_secure_conn, remote_secure_conn
+
+
 class SwarmFactory(factory.Factory):
     class Meta:
         model = Swarm
@@ -296,7 +472,8 @@ class SwarmFactory(factory.Factory):
             o.muxer_opt,
         )
     )
-    transport = factory.LazyFunction(TCP)
+    transports = factory.LazyFunction(lambda: [TCP()])
+    connection_config = factory.LazyFunction(ConnectionConfig)
 
     @classmethod
     @asynccontextmanager
@@ -305,6 +482,7 @@ class SwarmFactory(factory.Factory):
         key_pair: KeyPair | None = None,
         security_protocol: TProtocol | None = None,
         muxer_opt: TMuxerOptions | None = None,
+        connection_config: ConnectionConfig | None = None,
     ) -> AsyncIterator[Swarm]:
         # `factory.Factory.__init__` does *not* prepare a *default value* if we pass
         # an argument explicitly with `None`. If an argument is `None`, we don't pass it
@@ -316,10 +494,19 @@ class SwarmFactory(factory.Factory):
             optional_kwargs["security_protocol"] = security_protocol
         if muxer_opt is not None:
             optional_kwargs["muxer_opt"] = muxer_opt
+        if connection_config is not None:
+            optional_kwargs["connection_config"] = connection_config
         swarm = cls(**optional_kwargs)
         async with background_trio_service(swarm):
             await swarm.listen(LISTEN_MADDR)
-            yield swarm
+            try:
+                yield swarm
+            finally:
+                # Deterministic teardown: close the swarm (and its live
+                # connections + listeners) instead of relying on the service
+                # manager cancelling tasks, which leaves dialed sockets open
+                # (#1485). Idempotent with the manager stop that follows.
+                await swarm.close()
 
     @classmethod
     @asynccontextmanager
@@ -328,12 +515,15 @@ class SwarmFactory(factory.Factory):
         number: int,
         security_protocol: TProtocol | None = None,
         muxer_opt: TMuxerOptions | None = None,
+        connection_config: ConnectionConfig | None = None,
     ) -> AsyncIterator[tuple[Swarm, ...]]:
         async with AsyncExitStack() as stack:
             ctx_mgrs = [
                 await stack.enter_async_context(
                     cls.create_and_listen(
-                        security_protocol=security_protocol, muxer_opt=muxer_opt
+                        security_protocol=security_protocol,
+                        muxer_opt=muxer_opt,
+                        connection_config=connection_config,
                     )
                 )
                 for _ in range(number)
@@ -363,12 +553,20 @@ class HostFactory(factory.Factory):
         number: int,
         security_protocol: TProtocol | None = None,
         muxer_opt: TMuxerOptions | None = None,
+        connection_config: ConnectionConfig | None = None,
     ) -> AsyncIterator[tuple[BasicHost, ...]]:
         async with SwarmFactory.create_batch_and_listen(
-            number, security_protocol=security_protocol, muxer_opt=muxer_opt
+            number,
+            security_protocol=security_protocol,
+            muxer_opt=muxer_opt,
+            connection_config=connection_config,
         ) as swarms:
             hosts = tuple(BasicHost(swarm) for swarm in swarms)
-            yield hosts
+            try:
+                yield hosts
+            finally:
+                for host in hosts:
+                    await host.close()
 
 
 class DummyRouter(IPeerRouting):
@@ -447,6 +645,10 @@ class GossipsubFactory(factory.Factory):
     px_peers_count = GOSSIPSUB_PARAMS.px_peers_count
     prune_back_off = GOSSIPSUB_PARAMS.prune_back_off
     unsubscribe_back_off = GOSSIPSUB_PARAMS.unsubscribe_back_off
+    score_params = None
+    max_idontwant_messages = 10
+    max_pending_messages_per_peer = GOSSIPSUB_PARAMS.max_pending_messages_per_peer
+    pending_messages_ttl = GOSSIPSUB_PARAMS.pending_messages_ttl
 
 
 class PubsubFactory(factory.Factory):
@@ -576,6 +778,10 @@ class PubsubFactory(factory.Factory):
         px_peers_count: int = GOSSIPSUB_PARAMS.px_peers_count,
         prune_back_off: int = GOSSIPSUB_PARAMS.prune_back_off,
         unsubscribe_back_off: int = GOSSIPSUB_PARAMS.unsubscribe_back_off,
+        score_params: ScoreParams | None = None,
+        max_idontwant_messages: int = 10,
+        max_pending_messages_per_peer: int = GOSSIPSUB_PARAMS.max_pending_messages_per_peer,  # noqa: E501
+        pending_messages_ttl: float = GOSSIPSUB_PARAMS.pending_messages_ttl,
         security_protocol: TProtocol | None = None,
         muxer_opt: TMuxerOptions | None = None,
         msg_id_constructor: None
@@ -600,6 +806,10 @@ class PubsubFactory(factory.Factory):
                 px_peers_count=px_peers_count,
                 prune_back_off=prune_back_off,
                 unsubscribe_back_off=unsubscribe_back_off,
+                score_params=score_params,
+                max_idontwant_messages=max_idontwant_messages,
+                max_pending_messages_per_peer=max_pending_messages_per_peer,
+                pending_messages_ttl=pending_messages_ttl,
             )
         else:
             gossipsubs = GossipsubFactory.create_batch(
@@ -618,6 +828,10 @@ class PubsubFactory(factory.Factory):
                 px_peers_count=px_peers_count,
                 prune_back_off=prune_back_off,
                 unsubscribe_back_off=unsubscribe_back_off,
+                score_params=score_params,
+                max_idontwant_messages=max_idontwant_messages,
+                max_pending_messages_per_peer=max_pending_messages_per_peer,
+                pending_messages_ttl=pending_messages_ttl,
             )
 
         async with cls._create_batch_with_router(
@@ -653,9 +867,13 @@ async def swarm_pair_factory(
 async def host_pair_factory(
     security_protocol: TProtocol | None = None,
     muxer_opt: TMuxerOptions | None = None,
+    connection_config: ConnectionConfig | None = None,
 ) -> AsyncIterator[tuple[BasicHost, BasicHost]]:
     async with HostFactory.create_batch_and_listen(
-        2, security_protocol=security_protocol, muxer_opt=muxer_opt
+        2,
+        security_protocol=security_protocol,
+        muxer_opt=muxer_opt,
+        connection_config=connection_config,
     ) as hosts:
         await connect(hosts[0], hosts[1])
         yield hosts[0], hosts[1]
@@ -669,8 +887,8 @@ async def swarm_conn_pair_factory(
     async with swarm_pair_factory(
         security_protocol=security_protocol, muxer_opt=muxer_opt
     ) as swarms:
-        conn_0 = swarms[0].connections[swarms[1].get_peer_id()]
-        conn_1 = swarms[1].connections[swarms[0].get_peer_id()]
+        conn_0 = swarms[0].connections[swarms[1].get_peer_id()][0]
+        conn_1 = swarms[1].connections[swarms[0].get_peer_id()][0]
         yield cast(SwarmConn, conn_0), cast(SwarmConn, conn_1)
 
 

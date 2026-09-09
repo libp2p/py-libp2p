@@ -1,0 +1,4 @@
+Clean up ``peer_topics`` for pubsub peers that disconnect before their outbound
+stream is registered, and replay the gossipsub message cache at most once per
+peer subscription so a reconnecting peer is no longer handed the whole window
+again.

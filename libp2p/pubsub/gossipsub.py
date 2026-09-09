@@ -1,15 +1,15 @@
-from ast import (
-    literal_eval,
-)
 from collections import (
     defaultdict,
 )
 from collections.abc import (
+    Awaitable,
+    Callable,
     Iterable,
     Sequence,
 )
 import logging
 import random
+import statistics
 import time
 from typing import (
     Any,
@@ -22,28 +22,36 @@ from libp2p.abc import (
     IPubsubRouter,
 )
 from libp2p.custom_types import (
+    MessageID,
     TProtocol,
 )
+from libp2p.peer.envelope import consume_envelope
 from libp2p.peer.id import (
     ID,
 )
-from libp2p.peer.peerinfo import (
-    PeerInfo,
-    peer_info_from_bytes,
-    peer_info_to_bytes,
-)
+from libp2p.peer.peerinfo import PeerInfo
 from libp2p.peer.peerstore import (
     PERMANENT_ADDR_TTL,
+    env_to_send_in_RPC,
 )
 from libp2p.pubsub import (
     floodsub,
 )
-from libp2p.tools.async_service import (
+from libp2p.pubsub.utils import maybe_consume_signed_record
+from libp2p.tools.anyio_service import (
     Service,
+)
+from libp2p.utils.multiaddr_utils import (
+    extract_ip_from_multiaddr as extract_ip_from_multiaddr_util,
 )
 
 from .exceptions import (
     NoPubsubAttached,
+)
+from .extensions import (
+    ExtensionsState,
+    PeerExtensions,
+    TopicObservationState,
 )
 from .mcache import (
     MessageCache,
@@ -54,11 +62,27 @@ from .pb import (
 from .pubsub import (
     Pubsub,
 )
+from .rpc_queue import drop_rpc
+from .score import (
+    PeerScorer,
+    ScoreParams,
+)
+from .utils import (
+    safe_bytes_from_hex,
+)
 
 PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
 PROTOCOL_ID_V11 = TProtocol("/meshsub/1.1.0")
+PROTOCOL_ID_V12 = TProtocol("/meshsub/1.2.0")
+# GossipSub v1.3: Extensions Control Message
+# Spec: https://github.com/libp2p/specs/blob/master/pubsub/gossipsub/gossipsub-v1.3.md
+PROTOCOL_ID_V13 = TProtocol("/meshsub/1.3.0")
+PROTOCOL_ID_V14 = TProtocol("/meshsub/1.4.0")
+PROTOCOL_ID_V20 = TProtocol("/meshsub/2.0.0")
 
-logger = logging.getLogger("libp2p.pubsub.gossipsub")
+logger = logging.getLogger(__name__)
+
+_MAX_PENDING_GRAFT_PRUNE_PER_PEER = 64
 
 
 class GossipSub(IPubsubRouter, Service):
@@ -94,6 +118,53 @@ class GossipSub(IPubsubRouter, Service):
     prune_back_off: int
     unsubscribe_back_off: int
 
+    # Scoring
+    scorer: PeerScorer | None
+
+    # Gossipsub v1.2 features
+    dont_send_message_ids: dict[ID, set[bytes]]
+    max_idontwant_messages: (
+        int  # Maximum number of message IDs to track per peer in IDONTWANT lists
+    )
+
+    # Gossipsub v1.3 – Extensions Control Message
+    # Spec: https://github.com/libp2p/specs/blob/master/pubsub/gossipsub/gossipsub-v1.3.md
+    extensions_state: ExtensionsState
+    topic_observation: TopicObservationState
+
+    # Gossipsub v2.0 adaptive features
+    adaptive_gossip_enabled: bool
+    network_health_score: float  # 0.0 (poor) to 1.0 (excellent)
+    adaptive_degree_low: int  # Dynamic lower bound for mesh degree
+    adaptive_degree_high: int  # Dynamic upper bound for mesh degree
+    gossip_factor: float  # Dynamic gossip factor
+    last_health_update: int  # Timestamp of last health score update
+
+    # Security features
+    spam_protection_enabled: bool
+    message_rate_limits: dict[ID, dict[str, list[float]]]  # peer -> topic -> timestamps
+    max_messages_per_topic_per_second: float
+    equivocation_detection: dict[
+        bytes, rpc_pb2.Message
+    ]  # msg_id (from_id + seqno) -> first_msg
+    eclipse_protection_enabled: bool
+    min_mesh_diversity_ips: int  # Minimum number of different IPs in mesh
+
+    # Pending messages for peers that haven't completed protocol identification yet.
+    # Maps peer_id -> list of (timestamp, RPC message) tuples queued for delivery
+    # once identify completes.
+    _pending_messages: DefaultDict[ID, list[tuple[float, rpc_pb2.RPC]]]
+    _max_pending_messages_per_peer: int  # Maximum messages queued per peer
+    _pending_messages_ttl: float  # Time-to-live for queued messages in seconds
+
+    # Deferred control retries for dropped outbound RPC chunks.
+    # Maps peer_id -> coalesced control message to piggyback on later sends.
+    _pending_control: DefaultDict[ID, rpc_pb2.ControlMessage]
+    _max_pending_graft_prune_per_peer: int
+
+    # Event-based waiting for mesh membership (wait_for_mesh).
+    _mesh_peer_events: dict[tuple[ID, str], trio.Event]
+
     def __init__(
         self,
         protocols: Sequence[TProtocol],
@@ -112,6 +183,19 @@ class GossipSub(IPubsubRouter, Service):
         px_peers_count: int = 16,
         prune_back_off: int = 60,
         unsubscribe_back_off: int = 10,
+        score_params: ScoreParams | None = None,
+        max_idontwant_messages: int = 10,
+        adaptive_gossip_enabled: bool = True,
+        spam_protection_enabled: bool = True,
+        max_messages_per_topic_per_second: float = 10.0,
+        eclipse_protection_enabled: bool = True,
+        min_mesh_diversity_ips: int = 3,
+        # GossipSub v1.3 – Extensions Control Message
+        # Pass a PeerExtensions instance to advertise your supported extensions
+        # to remote peers in the first message on every new stream.
+        my_extensions: PeerExtensions | None = None,
+        max_pending_messages_per_peer: int = 100,
+        pending_messages_ttl: float = 30.0,
     ) -> None:
         self.protocols = list(protocols)
         self.pubsub = None
@@ -137,6 +221,7 @@ class GossipSub(IPubsubRouter, Service):
         # Create heartbeat timer
         self.heartbeat_initial_delay = heartbeat_initial_delay
         self.heartbeat_interval = heartbeat_interval
+        self.heartbeat_interval_base = heartbeat_interval  # For adaptive adjustment
 
         # Create direct peers
         self.direct_peers = dict()
@@ -152,6 +237,133 @@ class GossipSub(IPubsubRouter, Service):
         self.prune_back_off = prune_back_off
         self.unsubscribe_back_off = unsubscribe_back_off
 
+        # Scoring
+        self.scorer = PeerScorer(score_params or ScoreParams())
+        # Gossipsub v1.2 features
+        self.dont_send_message_ids = dict()
+        self.max_idontwant_messages = max_idontwant_messages
+
+        # Gossipsub v1.3 – Extensions Control Message
+        # ExtensionsState tracks:
+        #   - which extensions we advertise (my_extensions)
+        #   - which extensions each peer has advertised (_peer_extensions)
+        #   - whether we have already sent our extensions to a peer (_sent_extensions)
+        self.extensions_state = ExtensionsState(
+            my_extensions=my_extensions or PeerExtensions()
+        )
+        # Wire up the misbehaviour reporter after scorer is initialised.
+        self.extensions_state.set_report_misbehaviour(
+            self._report_extensions_misbehaviour
+        )
+
+        # Topic Observation extension state (per router).
+        # Tracks observers (inbound) and topics we are observing (outbound).
+        self.topic_observation = TopicObservationState()
+
+        # Gossipsub v2.0 adaptive features
+        self.adaptive_gossip_enabled = adaptive_gossip_enabled
+        self.network_health_score = 1.0  # Start optimistic
+        self.adaptive_degree_low = degree_low
+        self.adaptive_degree_high = degree_high
+        self.gossip_factor = 0.25  # Default gossip factor
+        self.last_health_update = int(time.time())
+
+        # Enhanced v1.4 adaptive metrics
+        self.message_delivery_success_rate = 1.0
+        self.average_peer_score = 0.0
+        self.mesh_stability_score = 1.0
+        self.connection_churn_rate = 0.0
+        self.last_metrics_update = int(time.time())
+
+        # Tracking for adaptive calculations
+        self.recent_message_deliveries: dict[str, list[float]] = defaultdict(list)
+        self.recent_peer_connections: list[float] = []
+        self.recent_peer_disconnections: list[float] = []
+
+        # Security features
+        self.spam_protection_enabled = spam_protection_enabled
+        self.message_rate_limits = defaultdict(lambda: defaultdict(list))
+        self.max_messages_per_topic_per_second = max_messages_per_topic_per_second
+        self.equivocation_detection = {}
+        self.eclipse_protection_enabled = eclipse_protection_enabled
+        self.min_mesh_diversity_ips = min_mesh_diversity_ips
+
+        # Pending publish queue for identify-aware delivery
+        self._pending_messages = defaultdict(list)
+        self._max_pending_messages_per_peer = max_pending_messages_per_peer
+        self._pending_messages_ttl = pending_messages_ttl
+
+        # Deferred retry queue for dropped control chunks.
+        self._pending_control = defaultdict(lambda: rpc_pb2.ControlMessage())
+        self._max_pending_graft_prune_per_peer = _MAX_PENDING_GRAFT_PRUNE_PER_PEER
+
+        # Event-based mesh membership waits (see wait_for_mesh).
+        self._mesh_peer_events = {}
+
+        # Extensions support (v1.3+)
+        self.extension_handlers: dict[str, Callable[[bytes, ID], Awaitable[None]]] = {}
+
+        # Rate limiting for v1.4 features
+        self.iwant_request_limits: dict[ID, dict[str, list[float]]] = defaultdict(
+            lambda: defaultdict(list)
+        )
+        self.ihave_message_limits: dict[ID, dict[str, list[float]]] = defaultdict(
+            lambda: defaultdict(list)
+        )
+        self.graft_flood_tracking: dict[ID, dict[str, float]] = defaultdict(
+            lambda: defaultdict(float)
+        )
+
+        # v1.4 rate limiting parameters
+        self.max_iwant_requests_per_second: float = 10.0
+        self.max_ihave_messages_per_second: float = 10.0
+        self.graft_flood_threshold: float = 10.0  # seconds
+
+        # v1.4 adaptive gossip parameters
+        self.opportunistic_graft_threshold: float = 0.5
+
+    def supports_scoring(self, peer_id: ID) -> bool:
+        """
+        Check if peer supports Gossipsub v1.1+ scoring features.
+
+        :param peer_id: The peer to check
+        :return: True if peer supports v1.1+ features, False otherwise
+        """
+        return self.peer_protocol.get(peer_id) in (
+            PROTOCOL_ID_V11,
+            PROTOCOL_ID_V12,
+            PROTOCOL_ID_V13,
+            PROTOCOL_ID_V14,
+            PROTOCOL_ID_V20,
+        )
+
+    def supports_v13_features(self, peer_id: ID) -> bool:
+        """
+        Check if *peer_id* negotiated the GossipSub v1.3 protocol.
+
+        v1.3 is required for the Extensions Control Message mechanism and the
+        Topic Observation extension.  A peer that negotiated v1.3 (or later)
+        MUST have received (and sent) the Extensions control message in the
+        first stream message.
+
+        :param peer_id: The peer to check.
+        :return: True if peer negotiated ``/meshsub/1.3.0`` or later.
+        """
+        return self.peer_protocol.get(peer_id) in (
+            PROTOCOL_ID_V13,
+            PROTOCOL_ID_V14,
+            PROTOCOL_ID_V20,
+        )
+
+    def supports_v20_features(self, peer_id: ID) -> bool:
+        """
+        Check if peer supports Gossipsub v2.0 features.
+
+        :param peer_id: The peer to check
+        :return: True if peer supports v2.0 features, False otherwise
+        """
+        return self.peer_protocol.get(peer_id) == PROTOCOL_ID_V20
+
     async def run(self) -> None:
         self.manager.run_daemon_task(self.heartbeat)
         if len(self.direct_peers) > 0:
@@ -165,6 +377,162 @@ class GossipSub(IPubsubRouter, Service):
         :return: the list of protocols supported by the router
         """
         return self.protocols
+
+    def supports_protocol_feature(self, peer_id: ID, feature: str) -> bool:
+        """
+        Check if a peer supports a specific protocol feature based on its
+        supported protocol versions.
+
+        :param peer_id: ID of the peer to check
+        :param feature: Feature name to check support for
+        :return: True if the peer supports the feature, False otherwise
+        """
+        if peer_id not in self.peer_protocol:
+            return False
+
+        protocol = self.peer_protocol[peer_id]
+
+        # Define feature support by protocol version
+        if feature == "px":  # Peer Exchange
+            return protocol in (
+                PROTOCOL_ID_V11,
+                PROTOCOL_ID_V12,
+                PROTOCOL_ID_V13,
+                PROTOCOL_ID_V14,
+            )
+        elif feature == "idontwant":  # IDONTWANT message
+            return protocol in (PROTOCOL_ID_V12, PROTOCOL_ID_V13, PROTOCOL_ID_V14)
+        elif feature == "extensions":  # Extensions control message
+            return protocol in (PROTOCOL_ID_V13, PROTOCOL_ID_V14)
+        elif feature == "adaptive_gossip":  # Adaptive gossip parameters
+            return protocol == PROTOCOL_ID_V14
+        elif feature == "scoring":  # Peer scoring system
+            return protocol in (
+                PROTOCOL_ID_V11,
+                PROTOCOL_ID_V12,
+                PROTOCOL_ID_V13,
+                PROTOCOL_ID_V14,
+            )
+        elif feature == "extended_scoring":  # Extended peer scoring (P5-P7)
+            return protocol == PROTOCOL_ID_V14
+
+        # Default to not supported for unknown features
+        return False
+
+    def register_extension_handler(
+        self, extension_name: str, handler: Callable[[bytes, ID], Awaitable[None]]
+    ) -> None:
+        """
+        Register a handler for a specific extension.
+
+        :param extension_name: Name of the extension
+        :param handler: Async callable that takes (data: bytes, sender_peer_id: ID)
+        """
+        self.extension_handlers[extension_name] = handler
+        logger.debug("Registered handler for extension: %s", extension_name)
+
+    def unregister_extension_handler(self, extension_name: str) -> None:
+        """
+        Unregister a handler for a specific extension.
+
+        :param extension_name: Name of the extension
+        """
+        if extension_name in self.extension_handlers:
+            del self.extension_handlers[extension_name]
+            logger.debug("Unregistered handler for extension: %s", extension_name)
+
+    async def emit_extension(
+        self, extension_name: str, data: bytes, to_peer: ID
+    ) -> None:
+        """
+        Emit an extension message to a peer.
+
+        In GossipSub v1.3 wire format, the Extensions control message is sent
+        only once in the first stream message (hello). Arbitrary extension
+        name/data messages after that are not part of the v1.3 spec. This method
+        is a no-op for compatibility with the extension_handlers API.
+
+        :param extension_name: Name of the extension
+        :param data: Extension data
+        :param to_peer: Target peer ID
+        """
+        logger.debug(
+            "emit_extension(%s, ...) called: v1.3 wire format only sends Extensions "
+            "in the first hello; skipping.",
+            extension_name,
+        )
+
+    def _check_iwant_rate_limit(self, peer_id: ID) -> bool:
+        """
+        Check if peer has exceeded IWANT request rate limit.
+
+        :param peer_id: The peer to check
+        :return: True if within rate limit, False if exceeded
+        """
+        current_time = time.time()
+        timestamps = self.iwant_request_limits[peer_id]["requests"]
+
+        # Remove old timestamps (older than 1 second)
+        cutoff_time = current_time - 1.0
+        timestamps[:] = [t for t in timestamps if t > cutoff_time]
+
+        # Check if rate limit exceeded
+        if len(timestamps) >= self.max_iwant_requests_per_second:
+            # Apply penalty for IWANT spam
+            if hasattr(self, "scorer") and self.scorer is not None:
+                self.scorer.penalize_iwant_spam(peer_id, 5.0)
+            return False
+
+        # Add current timestamp
+        timestamps.append(current_time)
+        return True
+
+    def _check_ihave_rate_limit(self, peer_id: ID, topic: str) -> bool:
+        """
+        Check if peer has exceeded IHAVE message rate limit for a topic.
+
+        :param peer_id: The peer to check
+        :param topic: The topic to check
+        :return: True if within rate limit, False if exceeded
+        """
+        current_time = time.time()
+        timestamps = self.ihave_message_limits[peer_id][topic]
+
+        # Remove old timestamps (older than 1 second)
+        cutoff_time = current_time - 1.0
+        timestamps[:] = [t for t in timestamps if t > cutoff_time]
+
+        # Check if rate limit exceeded
+        if len(timestamps) >= self.max_ihave_messages_per_second:
+            # Apply penalty for IHAVE spam
+            if hasattr(self, "scorer") and self.scorer is not None:
+                self.scorer.penalize_ihave_spam(peer_id, 5.0)
+            return False
+
+        # Add current timestamp
+        timestamps.append(current_time)
+        return True
+
+    def _check_graft_flood_protection(self, peer_id: ID, topic: str) -> bool:
+        """
+        Check for GRAFT flood protection (P7 behavioral penalty).
+
+        :param peer_id: The peer to check
+        :param topic: The topic to check
+        :return: True if no flood detected, False if flood detected
+        """
+        current_time = time.time()
+        last_prune_time = self.graft_flood_tracking[peer_id].get(topic, 0.0)
+
+        # Use the smaller of graft_flood_threshold and prune_back_off so that
+        # peers can re-graft after the configured backoff period.
+        threshold = min(self.graft_flood_threshold, float(self.prune_back_off))
+
+        # Check if GRAFT comes too soon after PRUNE (flood threshold)
+        if current_time - last_prune_time < threshold:
+            return False
+
+        return True
 
     def attach(self, pubsub: Pubsub) -> None:
         """
@@ -195,13 +563,318 @@ class GossipSub(IPubsubRouter, Service):
         if protocol_id is None:
             raise ValueError("Protocol cannot be None")
 
-        if protocol_id not in (PROTOCOL_ID, floodsub.PROTOCOL_ID):
+        if protocol_id not in (
+            PROTOCOL_ID,
+            PROTOCOL_ID_V11,
+            PROTOCOL_ID_V12,
+            PROTOCOL_ID_V13,
+            PROTOCOL_ID_V14,
+            PROTOCOL_ID_V20,
+            floodsub.PROTOCOL_ID,
+        ):
             # We should never enter here. Becuase the `protocol_id` is registered by
             #   your pubsub instance in multistream-select, but it is not the protocol
             #   that gossipsub supports. In this case, probably we registered gossipsub
             #   to a wrong `protocol_id` in multistream-select, or wrong versions.
             raise ValueError(f"Protocol={protocol_id} is not supported.")
         self.peer_protocol[peer_id] = protocol_id
+
+        # Initialize IDONTWANT tracking for this peer
+        if peer_id not in self.dont_send_message_ids:
+            self.dont_send_message_ids[peer_id] = set()
+
+        # Track peer IP for colocation scoring if scorer is available
+        if self.scorer is not None and self.pubsub is not None:
+            self._track_peer_ip(peer_id)
+
+        # Track connection for adaptive gossip metrics (only when enabled)
+        if self.adaptive_gossip_enabled:
+            self.recent_peer_connections.append(time.time())
+
+        # NOTE: Pending messages are NOT flushed here because
+        # ``pubsub.peers[peer_id]`` (the stream) is not yet set at this
+        # point.  Flushing happens in ``flush_pending_messages`` which is
+        # called by Pubsub._handle_new_peer after the stream is registered.
+
+    def _prune_pending_messages(self, peer_id: ID) -> None:
+        """
+        Remove expired messages and enforce queue size limits for a peer.
+
+        :param peer_id: the peer whose pending queue should be pruned
+        """
+        if peer_id not in self._pending_messages:
+            return
+
+        current_time = time.time()
+        queue = self._pending_messages[peer_id]
+
+        # Remove expired messages (older than TTL)
+        queue[:] = [
+            (ts, msg)
+            for ts, msg in queue
+            if current_time - ts <= self._pending_messages_ttl
+        ]
+
+        # Enforce max queue size (keep most recent messages)
+        if len(queue) > self._max_pending_messages_per_peer:
+            logger.warning(
+                "pending message queue for peer %s exceeded limit "
+                "(%d > %d), dropping oldest messages",
+                peer_id,
+                len(queue),
+                self._max_pending_messages_per_peer,
+            )
+            queue[:] = queue[-self._max_pending_messages_per_peer :]
+
+        # Remove peer entry if queue is now empty
+        if not queue:
+            self._pending_messages.pop(peer_id, None)
+
+    async def flush_pending_messages(self, peer_id: ID) -> None:
+        """
+        Flush any messages queued for a peer once they are identified.
+
+        This **must** be called only after both ``add_peer`` and
+        ``pubsub.peers[peer_id]`` have been set so that we have the stream
+        available for writing.
+
+        Only sends messages for topics the peer has subscribed to. The queue
+        handles the identify race; once the peer is identified, standard
+        GossipSub rules apply (drop if not subscribed).
+        Applies the same scorer.allow_publish gate as the normal publish path.
+
+        :param peer_id: the peer whose pending queue should be drained
+        """
+        # First, prune expired and excess messages
+        self._prune_pending_messages(peer_id)
+
+        if peer_id not in self._pending_messages:
+            return
+
+        if self.pubsub is None:
+            logger.warning(
+                "Cannot flush pending messages for %s: pubsub not attached",
+                peer_id,
+            )
+            return
+
+        # Store pubsub in local variable for type narrowing
+        pubsub = self.pubsub
+
+        if peer_id not in pubsub.peers:
+            logger.warning(
+                "Cannot flush pending messages for %s: no stream available",
+                peer_id,
+            )
+            return
+
+        stream = pubsub.peers[peer_id]
+
+        peer_topics: set[str] = set()
+        for topic, peers in pubsub.peer_topics.items():
+            if peer_id in peers:
+                peer_topics.add(topic)
+
+        # Process queue: send matching messages, drop non-matching
+        # The queue only handles the identify race; once identified,
+        # standard GossipSub rules apply (peer must be subscribed)
+        messages_sent = 0
+        messages_dropped = 0
+        messages_blocked = 0
+
+        for timestamp, rpc_msg in self._pending_messages[peer_id]:
+            # Extract topics from the RPC message's publish field
+            msg_topics: list[str] = [
+                topic_id for pub_msg in rpc_msg.publish for topic_id in pub_msg.topicIDs
+            ]
+
+            # Drop message if peer isn't subscribed to any of these topics
+            if not peer_topics or not any(topic in peer_topics for topic in msg_topics):
+                messages_dropped += 1
+                continue
+
+            # Apply same publish gate as normal publish path
+            scorer = self.scorer
+            if scorer is not None:
+                if not scorer.allow_publish(peer_id, msg_topics):
+                    messages_blocked += 1
+                    continue
+
+            try:
+                await pubsub.write_msg(stream, rpc_msg)
+                messages_sent += 1
+            except Exception:
+                logger.debug(
+                    "failed to flush pending message to peer %s",
+                    peer_id,
+                    exc_info=True,
+                )
+
+        # Clear the queue - identify is complete
+        self._pending_messages.pop(peer_id, None)
+
+        if messages_sent > 0 or messages_dropped > 0 or messages_blocked > 0:
+            logger.debug(
+                "flushed identify-pending messages to peer %s: "
+                "%d sent, %d dropped, %d blocked",
+                peer_id,
+                messages_sent,
+                messages_dropped,
+                messages_blocked,
+            )
+
+    async def send_recent_messages(self, peer_id: ID, topic: str) -> None:
+        """
+        Send recent messages from mcache for a topic to a newly subscribed peer.
+
+        This handles the race condition where messages are published before a
+        peer appears in pubsub.peers (during connection setup). When the peer
+        later subscribes to the topic, we send them recent messages they might
+        have missed.
+
+        :param peer_id: the peer to send messages to
+        :param topic: the topic to send recent messages for
+        """
+        if self.pubsub is None:
+            logger.warning(
+                "Cannot send recent messages for %s: pubsub not attached",
+                peer_id,
+            )
+            return
+
+        # Store pubsub in local variable for type narrowing
+        pubsub = self.pubsub
+
+        if peer_id not in pubsub.peers:
+            logger.debug(
+                "Cannot send recent messages for %s: no stream available yet",
+                peer_id,
+            )
+            return
+
+        # Get recent message IDs for this topic from the cache
+        recent_mids = self.mcache.window(topic)
+        if not recent_mids:
+            return
+
+        stream = pubsub.peers[peer_id]
+        logger.debug(
+            "sending %d recent message(s) for topic %s to peer %s",
+            len(recent_mids),
+            topic,
+            peer_id,
+        )
+
+        # Send each recent message
+        for mid in recent_mids:
+            msg = self.mcache.get(mid)
+            if msg is None:
+                continue
+
+            scorer = self.scorer
+            if scorer is not None:
+                if not scorer.allow_publish(peer_id, list(msg.topicIDs)):
+                    continue
+
+            # Create RPC with this message
+            rpc_msg = rpc_pb2.RPC(publish=[msg])
+
+            # Add the senderRecord if available
+            if isinstance(pubsub, Pubsub):
+                envelope_bytes, _ = env_to_send_in_RPC(pubsub.host)
+                rpc_msg.senderRecord = envelope_bytes
+
+            try:
+                await pubsub.write_msg(stream, rpc_msg)
+            except Exception:
+                logger.debug(
+                    "failed to send recent message to peer %s",
+                    peer_id,
+                    exc_info=True,
+                )
+
+    def _is_gossipsub_peer(self, peer_id: ID) -> bool:
+        return self.peer_protocol.get(peer_id) in (
+            PROTOCOL_ID,
+            PROTOCOL_ID_V11,
+            PROTOCOL_ID_V12,
+            PROTOCOL_ID_V13,
+            PROTOCOL_ID_V14,
+            PROTOCOL_ID_V20,
+        )
+
+    def _notify_mesh_peer_added(self, peer_id: ID, topic: str) -> None:
+        """Wake any ``wait_for_mesh`` waiter for this peer/topic."""
+        key = (peer_id, topic)
+        event = self._mesh_peer_events.pop(key, None)
+        if event is not None:
+            event.set()
+
+    async def wait_for_mesh(
+        self, peer_id: ID, topic_id: str, timeout: float = 5.0
+    ) -> None:
+        """
+        Wait until *peer_id* is in ``mesh[topic_id]``.
+
+        Blocks on a :class:`trio.Event` set when the peer is added to the mesh
+        (subscription-driven GRAFT, ``join``, ``handle_graft``, or heartbeat
+        fill). Use this instead of sleeping or polling for mesh readiness.
+
+        :param peer_id: the peer to wait for in the mesh
+        :param topic_id: the topic whose mesh to check
+        :param timeout: maximum time to wait in seconds (default: 5.0)
+        :raises trio.TooSlowError: if the peer is not in the mesh within timeout
+        """
+        if topic_id in self.mesh and peer_id in self.mesh[topic_id]:
+            return
+        event = self._mesh_peer_events.setdefault((peer_id, topic_id), trio.Event())
+        with trio.fail_after(timeout):
+            await event.wait()
+
+    async def on_peer_subscribed(self, peer_id: ID, topic: str) -> None:
+        """
+        Event-driven mesh first-fill when a peer announces a subscription.
+
+        If we have already joined *topic* and the mesh is underfilled, GRAFT
+        the peer immediately instead of waiting for the next heartbeat. Ongoing
+        prune / opportunistic graft / degree maintenance remain heartbeat-owned.
+        """
+        if topic not in self.mesh:
+            return
+
+        if peer_id in self.mesh[topic]:
+            # Already meshed (e.g. remote GRAFT won the race); wake waiters.
+            self._notify_mesh_peer_added(peer_id, topic)
+            return
+
+        if peer_id in self.direct_peers:
+            return
+
+        if not self._is_gossipsub_peer(peer_id):
+            return
+
+        if self._check_back_off(peer_id, topic):
+            return
+
+        effective_degree_low = (
+            self.adaptive_degree_low
+            if self.adaptive_gossip_enabled
+            else self.degree_low
+        )
+        if len(self.mesh[topic]) >= effective_degree_low:
+            return
+
+        self.mesh[topic].add(peer_id)
+        if self.scorer is not None:
+            self.scorer.on_join_mesh(peer_id, topic)
+        self._notify_mesh_peer_added(peer_id, topic)
+
+        logger.debug(
+            "event-driven GRAFT of peer %s on topic %s after subscription",
+            peer_id,
+            topic,
+        )
+        await self.emit_graft(topic, peer_id)
 
     def remove_peer(self, peer_id: ID) -> None:
         """
@@ -218,6 +891,34 @@ class GossipSub(IPubsubRouter, Service):
 
         self.peer_protocol.pop(peer_id, None)
 
+        # Clean up IDONTWANT tracking for this peer
+        self.dont_send_message_ids.pop(peer_id, None)
+
+        # Clean up scoring data for this peer
+        if self.scorer is not None:
+            self.scorer.remove_peer(peer_id)
+
+        # Clean up security state
+        self._cleanup_security_state(peer_id)
+
+        # GossipSub v1.3: clean up extension exchange state for this peer
+        self.extensions_state.remove_peer(peer_id)
+
+        # Topic Observation: clean up observer / observing state for this peer
+        self.topic_observation.remove_peer(peer_id)
+        # Discard any pending messages for this peer
+        self._pending_messages.pop(peer_id, None)
+        self._pending_control.pop(peer_id, None)
+
+        # Drop mesh-wait events for this peer (do not set — peer is gone).
+        stale_keys = [key for key in self._mesh_peer_events if key[0] == peer_id]
+        for key in stale_keys:
+            self._mesh_peer_events.pop(key, None)
+
+        # Track disconnection for adaptive gossip metrics (only when enabled)
+        if self.adaptive_gossip_enabled:
+            self.recent_peer_disconnections.append(time.time())
+
     async def handle_rpc(self, rpc: rpc_pb2.RPC, sender_peer_id: ID) -> None:
         """
         Invoked to process control messages in the RPC envelope.
@@ -226,7 +927,19 @@ class GossipSub(IPubsubRouter, Service):
         :param rpc: RPC message
         :param sender_peer_id: id of the peer who sent the message
         """
+        # Process the senderRecord if sent
+        if isinstance(self.pubsub, Pubsub):
+            if not maybe_consume_signed_record(rpc, self.pubsub.host, sender_peer_id):
+                logger.error("Received an invalid-signed-record, ignoring the message")
+                return
+
         control_message = rpc.control
+
+        # GossipSub v1.3: process Extensions control message BEFORE dispatching
+        # other control messages.  This must happen on every incoming RPC so
+        # that the "at most once" duplicate-detection logic runs correctly.
+        if self.supports_v13_features(sender_peer_id):
+            self.extensions_state.handle_rpc(rpc, sender_peer_id)
 
         # Relay each rpc control message to the appropriate handler
         if control_message.ihave:
@@ -241,35 +954,146 @@ class GossipSub(IPubsubRouter, Service):
         if control_message.prune:
             for prune in control_message.prune:
                 await self.handle_prune(prune, sender_peer_id)
+        if control_message.idontwant:
+            for idontwant in control_message.idontwant:
+                await self.handle_idontwant(idontwant, sender_peer_id)
+        # v1.3 Extensions control message is processed above via
+        # extensions_state.handle_rpc()
+
+        # GossipSub v1.3 – Topic Observation extension
+        if self.supports_v13_features(sender_peer_id):
+            if control_message.observe:
+                for observe in control_message.observe:
+                    await self.handle_observe(observe, sender_peer_id)
+            if control_message.unobserve:
+                for unobserve in control_message.unobserve:
+                    await self.handle_unobserve(unobserve, sender_peer_id)
 
     async def publish(self, msg_forwarder: ID, pubsub_msg: rpc_pb2.Message) -> None:
         """Invoked to forward a new message that has been validated."""
+        # Security checks for Gossipsub 2.0
+        if not self._check_spam_protection(msg_forwarder, pubsub_msg):
+            logger.debug(
+                "Message rejected due to spam protection from peer %s", msg_forwarder
+            )
+            return
+
+        if not self._check_equivocation(pubsub_msg):
+            logger.debug(
+                "Message rejected due to equivocation from peer %s",
+                ID(pubsub_msg.from_id),
+            )
+            return
+
         self.mcache.put(pubsub_msg)
+
+        # Get message ID for IDONTWANT
+        if self.pubsub is not None:
+            msg_id = self.pubsub.get_message_id(pubsub_msg)
+        else:
+            # Fallback to default ID construction
+            msg_id = pubsub_msg.from_id + pubsub_msg.seqno
 
         peers_gen = self._get_peers_to_send(
             pubsub_msg.topicIDs,
             msg_forwarder=msg_forwarder,
             origin=ID(pubsub_msg.from_id),
+            msg_id=msg_id,
         )
         rpc_msg = rpc_pb2.RPC(publish=[pubsub_msg])
 
+        # Add the senderRecord of the peer in the RPC msg
+        if isinstance(self.pubsub, Pubsub):
+            envelope_bytes, _ = env_to_send_in_RPC(self.pubsub.host)
+            rpc_msg.senderRecord = envelope_bytes
+
         logger.debug("publishing message %s", pubsub_msg)
+
+        # Send IDONTWANT to mesh peers about this message
+        await self._emit_idontwant_for_message(msg_id, pubsub_msg.topicIDs)
+
+        # GossipSub v1.3 – Topic Observation: immediately notify observers with IHAVE.
+        # Unlike the heartbeat gossip, notification is sent right after receiving
+        # a message so observers get near-real-time awareness of new messages.
+        await self._notify_observers(pubsub_msg.topicIDs, msg_id)
 
         for peer_id in peers_gen:
             if self.pubsub is None:
                 raise NoPubsubAttached
             if peer_id not in self.pubsub.peers:
                 continue
-            stream = self.pubsub.peers[peer_id]
+            # Publish gate
+            if self.scorer is not None and not self.scorer.allow_publish(
+                peer_id, list(pubsub_msg.topicIDs)
+            ):
+                continue
+            self.send_rpc(peer_id, rpc_msg)
 
-            # TODO: Go use `sendRPC`, which possibly piggybacks gossip/control messages.
-            await self.pubsub.write_msg(stream, rpc_msg)
+        # Queue messages for peers whose subscriptions we haven't received yet.
+        # This handles two cases:
+        # 1. Peer connected but protocol negotiation not complete
+        # 2. Peer identified but subscription exchange not complete
+        # Messages flushed when peer added or subscription received.
+        if self.pubsub is not None:
+            # Store pubsub in local variable for type narrowing
+            pubsub = self.pubsub
+            queued_peers: set[ID] = set()
+
+            for topic in pubsub_msg.topicIDs:
+                # Queue for peers already in topic but not yet identified
+                if topic in pubsub.peer_topics:
+                    for peer_id in pubsub.peer_topics[topic]:
+                        if peer_id in (msg_forwarder, ID(pubsub_msg.from_id)):
+                            continue
+                        if (
+                            peer_id not in self.peer_protocol
+                            and peer_id not in self.direct_peers
+                            and peer_id not in queued_peers
+                        ):
+                            self._prune_pending_messages(peer_id)
+                            self._pending_messages[peer_id].append(
+                                (time.time(), rpc_msg)
+                            )
+                            queued_peers.add(peer_id)
+                            logger.debug(
+                                "queued message for peer %s (identify pending)",
+                                peer_id,
+                            )
+
+                # Queue for connected peers not yet in this topic's peer_topics.
+                # This handles the race where a peer is connected and identified
+                # but we haven't processed their subscription message yet.
+                for peer_id in pubsub.peers:
+                    if peer_id in (msg_forwarder, ID(pubsub_msg.from_id)):
+                        continue
+                    if peer_id in self.direct_peers:
+                        continue
+                    if peer_id in queued_peers:
+                        continue
+                    # Queue optimistically if peer not in peer_topics
+                    if (
+                        topic not in pubsub.peer_topics
+                        or peer_id not in pubsub.peer_topics[topic]
+                    ):
+                        self._prune_pending_messages(peer_id)
+                        self._pending_messages[peer_id].append((time.time(), rpc_msg))
+                        queued_peers.add(peer_id)
+                        logger.debug(
+                            "queued message for peer %s (identify pending)",
+                            peer_id,
+                        )
 
         for topic in pubsub_msg.topicIDs:
             self.time_since_last_publish[topic] = int(time.time())
+            # Track message delivery for adaptive metrics
+            self.recent_message_deliveries[topic].append(time.time())
 
     def _get_peers_to_send(
-        self, topic_ids: Iterable[str], msg_forwarder: ID, origin: ID
+        self,
+        topic_ids: Iterable[str],
+        msg_forwarder: ID,
+        origin: ID,
+        msg_id: bytes | None = None,
     ) -> Iterable[ID]:
         """
         Get the eligible peers to send the data to.
@@ -293,7 +1117,8 @@ class GossipSub(IPubsubRouter, Service):
             floodsub_peers: set[ID] = {
                 peer_id
                 for peer_id in self.pubsub.peer_topics[topic]
-                if self.peer_protocol[peer_id] == floodsub.PROTOCOL_ID
+                if peer_id in self.peer_protocol
+                and self.peer_protocol[peer_id] == floodsub.PROTOCOL_ID
             }
             send_to.update(floodsub_peers)
 
@@ -320,9 +1145,31 @@ class GossipSub(IPubsubRouter, Service):
                         )
                 self.fanout[topic] = fanout_peers
                 gossipsub_peers = fanout_peers
-            send_to.update(gossipsub_peers)
+            # Apply gossip score gate
+            scorer = self.scorer
+            if scorer is not None and gossipsub_peers:
+                allowed = {
+                    p
+                    for p in gossipsub_peers
+                    if scorer.allow_gossip(p, [topic])
+                    and not scorer.is_graylisted(p, [topic])
+                }
+                send_to.update(allowed)
+            else:
+                send_to.update(gossipsub_peers)
         # Excludes `msg_forwarder` and `origin`
-        yield from send_to.difference([msg_forwarder, origin])
+        filtered_peers = send_to.difference([msg_forwarder, origin])
+
+        # Filter out peers that have sent IDONTWANT for this message
+        if msg_id is not None:
+            filtered_peers = {
+                peer_id
+                for peer_id in filtered_peers
+                if peer_id not in self.dont_send_message_ids
+                or msg_id not in self.dont_send_message_ids[peer_id]
+            }
+
+        yield from filtered_peers
 
     async def join(self, topic: str) -> None:
         """
@@ -365,6 +1212,7 @@ class GossipSub(IPubsubRouter, Service):
         # Add fanout peers to mesh and notifies them with a GRAFT(topic) control message
         for peer in fanout_peers:
             self.mesh[topic].add(peer)
+            self._notify_mesh_peer_added(peer, topic)
             await self.emit_graft(topic, peer)
 
         self.fanout.pop(topic, None)
@@ -384,8 +1232,10 @@ class GossipSub(IPubsubRouter, Service):
             return
         # Notify the peers in mesh[topic] with a PRUNE(topic) message
         for peer in self.mesh[topic]:
-            await self.emit_prune(topic, peer, self.do_px, True)
+            # Add backoff BEFORE emitting PRUNE to avoid races where a GRAFT
+            # could be processed before the backoff is recorded locally.
             self._add_back_off(peer, topic, True)
+            await self.emit_prune(topic, peer, self.do_px, True)
 
         # Forget mesh[topic]
         self.mesh.pop(topic, None)
@@ -394,7 +1244,7 @@ class GossipSub(IPubsubRouter, Service):
         self,
         peers_to_graft: dict[ID, list[str]],
         peers_to_prune: dict[ID, list[str]],
-        peers_to_gossip: dict[ID, dict[str, list[str]]],
+        peers_to_gossip: dict[ID, dict[str, list[bytes]]],
     ) -> None:
         graft_msgs: list[rpc_pb2.ControlGraft] = []
         prune_msgs: list[rpc_pb2.ControlPrune] = []
@@ -471,6 +1321,19 @@ class GossipSub(IPubsubRouter, Service):
         while True:
             # Maintain mesh and keep track of which peers to send GRAFT or PRUNE to
             peers_to_graft, peers_to_prune = self.mesh_heartbeat()
+
+            # Ensure mesh diversity for Eclipse attack protection
+            # and collect additional peers to graft
+            if self.eclipse_protection_enabled:
+                for topic in self.mesh:
+                    diversity_peers = self._ensure_mesh_diversity(topic)
+                    # Add diversity peers to the graft list
+                    for peer in diversity_peers:
+                        if peer not in peers_to_graft:
+                            peers_to_graft[peer] = []
+                        if topic not in peers_to_graft[peer]:
+                            peers_to_graft[peer].append(topic)
+
             # Maintain fanout
             self.fanout_heartbeat()
             # Get the peers to send IHAVE to
@@ -482,6 +1345,25 @@ class GossipSub(IPubsubRouter, Service):
             )
 
             self.mcache.shift()
+
+            # scorer decay step
+            if self.scorer is not None:
+                self.scorer.on_heartbeat()
+
+            # Update network health and adapt parameters (v2.0 feature)
+            if self.adaptive_gossip_enabled:
+                self._update_network_health()
+                self._adapt_gossip_parameters()
+
+            # Security maintenance (v2.0 feature)
+            self._periodic_security_cleanup()
+
+            # Perform ongoing mesh quality maintenance (v2.0 feature)
+            for topic in list(self.mesh):
+                await self._maintain_mesh_quality(topic)
+
+            # Prune old IDONTWANT entries to prevent memory leaks
+            self._prune_idontwant_entries()
 
             await trio.sleep(self.heartbeat_interval)
 
@@ -518,7 +1400,20 @@ class GossipSub(IPubsubRouter, Service):
                 continue
 
             num_mesh_peers_in_topic = len(self.mesh[topic])
-            if num_mesh_peers_in_topic < self.degree_low:
+
+            # Use adaptive degree bounds
+            effective_degree_low = (
+                self.adaptive_degree_low
+                if self.adaptive_gossip_enabled
+                else self.degree_low
+            )
+            effective_degree_high = (
+                self.adaptive_degree_high
+                if self.adaptive_gossip_enabled
+                else self.degree_high
+            )
+
+            if num_mesh_peers_in_topic < effective_degree_low:
                 # Select D - |mesh[topic]| peers from peers.gossipsub[topic] - mesh[topic]  # noqa: E501
                 selected_peers = self._get_in_topic_gossipsub_peers_from_minus(
                     topic, self.degree - num_mesh_peers_in_topic, self.mesh[topic], True
@@ -527,18 +1422,28 @@ class GossipSub(IPubsubRouter, Service):
                 for peer in selected_peers:
                     # Add peer to mesh[topic]
                     self.mesh[topic].add(peer)
+                    self._notify_mesh_peer_added(peer, topic)
 
                     # Emit GRAFT(topic) control message to peer
                     peers_to_graft[peer].append(topic)
 
-            if num_mesh_peers_in_topic > self.degree_high:
-                # Select |mesh[topic]| - D peers from mesh[topic]
-                selected_peers = self.select_from_minus(
-                    num_mesh_peers_in_topic - self.degree, self.mesh[topic], set()
+            # Enhanced opportunistic grafting for Gossipsub 2.0
+            if (
+                self.scorer is not None
+                and num_mesh_peers_in_topic >= effective_degree_low
+            ):
+                self._perform_opportunistic_grafting(topic, peers_to_graft)
+
+            if num_mesh_peers_in_topic > effective_degree_high:
+                # Enhanced mesh pruning with score-based selection
+                peers_to_remove = self._select_peers_for_pruning(
+                    topic, num_mesh_peers_in_topic - self.degree
                 )
-                for peer in selected_peers:
+                for peer in peers_to_remove:
                     # Remove peer from mesh[topic]
                     self.mesh[topic].discard(peer)
+                    if self.scorer is not None:
+                        self.scorer.on_leave_mesh(peer, topic)
 
                     # Emit PRUNE(topic) control message to peer
                     peers_to_prune[peer].append(topic)
@@ -549,7 +1454,7 @@ class GossipSub(IPubsubRouter, Service):
         topic: str,
         current_peers: set[ID],
         is_fanout: bool = False,
-        peers_to_gossip: DefaultDict[ID, dict[str, list[str]]] | None = None,
+        peers_to_gossip: DefaultDict[ID, dict[str, list[bytes]]] | None = None,
     ) -> tuple[set[ID], bool]:
         """
         Helper method to handle heartbeat for a single topic,
@@ -593,13 +1498,20 @@ class GossipSub(IPubsubRouter, Service):
         if peers_to_gossip is not None:
             msg_ids = self.mcache.window(topic)
             if msg_ids:
-                # Select D peers from peers.gossipsub[topic] excluding current peers
-                peers_to_emit_ihave_to = self._get_in_topic_gossipsub_peers_from_minus(
-                    topic, self.degree, current_peers, True
+                # Select peers from peers.gossipsub[topic] excluding current peers
+                # Use adaptive count based on network health
+                total_gossip_peers = len(
+                    self.pubsub.peer_topics.get(topic, set())
+                ) - len(current_peers)
+                gossip_count = self._get_adaptive_gossip_peers_count(
+                    topic, total_gossip_peers
                 )
-                msg_id_strs = [str(msg_id) for msg_id in msg_ids]
+
+                peers_to_emit_ihave_to = self._get_in_topic_gossipsub_peers_from_minus(
+                    topic, gossip_count, current_peers, True
+                )
                 for peer in peers_to_emit_ihave_to:
-                    peers_to_gossip[peer][topic] = msg_id_strs
+                    peers_to_gossip[peer][topic] = list(msg_ids)
 
         return in_topic_peers, False
 
@@ -619,8 +1531,8 @@ class GossipSub(IPubsubRouter, Service):
             else:
                 self.fanout[topic] = updated_peers
 
-    def gossip_heartbeat(self) -> DefaultDict[ID, dict[str, list[str]]]:
-        peers_to_gossip: DefaultDict[ID, dict[str, list[str]]] = defaultdict(dict)
+    def gossip_heartbeat(self) -> DefaultDict[ID, dict[str, list[bytes]]]:
+        peers_to_gossip: DefaultDict[ID, dict[str, list[bytes]]] = defaultdict(dict)
 
         # Handle mesh topics
         for topic in self.mesh:
@@ -660,6 +1572,8 @@ class GossipSub(IPubsubRouter, Service):
         # If num_to_select > size(selection_pool), then return selection_pool (which has
         # the most possible elements s.t. the number of elements is less than
         # num_to_select)
+        if num_to_select <= 0:
+            return []
         if num_to_select >= len(selection_pool):
             return selection_pool
 
@@ -680,7 +1594,15 @@ class GossipSub(IPubsubRouter, Service):
         gossipsub_peers_in_topic = {
             peer_id
             for peer_id in self.pubsub.peer_topics[topic]
-            if self.peer_protocol[peer_id] == PROTOCOL_ID
+            if self.peer_protocol.get(peer_id)
+            in (
+                PROTOCOL_ID,
+                PROTOCOL_ID_V11,
+                PROTOCOL_ID_V12,
+                PROTOCOL_ID_V13,
+                PROTOCOL_ID_V14,
+                PROTOCOL_ID_V20,
+            )
         }
         if backoff_check:
             # filter out peers that are in back off for this topic
@@ -733,6 +1655,18 @@ class GossipSub(IPubsubRouter, Service):
             del self.back_off[topic][peer]
             return False
 
+    def _prune_idontwant_entries(self) -> None:
+        """
+        Prune old IDONTWANT entries during heartbeat to prevent memory leaks.
+
+        This method removes all IDONTWANT entries since they are only relevant
+        for the current heartbeat period. The specific message IDs that peers
+        don't want should be cleared regularly to prevent indefinite growth.
+        """
+        # Clear all IDONTWANT entries for all peers
+        for peer_id in self.dont_send_message_ids:
+            self.dont_send_message_ids[peer_id].clear()
+
     async def _do_px(self, px_peers: list[rpc_pb2.PeerInfo]) -> None:
         if len(px_peers) > self.px_peers_count:
             px_peers = px_peers[: self.px_peers_count]
@@ -744,18 +1678,54 @@ class GossipSub(IPubsubRouter, Service):
                 continue
 
             try:
-                peer_info = peer_info_from_bytes(peer.signedPeerRecord)
-                try:
+                # Validate signed peer record if provided;
+                # otherwise try to connect directly
+                if peer.HasField("signedPeerRecord") and len(peer.signedPeerRecord) > 0:
+                    # Validate envelope signature and freshness via peerstore consume
                     if self.pubsub is None:
                         raise NoPubsubAttached
-                    await self.pubsub.host.connect(peer_info)
-                except Exception as e:
-                    logger.warning(
-                        "failed to connect to px peer %s: %s",
-                        peer_id,
-                        e,
+
+                    envelope, record = consume_envelope(
+                        peer.signedPeerRecord, "libp2p-peer-record"
                     )
-                    continue
+
+                    # Ensure the record matches the advertised peer id
+                    if record.peer_id != peer_id:
+                        raise ValueError("peer id mismatch in PX signed record")
+
+                    # Store into peerstore and update addrs
+                    self.pubsub.host.get_peerstore().consume_peer_record(
+                        envelope, ttl=7200
+                    )
+
+                    peer_info = PeerInfo(record.peer_id, record.addrs)
+                    try:
+                        await self.pubsub.host.connect(peer_info)
+                    except Exception as e:
+                        logger.warning(
+                            "failed to connect to px peer %s: %s",
+                            peer_id,
+                            e,
+                        )
+                        continue
+                else:
+                    # No signed record available; try to use existing connection info
+                    if self.pubsub is None:
+                        raise NoPubsubAttached
+
+                    try:
+                        # Try to get existing peer info from peerstore
+                        existing_peer_info = self.pubsub.host.get_peerstore().peer_info(
+                            peer_id
+                        )
+                        await self.pubsub.host.connect(existing_peer_info)
+                    except Exception as e:
+                        logger.debug(
+                            "peer %s not found in peerstore or connection failed: %s",
+                            peer_id,
+                            e,
+                        )
+                        continue
             except Exception as e:
                 logger.warning(
                     "failed to parse peer info from px peer %s: %s",
@@ -769,23 +1739,37 @@ class GossipSub(IPubsubRouter, Service):
     async def handle_ihave(
         self, ihave_msg: rpc_pb2.ControlIHave, sender_peer_id: ID
     ) -> None:
-        """Checks the seen set and requests unknown messages with an IWANT message."""
+        """
+        Checks the seen set and requests unknown messages with an IWANT message.
+
+        Enhanced with rate limiting for GossipSub v1.4.
+        """
+        # Rate limiting check for IHAVE messages
+        if not self._check_ihave_rate_limit(sender_peer_id, ihave_msg.topicID):
+            logger.warning(
+                "IHAVE rate limit exceeded for peer %s on topic %s, ignoring message",
+                sender_peer_id,
+                ihave_msg.topicID,
+            )
+            return
         if self.pubsub is None:
             raise NoPubsubAttached
-        # Get list of all seen (seqnos, from) from the (seqno, from) tuples in
-        # seen_messages cache
-        seen_seqnos_and_peers = [
-            seqno_and_from for seqno_and_from in self.pubsub.seen_messages.cache.keys()
-        ]
+        pubsub = self.pubsub
 
-        # Add all unknown message ids (ids that appear in ihave_msg but not in
-        # seen_seqnos) to list of messages we want to request
-        # FIXME: Update type of message ID
-        msg_ids_wanted: list[Any] = [
-            msg_id
-            for msg_id in ihave_msg.messageIDs
-            if literal_eval(msg_id) not in seen_seqnos_and_peers
-        ]
+        # Add all unknown message ids (ids that appear in ihave_msg but not
+        # already seen) to list of messages we want to request
+        msg_ids_wanted: list[MessageID] = []
+        for msg_id in ihave_msg.messageIDs:
+            mid_bytes = safe_bytes_from_hex(msg_id)
+            if mid_bytes is None:
+                logger.warning(
+                    "Received invalid message ID in IHAVE from %s: %r",
+                    sender_peer_id,
+                    msg_id,
+                )
+                continue
+            if not pubsub.seen_messages.has(mid_bytes):
+                msg_ids_wanted.append(MessageID(mid_bytes))
 
         # Request messages with IWANT message
         if msg_ids_wanted:
@@ -797,10 +1781,28 @@ class GossipSub(IPubsubRouter, Service):
         """
         Forwards all request messages that are present in mcache to the
         requesting peer.
+
+        Enhanced with rate limiting for GossipSub v1.4.
         """
-        # FIXME: Update type of message ID
-        # FIXME: Find a better way to parse the msg ids
-        msg_ids: list[Any] = [literal_eval(msg) for msg in iwant_msg.messageIDs]
+        # Rate limiting check for IWANT messages
+        if not self._check_iwant_rate_limit(sender_peer_id):
+            logger.warning(
+                "IWANT rate limit exceeded for peer %s, ignoring request",
+                sender_peer_id,
+            )
+            return
+
+        msg_ids: list[bytes] = []
+        for msg_id_wire in iwant_msg.messageIDs:
+            mid_bytes = safe_bytes_from_hex(msg_id_wire)
+            if mid_bytes is None:
+                logger.warning(
+                    "Received invalid message ID in IWANT from %s: %r",
+                    sender_peer_id,
+                    msg_id_wire,
+                )
+                continue
+            msg_ids.append(mid_bytes)
         msgs_to_forward: list[rpc_pb2.Message] = []
         for msg_id_iwant in msg_ids:
             # Check if the wanted message ID is present in mcache
@@ -811,6 +1813,9 @@ class GossipSub(IPubsubRouter, Service):
                 # Add message to list of messages to forward to requesting peers
                 msgs_to_forward.append(msg)
 
+        if not msgs_to_forward:
+            return
+
         # Forward messages to requesting peer
         # Should this just be publishing? No, because then the message will forwarded to
         # peers in the topics contained in the messages.
@@ -818,27 +1823,44 @@ class GossipSub(IPubsubRouter, Service):
         # 1) Package these messages into a single packet
         packet: rpc_pb2.RPC = rpc_pb2.RPC()
 
+        # Here the an RPC message is being created and published in response
+        # to the iwant control msg, so we will send a freshly created senderRecord
+        # with the RPC msg
+        if isinstance(self.pubsub, Pubsub):
+            envelope_bytes, _ = env_to_send_in_RPC(self.pubsub.host)
+            packet.senderRecord = envelope_bytes
+
         packet.publish.extend(msgs_to_forward)
 
         if self.pubsub is None:
             raise NoPubsubAttached
 
-        # 3) Get the stream to this peer
-        if sender_peer_id not in self.pubsub.peers:
-            logger.debug(
-                "Fail to responed to iwant request from %s: peer record not exist",
-                sender_peer_id,
-            )
-            return
-        peer_stream = self.pubsub.peers[sender_peer_id]
-
-        # 4) And write the packet to the stream
-        await self.pubsub.write_msg(peer_stream, packet)
+        # 3) Send the packet via the peer's outbound queue
+        self.send_rpc(sender_peer_id, packet)
 
     async def handle_graft(
         self, graft_msg: rpc_pb2.ControlGraft, sender_peer_id: ID
     ) -> None:
         topic: str = graft_msg.topicID
+
+        # GRAFT flood protection (v1.4 feature)
+        if not self._check_graft_flood_protection(sender_peer_id, topic):
+            logger.warning(
+                "GRAFT flood detected from peer %s for topic %s, applying penalty",
+                sender_peer_id,
+                topic,
+            )
+            if self.scorer is not None:
+                self.scorer.penalize_graft_flood(sender_peer_id, 10.0)
+            await self.emit_prune(topic, sender_peer_id, False, False)
+            return
+
+        # Score gate for GRAFT acceptance
+        scorer = self.scorer
+        if scorer is not None:
+            if scorer.is_graylisted(sender_peer_id, [topic]):
+                await self.emit_prune(topic, sender_peer_id, False, False)
+                return
 
         # Add peer to mesh for topic
         if topic in self.mesh:
@@ -862,6 +1884,9 @@ class GossipSub(IPubsubRouter, Service):
 
             if sender_peer_id not in self.mesh[topic]:
                 self.mesh[topic].add(sender_peer_id)
+                self._notify_mesh_peer_added(sender_peer_id, topic)
+                if self.scorer is not None:
+                    self.scorer.on_join_mesh(sender_peer_id, topic)
         else:
             # Respond with PRUNE if not subscribed to the topic
             await self.emit_prune(topic, sender_peer_id, self.do_px, False)
@@ -876,16 +1901,28 @@ class GossipSub(IPubsubRouter, Service):
             px_peers.append(peer)
 
         # Remove peer from mesh for topic
-        if topic in self.mesh:
-            if backoff_till > 0:
-                self._add_back_off(sender_peer_id, topic, False, backoff_till)
-            else:
-                self._add_back_off(sender_peer_id, topic, False)
+        # Always add backoff, even if topic is not currently in mesh
+        if backoff_till > 0:
+            self._add_back_off(sender_peer_id, topic, False, backoff_till)
+        else:
+            self._add_back_off(sender_peer_id, topic, False)
 
+        # Remove sender from mesh if topic exists in mesh
+        if topic in self.mesh:
             self.mesh[topic].discard(sender_peer_id)
+            if self.scorer is not None:
+                self.scorer.on_leave_mesh(sender_peer_id, topic)
+
+        # Track PRUNE time for GRAFT flood protection
+        self.graft_flood_tracking[sender_peer_id][topic] = time.time()
 
         if px_peers:
-            await self._do_px(px_peers)
+            # Score-gate PX acceptance
+            allow_px = True
+            if self.scorer is not None:
+                allow_px = self.scorer.allow_px_from(sender_peer_id, [topic])
+            if allow_px:
+                await self._do_px(px_peers)
 
     # RPC emitters
 
@@ -894,7 +1931,9 @@ class GossipSub(IPubsubRouter, Service):
         ihave_msgs: list[rpc_pb2.ControlIHave] | None,
         graft_msgs: list[rpc_pb2.ControlGraft] | None,
         prune_msgs: list[rpc_pb2.ControlPrune] | None,
+        idontwant_msgs: list[rpc_pb2.ControlIDontWant] | None = None,
     ) -> rpc_pb2.ControlMessage:
+        """Pack control messages. v1.3 Extensions are set only in the first hello."""
         control_msg: rpc_pb2.ControlMessage = rpc_pb2.ControlMessage()
         if ihave_msgs:
             control_msg.ihave.extend(ihave_msgs)
@@ -902,9 +1941,13 @@ class GossipSub(IPubsubRouter, Service):
             control_msg.graft.extend(graft_msgs)
         if prune_msgs:
             control_msg.prune.extend(prune_msgs)
+        if idontwant_msgs:
+            control_msg.idontwant.extend(idontwant_msgs)
         return control_msg
 
-    async def emit_ihave(self, topic: str, msg_ids: Any, to_peer: ID) -> None:
+    async def emit_ihave(
+        self, topic: str, msg_ids: Sequence[bytes], to_peer: ID
+    ) -> None:
         """Emit ihave message, sent to to_peer, for topic and msg_ids."""
         ihave_msg: rpc_pb2.ControlIHave = rpc_pb2.ControlIHave()
         ihave_msg.messageIDs.extend(msg_ids)
@@ -915,7 +1958,7 @@ class GossipSub(IPubsubRouter, Service):
 
         await self.emit_control_message(control_msg, to_peer)
 
-    async def emit_iwant(self, msg_ids: Any, to_peer: ID) -> None:
+    async def emit_iwant(self, msg_ids: Sequence[bytes], to_peer: ID) -> None:
         """Emit iwant message, sent to to_peer, for msg_ids."""
         iwant_msg: rpc_pb2.ControlIWant = rpc_pb2.ControlIWant()
         iwant_msg.messageIDs.extend(msg_ids)
@@ -955,16 +1998,152 @@ class GossipSub(IPubsubRouter, Service):
             for peer in exchange_peers:
                 if self.pubsub is None:
                     raise NoPubsubAttached
-                peer_info = self.pubsub.host.get_peerstore().peer_info(peer)
-                signed_peer_record: rpc_pb2.PeerInfo = rpc_pb2.PeerInfo()
-                signed_peer_record.peerID = peer.to_bytes()
-                signed_peer_record.signedPeerRecord = peer_info_to_bytes(peer_info)
-                prune_msg.peers.append(signed_peer_record)
+
+                # Try to get the signed peer record envelope from peerstore
+                envelope = self.pubsub.host.get_peerstore().get_peer_record(peer)
+                peer_info_msg: rpc_pb2.PeerInfo = rpc_pb2.PeerInfo()
+                peer_info_msg.peerID = peer.to_bytes()
+
+                if envelope is not None:
+                    # Use the signed envelope
+                    peer_info_msg.signedPeerRecord = envelope.marshal_envelope()
+                # If no signed record available, include peer without signed record
+
+                prune_msg.peers.append(peer_info_msg)
 
         control_msg: rpc_pb2.ControlMessage = rpc_pb2.ControlMessage()
         control_msg.prune.extend([prune_msg])
 
         await self.emit_control_message(control_msg, to_peer)
+
+    async def emit_idontwant(self, msg_ids: list[bytes], to_peer: ID) -> None:
+        """Emit idontwant message, sent to to_peer, for msg_ids."""
+        idontwant_msg: rpc_pb2.ControlIDontWant = rpc_pb2.ControlIDontWant()
+        idontwant_msg.messageIDs.extend(msg_ids)
+
+        control_msg: rpc_pb2.ControlMessage = rpc_pb2.ControlMessage()
+        control_msg.idontwant.extend([idontwant_msg])
+
+        await self.emit_control_message(control_msg, to_peer)
+
+    def send_rpc(self, peer_id: ID, rpc: rpc_pb2.RPC, priority: bool = False) -> None:
+        """
+        Split *rpc* and enqueue each chunk for *peer_id* via its outbound
+        :class:`RpcQueue`.
+
+        This matches Go's ``sendRPC`` which calls ``split`` and then
+        ``doSendRPC`` for each resulting chunk.  Control-only messages
+        should pass ``priority=True`` so they are less likely to be
+        dropped under back-pressure.
+
+        If the queue is full the chunk is dropped (matching Go's
+        ``doSendRPC`` / ``ErrQueueFull`` behaviour).  Each chunk is
+        attempted independently — a single drop does not abort the
+        remaining chunks.
+        """
+        if self.pubsub is None:
+            logger.debug("send_rpc: no pubsub attached, dropping message")
+            return
+        queue = self.pubsub.peer_queues.get(peer_id)
+        if queue is None:
+            logger.debug("send_rpc: no queue for peer %s", peer_id)
+            return
+
+        outbound = rpc_pb2.RPC()
+        outbound.CopyFrom(rpc)
+        self._piggyback_control_retry(peer_id, outbound)
+
+        for part in queue.split_rpc(outbound):
+            # Caller-side size check matching Go's sendRPC:
+            #   if rpc.Size() > gs.p.maxMessageSize { gs.doDropRPC(...) }
+            if part.ByteSize() > queue.max_message_size:
+                self._handle_dropped_rpc(peer_id, part, "oversized")
+                continue
+            ok = queue.push(part, priority=priority)
+            if not ok:
+                self._handle_dropped_rpc(peer_id, part, "queue_full")
+
+    def _handle_dropped_rpc(
+        self,
+        peer_id: ID,
+        rpc: rpc_pb2.RPC,
+        reason: str,
+    ) -> None:
+        """Record drop and enqueue retriable control intent for later send."""
+        drop_rpc(peer_id, rpc)
+        if rpc.HasField("control"):
+            self._push_control_retry(peer_id, rpc.control)
+            logger.debug(
+                "deferred dropped control for retry (peer=%s, reason=%s)",
+                peer_id,
+                reason,
+            )
+
+    def _push_control_retry(self, peer_id: ID, control: rpc_pb2.ControlMessage) -> None:
+        """
+        Merge dropped control information into per-peer deferred retry state.
+
+        Retries include GRAFT and PRUNE only (Go parity).
+        IHAVE, IWANT, IDONTWANT and EXTENSIONS are intentionally not retried.
+        """
+        if not (control.graft or control.prune):
+            return
+
+        pending = self._pending_control[peer_id]
+
+        if control.graft:
+            pending.graft.extend(control.graft)
+            if len(pending.graft) > self._max_pending_graft_prune_per_peer:
+                del pending.graft[: -self._max_pending_graft_prune_per_peer]
+
+        if control.prune:
+            pending.prune.extend(control.prune)
+            if len(pending.prune) > self._max_pending_graft_prune_per_peer:
+                del pending.prune[: -self._max_pending_graft_prune_per_peer]
+
+        if not self._has_retriable_control(pending):
+            self._pending_control.pop(peer_id, None)
+
+    def _piggyback_control_retry(self, peer_id: ID, rpc: rpc_pb2.RPC) -> None:
+        """Attach deferred control to rpc and clear the pending entry."""
+        pending = self._pending_control.get(peer_id)
+        if pending is None or not self._has_retriable_control(pending):
+            self._pending_control.pop(peer_id, None)
+            return
+
+        filtered = self._filter_retriable_control(peer_id, pending)
+        if not self._has_retriable_control(filtered):
+            self._pending_control.pop(peer_id, None)
+            return
+
+        if not rpc.HasField("control"):
+            rpc.control.SetInParent()
+        rpc.control.graft.extend(filtered.graft)
+        rpc.control.prune.extend(filtered.prune)
+
+        self._pending_control.pop(peer_id, None)
+
+    def _filter_retriable_control(
+        self, peer_id: ID, control: rpc_pb2.ControlMessage
+    ) -> rpc_pb2.ControlMessage:
+        """Drop stale retriable control entries before piggybacking."""
+        filtered = rpc_pb2.ControlMessage()
+
+        for graft in control.graft:
+            topic_id = graft.topicID
+            if topic_id in self.mesh and peer_id in self.mesh[topic_id]:
+                filtered.graft.append(graft)
+
+        for prune in control.prune:
+            topic_id = prune.topicID
+            if topic_id not in self.mesh or peer_id not in self.mesh[topic_id]:
+                filtered.prune.append(prune)
+
+        return filtered
+
+    @staticmethod
+    def _has_retriable_control(control: rpc_pb2.ControlMessage) -> bool:
+        return bool(control.graft or control.prune)
 
     async def emit_control_message(
         self, control_msg: rpc_pb2.ControlMessage, to_peer: ID
@@ -973,15 +2152,1445 @@ class GossipSub(IPubsubRouter, Service):
             raise NoPubsubAttached
         # Add control message to packet
         packet: rpc_pb2.RPC = rpc_pb2.RPC()
+
+        # Add the sender's peer-record in the RPC msg
+        if isinstance(self.pubsub, Pubsub):
+            envelope_bytes, _ = env_to_send_in_RPC(self.pubsub.host)
+            packet.senderRecord = envelope_bytes
+
         packet.control.CopyFrom(control_msg)
 
-        # Get stream for peer from pubsub
-        if to_peer not in self.pubsub.peers:
+        # Send via outbound queue (control messages are priority)
+        self.send_rpc(to_peer, packet, priority=True)
+
+    async def _emit_idontwant_for_message(
+        self, msg_id: bytes, topic_ids: Iterable[str]
+    ) -> None:
+        """
+        Emit IDONTWANT message to mesh peers about a received message.
+
+        :param msg_id: The message ID to notify peers about
+        :param topic_ids: The topics the message belongs to
+        """
+        if self.pubsub is None:
+            return
+
+        # Get all mesh peers for the topics in this message
+        mesh_peers: set[ID] = set()
+        for topic in topic_ids:
+            if topic in self.mesh:
+                mesh_peers.update(self.mesh[topic])
+
+        # Only send to peers that support gossipsub 1.2+
+        v12_plus_peers = {
+            peer_id
+            for peer_id in mesh_peers
+            if self.peer_protocol.get(peer_id)
+            in (PROTOCOL_ID_V12, PROTOCOL_ID_V13, PROTOCOL_ID_V14, PROTOCOL_ID_V20)
+        }
+
+        if not v12_plus_peers:
+            return
+
+        # Send IDONTWANT message to all v1.2+ mesh peers
+        for peer_id in v12_plus_peers:
+            await self.emit_idontwant([msg_id], peer_id)
+
+    async def handle_idontwant(
+        self, idontwant_msg: rpc_pb2.ControlIDontWant, sender_peer_id: ID
+    ) -> None:
+        """
+        Handle incoming IDONTWANT control message by adding message IDs
+        to the peer's dont_send_message_ids set.
+
+        This method enforces max_idontwant_messages limit to prevent memory exhaustion
+        from peers sending excessive IDONTWANT messages. When the limit is reached,
+        older entries may be dropped to make room for new ones.
+
+        :param idontwant_msg: The IDONTWANT control message
+        :param sender_peer_id: ID of the peer who sent the message
+        """
+        # Initialize set if peer not tracked
+        if sender_peer_id not in self.dont_send_message_ids:
+            self.dont_send_message_ids[sender_peer_id] = set()
+
+        # Check if we need to enforce the limit
+        current_count = len(self.dont_send_message_ids[sender_peer_id])
+        new_count = len(idontwant_msg.messageIDs)
+
+        # If adding all new message IDs would exceed the limit, we need to enforce it
+        if current_count + new_count > self.max_idontwant_messages:
+            # If we're already at or over the limit, we need to drop some entries
+            if current_count >= self.max_idontwant_messages:
+                # Convert to list to allow removal of specific elements
+                current_ids = list(self.dont_send_message_ids[sender_peer_id])
+                # Calculate how many old entries to drop to make room for new ones
+                # while staying under the limit
+                to_drop = min(new_count, current_count)
+                # Drop the oldest entries (assuming they're the first in the set)
+                self.dont_send_message_ids[sender_peer_id] = set(current_ids[to_drop:])
+
+                logger.debug(
+                    "IDONTWANT limit reached for peer %s. Dropped %d oldest entries.",
+                    sender_peer_id,
+                    to_drop,
+                )
+
+            # Add new entries up to the limit
+            remaining_capacity = self.max_idontwant_messages - len(
+                self.dont_send_message_ids[sender_peer_id]
+            )
+            for msg_id in list(idontwant_msg.messageIDs)[:remaining_capacity]:
+                self.dont_send_message_ids[sender_peer_id].add(msg_id)
+        else:
+            # We have room for all new entries
+            for msg_id in idontwant_msg.messageIDs:
+                self.dont_send_message_ids[sender_peer_id].add(msg_id)
+
+        logger.debug(
+            "Added message IDs to dont_send list for peer %s (current count: %d/%d)",
+            sender_peer_id,
+            len(self.dont_send_message_ids[sender_peer_id]),
+            self.max_idontwant_messages,
+        )
+
+    # ------------------------------------------------------------------ #
+    # GossipSub v1.3 – Topic Observation extension handlers              #
+    # ------------------------------------------------------------------ #
+
+    async def handle_observe(
+        self, observe_msg: rpc_pb2.ControlObserve, sender_peer_id: ID
+    ) -> None:
+        """
+        Handle an incoming OBSERVE control message.
+
+        An OBSERVE message is sent by an *observer* peer that wants to receive
+        IHAVE notifications for ``topicID`` without being a full subscriber.
+        After this call, every time a new message for ``topicID`` arrives we
+        will send an IHAVE to *sender_peer_id* immediately (not at the next
+        heartbeat).
+
+        Per the Topic Observation spec, only peers that meet both of the
+        following conditions should be permitted to send OBSERVE:
+
+        - Negotiated ``/meshsub/1.3.0`` (checked by the caller), and
+        - Advertised the ``topicObservation`` extension in their first message.
+
+        :param observe_msg:    The OBSERVE control message.
+        :param sender_peer_id: ID of the peer that sent the OBSERVE.
+        """
+        topic: str = observe_msg.topicID
+        if not topic:
             logger.debug(
-                "Fail to emit control message to %s: peer record not exist", to_peer
+                "Received OBSERVE with empty topicID from peer %s, ignoring.",
+                sender_peer_id,
             )
             return
-        peer_stream = self.pubsub.peers[to_peer]
 
-        # Write rpc to stream
-        await self.pubsub.write_msg(peer_stream, packet)
+        # Only honour OBSERVE if the peer advertised topic_observation support.
+        if not self.extensions_state.peer_supports_topic_observation(sender_peer_id):
+            logger.debug(
+                "Peer %s sent OBSERVE but did not advertise topic_observation "
+                "extension – ignoring.",
+                sender_peer_id,
+            )
+            return
+
+        self.topic_observation.add_observer(topic, sender_peer_id)
+        logger.debug(
+            "OBSERVE: peer %s is now observing topic '%s'.", sender_peer_id, topic
+        )
+
+    async def handle_unobserve(
+        self, unobserve_msg: rpc_pb2.ControlUnobserve, sender_peer_id: ID
+    ) -> None:
+        """
+        Handle an incoming UNOBSERVE control message.
+
+        Stops sending IHAVE notifications to *sender_peer_id* for ``topicID``.
+
+        :param unobserve_msg:  The UNOBSERVE control message.
+        :param sender_peer_id: ID of the peer that sent the UNOBSERVE.
+        """
+        topic: str = unobserve_msg.topicID
+        if not topic:
+            logger.debug(
+                "Received UNOBSERVE with empty topicID from peer %s, ignoring.",
+                sender_peer_id,
+            )
+            return
+
+        self.topic_observation.remove_observer(topic, sender_peer_id)
+        logger.debug(
+            "UNOBSERVE: peer %s stopped observing topic '%s'.",
+            sender_peer_id,
+            topic,
+        )
+
+    # ------------------------------------------------------------------ #
+    # GossipSub v1.3 – Topic Observation extension emitters              #
+    # ------------------------------------------------------------------ #
+
+    async def emit_observe(self, topic: str, to_peer: ID) -> None:
+        """
+        Emit an OBSERVE control message to *to_peer* for *topic*.
+
+        Call this when this node wants to observe *topic* via a subscribing
+        peer.  After sending OBSERVE, *to_peer* should begin sending IHAVE
+        to us when new messages arrive in *topic*.
+
+        :param topic:   The topic to start observing.
+        :param to_peer: The subscribing peer to send OBSERVE to.
+        """
+        observe_msg = rpc_pb2.ControlObserve(topicID=topic)
+        control_msg = rpc_pb2.ControlMessage()
+        control_msg.observe.extend([observe_msg])
+
+        await self.emit_control_message(control_msg, to_peer)
+        self.topic_observation.add_observing(topic, to_peer)
+        logger.debug("OBSERVE sent: topic='%s' to peer %s.", topic, to_peer)
+
+    async def emit_unobserve(self, topic: str, to_peer: ID) -> None:
+        """
+        Emit an UNOBSERVE control message to *to_peer* for *topic*.
+
+        Call this to stop observing *topic* via *to_peer*.
+
+        :param topic:   The topic to stop observing.
+        :param to_peer: The subscribing peer to send UNOBSERVE to.
+        """
+        unobserve_msg = rpc_pb2.ControlUnobserve(topicID=topic)
+        control_msg = rpc_pb2.ControlMessage()
+        control_msg.unobserve.extend([unobserve_msg])
+
+        await self.emit_control_message(control_msg, to_peer)
+        self.topic_observation.remove_observing(topic, to_peer)
+        logger.debug("UNOBSERVE sent: topic='%s' to peer %s.", topic, to_peer)
+
+    async def _notify_observers(self, topic_ids: Iterable[str], msg_id: bytes) -> None:
+        """
+        Immediately send an IHAVE to every observer of each topic in
+        *topic_ids* when a new message arrives.
+
+        Unlike the gossip heartbeat, this notification is *immediate* so that
+        observers get near-real-time awareness (per the Topic Observation spec).
+        Observers are not expected to reply with IWANT in this flow; they use
+        the IHAVE purely as a presence notification.
+
+        :param topic_ids: Topics the new message belongs to.
+        :param msg_id:    The message ID to include in the IHAVE notifications.
+        """
+        if self.pubsub is None:
+            return
+        pubsub = self.pubsub  # narrow type for pyrefly / mypy
+
+        # Emit opaque bytes message IDs (aligned with IHAVE/IWANT protobuf schema).
+        for topic in topic_ids:
+            observers = self.topic_observation.get_observers(topic)
+            if not observers:
+                continue
+
+            for observer_peer in observers:
+                if observer_peer not in pubsub.peers:
+                    continue
+                await self.emit_ihave(topic, [msg_id], observer_peer)
+                logger.debug(
+                    "Topic Observation: sent IHAVE(topic='%s', msg_id=%s) "
+                    "to observer %s.",
+                    topic,
+                    msg_id.hex(),
+                    observer_peer,
+                )
+
+    # ------------------------------------------------------------------ #
+    # GossipSub v1.3 – Extensions misbehaviour reporting                 #
+    # ------------------------------------------------------------------ #
+
+    def _report_extensions_misbehaviour(self, peer_id: ID) -> None:
+        """
+        Apply a peer-score penalty when a peer sends a duplicate Extensions
+        control message (violates GossipSub v1.3 spec rule 2).
+
+        Mirrors go-libp2p's ``reportMisbehavior`` callback.
+
+        :param peer_id: The misbehaving peer.
+        """
+        if self.scorer is not None:
+            self.scorer.penalize_behavior(peer_id, 1.0)
+            logger.warning(
+                "Applied score penalty to peer %s for sending duplicate "
+                "Extensions control message (GossipSub v1.3 violation).",
+                peer_id,
+            )
+
+    async def start_observing_topic(self, topic: str) -> None:
+        """
+        Start observing *topic* by sending OBSERVE to all in-topic v1.3 peers
+        that support the Topic Observation extension.
+
+        This is the high-level API for callers that want to become an observer.
+        Internally it picks suitable subscriber peers and calls
+        :meth:`emit_observe` for each of them.
+
+        :param topic: The topic to start observing.
+        """
+        if self.pubsub is None:
+            raise NoPubsubAttached
+
+        peers_subscribed = self.pubsub.peer_topics.get(topic, set())
+        for peer in peers_subscribed:
+            if self.supports_v13_features(
+                peer
+            ) and self.extensions_state.both_support_topic_observation(peer):
+                await self.emit_observe(topic, peer)
+                logger.debug(
+                    "Started observing topic '%s' via peer %s.",
+                    topic,
+                    peer,
+                )
+
+    async def stop_observing_topic(self, topic: str) -> None:
+        """
+        Stop observing *topic* by sending UNOBSERVE to all peers we previously
+        sent OBSERVE to for *topic*.
+
+        :param topic: The topic to stop observing.
+        """
+        if self.pubsub is None:
+            raise NoPubsubAttached
+
+        subscriber_peers = self.topic_observation.get_subscriber_peers_for_topic(topic)
+        for peer in subscriber_peers:
+            await self.emit_unobserve(topic, peer)
+            logger.debug(
+                "Stopped observing topic '%s' via peer %s.",
+                topic,
+                peer,
+            )
+
+    def _track_peer_ip(self, peer_id: ID) -> None:
+        """
+        Track the IP address of a peer for colocation scoring.
+
+        :param peer_id: The peer ID to track
+        """
+        if self.pubsub is None or self.scorer is None:
+            return
+
+        try:
+            # Try to get the peer's connection from the host
+            if peer_id in self.pubsub.peers:
+                stream = self.pubsub.peers[peer_id]
+                # Get the remote address from the connection
+                # Note: Accessing connection through muxed_conn may vary
+                muxed_conn = stream.muxed_conn
+                conn = getattr(muxed_conn, "conn", None)
+                if conn is not None and hasattr(conn, "remote_addr"):
+                    remote_addr = getattr(conn, "remote_addr", None)
+                    if remote_addr:
+                        ip_str = self._extract_ip_from_remote_addr(remote_addr)
+                        if ip_str:
+                            self.scorer.add_peer_ip(peer_id, ip_str)
+        except Exception as e:
+            logger.debug("Failed to track IP for peer %s: %s", peer_id, e)
+
+    def _extract_ip_from_remote_addr(self, remote_addr: Any) -> str | None:
+        """
+        Extract IP address from a remote address (Multiaddr, (host, port), or string).
+
+        Uses libp2p.utils.multiaddr_utils when possible for consistency.
+        """
+        try:
+            from multiaddr import Multiaddr
+
+            if isinstance(remote_addr, Multiaddr):
+                return extract_ip_from_multiaddr_util(remote_addr)
+            if isinstance(remote_addr, (tuple, list)) and len(remote_addr) >= 1:
+                return str(remote_addr[0])
+            addr_str = str(remote_addr)
+            # Try parsing as multiaddr and use shared util
+            try:
+                maddr = Multiaddr(addr_str)
+                return extract_ip_from_multiaddr_util(maddr)
+            except Exception:
+                pass
+            return self._extract_ip_from_multiaddr_str(addr_str)
+        except Exception:
+            return None
+
+    def _extract_ip_from_multiaddr_str(self, multiaddr_str: str) -> str | None:
+        """
+        Extract IP from multiaddr string (fallback when Multiaddr parse fails).
+
+        :param multiaddr_str: The multiaddr string
+        :return: The IP address or None if extraction fails
+        """
+        try:
+            parts = multiaddr_str.split("/")
+            for i, part in enumerate(parts):
+                if part in ("ip4", "ip6") and i + 1 < len(parts):
+                    return parts[i + 1]
+            return None
+        except Exception:
+            return None
+
+    def _update_network_health(self) -> None:
+        """
+        Update network health score based on mesh connectivity and peer behavior.
+
+        Network health is calculated based on:
+        - Mesh connectivity ratio
+        - Peer score distribution
+        - Message delivery success rate
+        """
+        if not self.adaptive_gossip_enabled or self.scorer is None:
+            return
+
+        current_time = int(time.time())
+        # Update health every 30 seconds
+        if current_time - self.last_health_update < 30:
+            return
+
+        self.last_health_update = current_time
+
+        try:
+            total_topics = len(self.mesh)
+            if total_topics == 0:
+                self.network_health_score = 1.0
+                return
+
+            # Calculate mesh connectivity health (0.0 to 1.0)
+            connectivity_health = 0.0
+            for topic, peers in self.mesh.items():
+                target_degree = self.degree
+                actual_degree = len(peers)
+                # Health is better when we're close to target degree
+                if actual_degree == 0:
+                    topic_health = 0.0
+                else:
+                    # Normalize based on how close we are to target
+                    ratio = min(actual_degree / target_degree, 1.0)
+                    topic_health = ratio
+                connectivity_health += topic_health
+
+            connectivity_health /= total_topics
+
+            # Calculate additional health metrics
+            score_health = self._calculate_peer_score_health()
+            delivery_health = self._calculate_message_delivery_health()
+            stability_health = self._calculate_mesh_stability_health()
+            churn_health = self._calculate_connection_churn_health()
+
+            # Combine metrics (weighted average with v1.4 enhancements)
+            self.network_health_score = (
+                0.3 * connectivity_health
+                + 0.25 * score_health
+                + 0.2 * delivery_health
+                + 0.15 * stability_health
+                + 0.1 * churn_health
+            )
+            self.network_health_score = max(0.0, min(1.0, self.network_health_score))
+
+            logger.debug(
+                "Network health updated: %.2f (connectivity: %.2f, scores: %.2f, ",
+                "delivery: %.2f, stability: %.2f, churn: %.2f)",
+                self.network_health_score,
+                connectivity_health,
+                score_health,
+                delivery_health,
+                stability_health,
+                churn_health,
+            )
+
+        except Exception as e:
+            logger.debug("Failed to update network health: %s", e)
+            # Default to moderate health on error
+            self.network_health_score = 0.5
+
+    def _calculate_peer_score_health(self) -> float:
+        """
+        Calculate health based on peer score distribution.
+
+        :return: Health score from 0.0 to 1.0
+        """
+        if self.scorer is None:
+            return 1.0
+
+        scorer = self.scorer  # Type narrowing
+        try:
+            # Get all peers in mesh
+            all_mesh_peers: set[ID] = set()
+            for peers in self.mesh.values():
+                all_mesh_peers.update(peers)
+
+            if not all_mesh_peers:
+                return 0.0  # No peers means poor health
+
+            # Calculate average score
+            total_score = 0.0
+            positive_scores = 0
+            for peer in all_mesh_peers:
+                # Use empty topic list for overall score
+                score = scorer.score(peer, [])
+                total_score += score
+                if score > 0:
+                    positive_scores += 1
+
+            # Health is better when more peers have positive scores
+            positive_ratio = positive_scores / len(all_mesh_peers)
+            return positive_ratio
+
+        except Exception:
+            return 0.5
+
+    def _calculate_message_delivery_health(self) -> float:
+        """
+        Calculate health based on message delivery success rate.
+
+        :return: Health score from 0.0 to 1.0
+        """
+        try:
+            current_time = time.time()
+            cutoff_time = current_time - 60.0  # Look at last minute
+
+            total_deliveries = 0
+            successful_deliveries = 0
+
+            for topic, delivery_times in self.recent_message_deliveries.items():
+                # Clean old entries
+                delivery_times[:] = [t for t in delivery_times if t > cutoff_time]
+
+                # Count deliveries (simplified - in real implementation,
+                # track success/failure separately)
+                total_deliveries += len(delivery_times)
+                successful_deliveries += len(
+                    delivery_times
+                )  # Assume all tracked are successful
+
+            if total_deliveries == 0:
+                # If we have no deliveries but have mesh peers, assume moderate health
+                # If we have no mesh peers, return poor health
+                total_mesh_peers = sum(len(peers) for peers in self.mesh.values())
+                if total_mesh_peers == 0:
+                    return 0.0  # No mesh peers means poor health
+                return 0.5  # No delivery data but have peers, assume moderate
+
+            self.message_delivery_success_rate = (
+                successful_deliveries / total_deliveries
+            )
+            return self.message_delivery_success_rate
+
+        except Exception:
+            return 0.5
+
+    def _calculate_mesh_stability_health(self) -> float:
+        """
+        Calculate health based on mesh stability (low churn is good).
+
+        :return: Health score from 0.0 to 1.0
+        """
+        try:
+            # Simple stability metric: ratio of stable connections
+            total_mesh_peers = sum(len(peers) for peers in self.mesh.values())
+
+            if total_mesh_peers == 0:
+                return 0.0  # No mesh peers means poor stability
+
+            # In a real implementation, track mesh changes over time
+            # For now, use a simple heuristic based on mesh size vs target
+            stability_ratio = 0.0
+            topic_count = len(self.mesh)
+
+            if topic_count > 0:
+                for topic, peers in self.mesh.items():
+                    target_size = self.degree
+                    actual_size = len(peers)
+
+                    if actual_size == 0:
+                        topic_stability = 0.0
+                    else:
+                        # Stability is higher when actual size is close to target
+                        size_ratio = min(
+                            actual_size / target_size, target_size / actual_size
+                        )
+                        topic_stability = size_ratio
+
+                    stability_ratio += topic_stability
+
+                self.mesh_stability_score = stability_ratio / topic_count
+            else:
+                self.mesh_stability_score = 1.0
+
+            return self.mesh_stability_score
+
+        except Exception:
+            return 0.5
+
+    def _calculate_connection_churn_health(self) -> float:
+        """
+        Calculate health based on connection churn rate (low churn is good).
+
+        :return: Health score from 0.0 to 1.0
+        """
+        try:
+            current_time = time.time()
+            window_size = 60.0  # 1 minute window
+            cutoff_time = current_time - window_size
+
+            # Clean old entries
+            self.recent_peer_connections[:] = [
+                t for t in self.recent_peer_connections if t > cutoff_time
+            ]
+            self.recent_peer_disconnections[:] = [
+                t for t in self.recent_peer_disconnections if t > cutoff_time
+            ]
+
+            connections = len(self.recent_peer_connections)
+            disconnections = len(self.recent_peer_disconnections)
+            total_churn = connections + disconnections
+
+            # Calculate churn rate (events per minute)
+            churn_rate = total_churn / (window_size / 60.0)
+            self.connection_churn_rate = churn_rate
+
+            # Health decreases with higher churn rate
+            # Assume 10 events/minute is high churn, 0 is perfect
+            max_acceptable_churn = 10.0
+            health = max(0.0, 1.0 - (churn_rate / max_acceptable_churn))
+
+            return health
+
+        except Exception:
+            return 0.5
+
+    def _adapt_gossip_parameters(self) -> None:
+        """
+        Adapt gossip parameters based on network health.
+
+        Enhanced v1.4 version with more sophisticated parameter adjustment.
+
+        When network health is poor:
+        - Increase mesh degree bounds to improve connectivity
+        - Increase gossip factor to spread messages more widely
+        - Adjust heartbeat intervals for faster convergence
+
+        When network health is good:
+        - Use standard parameters for efficiency
+        - Optimize for lower bandwidth usage
+        """
+        if not self.adaptive_gossip_enabled:
+            return
+
+        health = self.network_health_score
+
+        # More granular health-based adjustments
+        if health < 0.2:
+            # Critical health: aggressive adaptation
+            self.adaptive_degree_low = min(self.degree_low + 3, self.degree_high + 2)
+            self.adaptive_degree_high = self.degree_high + 4
+            self.gossip_factor = min(0.6, 0.25 * 2.0)
+        elif health < 0.4:
+            # Poor health: significant adaptation
+            self.adaptive_degree_low = min(self.degree_low + 2, self.degree_high)
+            self.adaptive_degree_high = self.degree_high + 3
+            self.gossip_factor = min(0.5, 0.25 * 1.8)
+        elif health < 0.6:
+            # Moderate health: moderate adaptation
+            self.adaptive_degree_low = min(self.degree_low + 1, self.degree_high)
+            self.adaptive_degree_high = self.degree_high + 2
+            self.gossip_factor = min(0.4, 0.25 * 1.4)
+        elif health < 0.8:
+            # Good health: slight optimization
+            self.adaptive_degree_low = self.degree_low
+            self.adaptive_degree_high = self.degree_high + 1
+            self.gossip_factor = 0.25 * 1.1
+        else:
+            # Excellent health: use base parameters (no further reduction)
+            self.adaptive_degree_low = self.degree_low
+            self.adaptive_degree_high = self.degree_high
+            self.gossip_factor = 0.25
+
+        # Additional v1.4 adaptive features
+        self._adapt_opportunistic_grafting_parameters(health)
+        self._adapt_heartbeat_parameters(health)
+
+    def _get_adaptive_gossip_peers_count(self, topic: str, total_peers: int) -> int:
+        """
+        Calculate adaptive number of peers to gossip to.
+
+        :param topic: The topic
+        :param total_peers: Total number of available peers
+        :return: Number of peers to gossip to
+        """
+        if not self.adaptive_gossip_enabled:
+            # Use default calculation
+            return max(6, int(total_peers * 0.25))  # Default Dlazy=6, factor=0.25
+
+        # Use adaptive gossip factor
+        base_count = int(total_peers * self.gossip_factor)
+        min_count = 6 if self.network_health_score > 0.5 else 8
+
+        return max(min_count, base_count)
+
+    def _adapt_opportunistic_grafting_parameters(self, health: float) -> None:
+        """
+        Adapt opportunistic grafting behavior based on network health.
+
+        :param health: Current network health score (0.0 to 1.0)
+        """
+        # In poor health, be more aggressive about opportunistic grafting
+        if hasattr(self, "opportunistic_graft_threshold"):
+            if health < 0.4:
+                # Lower threshold = more aggressive grafting
+                self.opportunistic_graft_threshold = 0.3
+            elif health < 0.7:
+                self.opportunistic_graft_threshold = 0.5
+            else:
+                # Higher threshold = more selective grafting
+                self.opportunistic_graft_threshold = 0.7
+
+    def _adapt_heartbeat_parameters(self, health: float) -> None:
+        """
+        Adapt heartbeat-related parameters based on network health.
+
+        Poor health: more frequent heartbeats for faster convergence.
+        Good health: standard interval to save bandwidth.
+
+        :param health: Current network health score (0.0 to 1.0)
+        """
+        base = getattr(self, "heartbeat_interval_base", self.heartbeat_interval)
+        if health < 0.4:
+            # Critical: heartbeat every 30-60s for faster recovery
+            self.heartbeat_interval = max(30, min(60, base // 2))
+        elif health < 0.7:
+            # Moderate: slightly more frequent than baseline
+            self.heartbeat_interval = max(60, int(base * 0.75))
+        else:
+            # Good health: use baseline interval
+            self.heartbeat_interval = base
+
+    def _check_spam_protection(self, peer_id: ID, msg: rpc_pb2.Message) -> bool:
+        """
+        Check if message should be rejected due to spam protection.
+
+        :param peer_id: The peer sending the message
+        :param msg: The message to check
+        :return: True if message should be accepted, False if rejected for spam
+        """
+        if not self.spam_protection_enabled:
+            return True
+
+        current_time = time.time()
+
+        for topic in msg.topicIDs:
+            # Get timestamps for this peer/topic combination
+            timestamps = self.message_rate_limits[peer_id][topic]
+
+            # Remove old timestamps (older than 1 second)
+            cutoff_time = current_time - 1.0
+            timestamps[:] = [t for t in timestamps if t > cutoff_time]
+
+            # Check if rate limit exceeded
+            if len(timestamps) >= self.max_messages_per_topic_per_second:
+                logger.warning(
+                    "Rate limit exceeded for peer %s on topic %s", peer_id, topic
+                )
+                # Penalize peer for spam
+                if self.scorer is not None:
+                    self.scorer.penalize_behavior(peer_id, 5.0)
+                return False
+
+            # Add current timestamp
+            timestamps.append(current_time)
+
+        return True
+
+    def _check_equivocation(self, msg: rpc_pb2.Message) -> bool:
+        """
+        Check for message equivocation (same seqno/from with different content).
+
+        :param msg: The message to check
+        :return: True if message is valid, False if equivocation detected
+        """
+        msg_key = msg.from_id + msg.seqno
+
+        if msg_key in self.equivocation_detection:
+            existing_msg = self.equivocation_detection[msg_key]
+            # Check if content differs (equivocation)
+            if existing_msg.data != msg.data or existing_msg.topicIDs != msg.topicIDs:
+                logger.warning("Equivocation detected from peer %s", ID(msg.from_id))
+                # Severely penalize equivocating peer
+                if self.scorer is not None:
+                    self.scorer.penalize_equivocation(ID(msg.from_id), 100.0)
+                return False
+        else:
+            # Store first occurrence
+            self.equivocation_detection[msg_key] = msg
+
+        return True
+
+    def _ensure_mesh_diversity(self, topic: str) -> list[ID]:
+        """
+        Ensure mesh has sufficient IP diversity to prevent Eclipse attacks.
+
+        :param topic: The topic to check
+        :return: List of peers that should be grafted for IP diversity
+        """
+        if not self.eclipse_protection_enabled or topic not in self.mesh:
+            return []
+
+        if self.scorer is None:
+            return []
+
+        mesh_peers = self.mesh[topic]
+        if len(mesh_peers) < self.min_mesh_diversity_ips:
+            return []
+
+        # Count unique IPs in mesh
+        unique_ips = set()
+        scorer = self.scorer
+        if scorer is not None:
+            for peer in mesh_peers:
+                if peer in scorer.ip_by_peer:
+                    unique_ips.add(scorer.ip_by_peer[peer])
+
+        # If diversity is too low, try to improve it
+        if len(unique_ips) < self.min_mesh_diversity_ips:
+            logger.debug(
+                "Low IP diversity in mesh for topic %s: %d unique IPs",
+                topic,
+                len(unique_ips),
+            )
+            return self._improve_mesh_diversity(topic, unique_ips)
+
+        return []
+
+    def _improve_mesh_diversity(self, topic: str, current_ips: set[str]) -> list[ID]:
+        """
+        Attempt to improve mesh diversity by grafting peers from different IPs.
+
+        :param topic: The topic to improve
+        :param current_ips: Set of IPs currently in mesh
+        :return: List of peers that should be grafted for IP diversity
+        """
+        if self.pubsub is None or self.scorer is None:
+            return []
+
+        if topic not in self.pubsub.peer_topics:
+            return []
+
+        # Find candidates from different IPs
+        candidates = []
+        if self.scorer is None:
+            return []
+
+        scorer = self.scorer  # Type narrowing
+        for peer in self.pubsub.peer_topics[topic]:
+            if peer in self.mesh[topic]:
+                continue  # Already in mesh
+
+            if peer not in scorer.ip_by_peer:
+                continue  # No IP info
+
+            peer_ip = scorer.ip_by_peer[peer]
+            if peer_ip not in current_ips:
+                # This peer would add IP diversity
+                candidates.append(peer)
+
+        if not candidates:
+            return []
+
+        # Select best candidates based on score
+        candidates_with_scores = [
+            (peer, scorer.score(peer, [topic])) for peer in candidates
+        ]
+        candidates_with_scores.sort(key=lambda x: x[1], reverse=True)
+
+        # Select up to 2 diverse peers to graft
+        peers_to_graft = []
+        grafted = 0
+        for peer, score in candidates_with_scores:
+            if grafted >= 2:
+                break
+
+            if score > scorer.params.graylist_threshold:
+                self.mesh[topic].add(peer)
+                self._notify_mesh_peer_added(peer, topic)
+                peers_to_graft.append(peer)
+                # Notify scorer about the new mesh peer
+                if self.scorer is not None:
+                    self.scorer.on_join_mesh(peer, topic)
+                logger.debug(
+                    "Grafted peer %s for IP diversity in topic %s", peer, topic
+                )
+                grafted += 1
+
+        return peers_to_graft
+
+    def _cleanup_security_state(self, peer_id: ID) -> None:
+        """
+        Clean up security-related state when a peer disconnects.
+
+        :param peer_id: The peer that disconnected
+        """
+        # Clean up rate limiting data
+        if peer_id in self.message_rate_limits:
+            del self.message_rate_limits[peer_id]
+
+        # Clean up v1.4 rate limiting data
+        if peer_id in self.iwant_request_limits:
+            del self.iwant_request_limits[peer_id]
+        if peer_id in self.ihave_message_limits:
+            del self.ihave_message_limits[peer_id]
+        if peer_id in self.graft_flood_tracking:
+            del self.graft_flood_tracking[peer_id]
+
+    def _perform_opportunistic_grafting(
+        self, topic: str, peers_to_graft: DefaultDict[ID, list[str]]
+    ) -> int:
+        """
+        Perform enhanced opportunistic grafting with sophisticated peer selection.
+
+        :param topic: The topic to perform grafting for
+        :param peers_to_graft: Dictionary to add graft candidates to
+        :return: Number of peers grafted
+        """
+        if self.scorer is None or self.pubsub is None:
+            return 0
+
+        try:
+            current_mesh_peers = self.mesh[topic]
+
+            # Only consider peers that support scoring for opportunistic grafting
+            scoring_mesh_peers = [
+                p for p in current_mesh_peers if self.supports_scoring(p)
+            ]
+
+            if not scoring_mesh_peers:
+                return 0
+
+            # Calculate mesh quality metrics
+            mesh_scores = [self.scorer.score(p, [topic]) for p in scoring_mesh_peers]
+            if not mesh_scores:
+                return 0
+
+            median_score = statistics.median(mesh_scores)
+            avg_score = sum(mesh_scores) / len(mesh_scores)
+            min_score = min(mesh_scores)
+
+            # Determine grafting strategy based on mesh quality
+            grafting_threshold = self._calculate_grafting_threshold(
+                median_score, avg_score, min_score, topic
+            )
+
+            # Find potential candidates
+            candidates = self._get_grafting_candidates(
+                topic, current_mesh_peers, grafting_threshold
+            )
+
+            if not candidates:
+                return 0
+
+            # Select best candidates using multiple criteria
+            selected_candidates = self._select_grafting_candidates(
+                candidates, topic, len(current_mesh_peers)
+            )
+
+            # Perform grafting
+            grafted_count = 0
+            for candidate in selected_candidates:
+                self.mesh[topic].add(candidate)
+                self._notify_mesh_peer_added(candidate, topic)
+                peers_to_graft[candidate].append(topic)
+                if self.scorer is not None:
+                    self.scorer.on_join_mesh(candidate, topic)
+                grafted_count += 1
+
+                if self.scorer is not None:
+                    logger.debug(
+                        "Opportunistically grafted peer %s to topic %s (score: %.2f)",
+                        candidate,
+                        topic,
+                        self.scorer.score(candidate, [topic]),
+                    )
+
+            return grafted_count
+
+        except Exception as e:
+            logger.warning(
+                "Enhanced opportunistic grafting failed for topic %s: %s", topic, e
+            )
+            return 0
+
+    def _calculate_grafting_threshold(
+        self, median_score: float, avg_score: float, min_score: float, topic: str
+    ) -> float:
+        """
+        Calculate the score threshold for opportunistic grafting candidates.
+
+        Uses opportunistic_graft_threshold (adapted by
+        _adapt_opportunistic_grafting_parameters based on network health) to control
+        aggressiveness: lower = more aggressive, higher = more selective.
+
+        :param median_score: Median score of current mesh peers
+        :param avg_score: Average score of current mesh peers
+        :param min_score: Minimum score of current mesh peers
+        :param topic: The topic being considered
+        :return: Score threshold for candidates
+        """
+        # Base threshold from median, scaled by opportunistic_graft_threshold
+        # Lower threshold (aggressive) = more peers qualify; higher (selective) = fewer
+        graft_threshold = getattr(self, "opportunistic_graft_threshold", 0.5)
+        threshold = median_score * graft_threshold
+
+        # Ensure threshold is reasonable
+        threshold = max(
+            threshold, min_score * 1.1
+        )  # At least slightly better than worst peer
+        if self.scorer is not None:
+            threshold = max(
+                threshold, self.scorer.params.gossip_threshold
+            )  # At least gossip threshold
+
+        return threshold
+
+    def _get_grafting_candidates(
+        self, topic: str, current_mesh: set[ID], threshold: float
+    ) -> list[tuple[ID, float]]:
+        """
+        Get potential candidates for opportunistic grafting.
+
+        :param topic: The topic
+        :param current_mesh: Current mesh peers
+        :param threshold: Score threshold for candidates
+        :return: List of (peer_id, score) tuples for candidates
+        """
+        if self.pubsub is None or self.scorer is None:
+            return []
+
+        scorer = self.scorer  # Type narrowing
+        if topic not in self.pubsub.peer_topics:
+            return []
+
+        candidates: list[tuple[ID, float]] = []
+
+        for peer in self.pubsub.peer_topics[topic]:
+            if peer in current_mesh:
+                continue  # Already in mesh
+
+            if not self.supports_scoring(peer):
+                continue  # Only consider scoring-capable peers
+
+            if self._check_back_off(peer, topic):
+                continue  # Peer is in backoff
+
+            # Check if peer meets score threshold
+            peer_score = scorer.score(peer, [topic])
+            if peer_score >= threshold:
+                candidates.append((peer, peer_score))
+
+        return candidates
+
+    def _select_grafting_candidates(
+        self, candidates: list[tuple[ID, float]], topic: str, current_mesh_size: int
+    ) -> list[ID]:
+        """
+        Select the best candidates for grafting using multiple criteria.
+
+        :param candidates: List of (peer_id, score) tuples
+        :param topic: The topic
+        :param current_mesh_size: Current size of mesh
+        :return: List of selected peer IDs
+        """
+        if not candidates:
+            return []
+
+        # Sort candidates by score (descending)
+        candidates.sort(key=lambda x: x[1], reverse=True)
+
+        # Apply additional selection criteria
+        selected = []
+        max_grafts = min(2, len(candidates))  # Limit grafts per heartbeat
+
+        # Prefer peers that improve IP diversity if Eclipse protection is enabled
+        if self.eclipse_protection_enabled and self.scorer is not None:
+            selected = self._select_for_ip_diversity(candidates, topic, max_grafts)
+
+        # If we still need more peers or diversity selection didn't work,
+        # select highest scoring peers
+        if len(selected) < max_grafts:
+            remaining_needed = max_grafts - len(selected)
+            for peer_id, score in candidates[: remaining_needed + len(selected)]:
+                if peer_id not in selected:
+                    selected.append(peer_id)
+                    if len(selected) >= max_grafts:
+                        break
+
+        return selected
+
+    def _select_for_ip_diversity(
+        self, candidates: list[tuple[ID, float]], topic: str, max_grafts: int
+    ) -> list[ID]:
+        """
+        Select candidates that improve IP diversity in the mesh.
+
+        :param candidates: List of (peer_id, score) tuples
+        :param topic: The topic
+        :param max_grafts: Maximum number of peers to select
+        :return: List of selected peer IDs
+        """
+        if self.scorer is None or topic not in self.mesh:
+            return []
+
+        # Get current IPs in mesh
+        current_ips: set[str] = set()
+        scorer = self.scorer
+        if scorer is not None:
+            for peer in self.mesh[topic]:
+                if peer in scorer.ip_by_peer:
+                    current_ips.add(scorer.ip_by_peer[peer])
+
+        selected: list[ID] = []
+
+        # Prioritize candidates from new IPs
+        if scorer is not None:
+            for peer_id, score in candidates:
+                if len(selected) >= max_grafts:
+                    break
+
+                if peer_id in scorer.ip_by_peer:
+                    peer_ip = scorer.ip_by_peer[peer_id]
+                    if peer_ip not in current_ips:
+                        # This peer would add IP diversity
+                        selected.append(peer_id)
+                        current_ips.add(peer_ip)
+
+        return selected
+
+    def _select_peers_for_pruning(self, topic: str, num_to_prune: int) -> list[ID]:
+        """
+        Select peers to prune from mesh using sophisticated scoring and
+        diversity criteria.
+
+        :param topic: The topic to prune peers from
+        :param num_to_prune: Number of peers to prune
+        :return: List of peer IDs to prune
+        """
+        if topic not in self.mesh or num_to_prune <= 0:
+            return []
+
+        mesh_peers = list(self.mesh[topic])
+        if len(mesh_peers) <= num_to_prune:
+            return mesh_peers
+
+        if self.scorer is None:
+            # Fallback to random selection if no scorer
+            return self.select_from_minus(num_to_prune, mesh_peers, set())
+
+        # Enhanced pruning strategy
+        return self._score_based_pruning_selection(topic, mesh_peers, num_to_prune)
+
+    def _score_based_pruning_selection(
+        self, topic: str, mesh_peers: list[ID], num_to_prune: int
+    ) -> list[ID]:
+        """
+        Select peers for pruning based on scores and diversity considerations.
+
+        :param topic: The topic
+        :param mesh_peers: List of current mesh peers
+        :param num_to_prune: Number of peers to prune
+        :return: List of peer IDs to prune
+        """
+        if self.scorer is None:
+            return []
+
+        # Calculate scores for all mesh peers
+        peer_scores = []
+        for peer in mesh_peers:
+            score = self.scorer.score(peer, [topic])
+            peer_scores.append((peer, score))
+
+        # Sort by score (ascending - worst peers first)
+        peer_scores.sort(key=lambda x: x[1])
+
+        # Apply pruning strategy based on Gossipsub 2.0 principles
+        selected_for_pruning: list[ID] = []
+
+        # Strategy 1: Always prune peers below graylist threshold
+        graylist_threshold = self.scorer.params.graylist_threshold
+        for peer, score in peer_scores:
+            if score < graylist_threshold and len(selected_for_pruning) < num_to_prune:
+                selected_for_pruning.append(peer)
+
+        # Strategy 2: If we still need to prune more, consider IP diversity
+        if len(selected_for_pruning) < num_to_prune and self.eclipse_protection_enabled:
+            remaining_to_prune = num_to_prune - len(selected_for_pruning)
+            diversity_pruned = self._prune_for_ip_diversity(
+                topic, peer_scores, selected_for_pruning, remaining_to_prune
+            )
+            selected_for_pruning.extend(diversity_pruned)
+
+        # Strategy 3: If we still need more, prune lowest scoring peers
+        if len(selected_for_pruning) < num_to_prune:
+            remaining_to_prune = num_to_prune - len(selected_for_pruning)
+            for peer, score in peer_scores:
+                if (
+                    peer not in selected_for_pruning
+                    and len(selected_for_pruning) < num_to_prune
+                ):
+                    selected_for_pruning.append(peer)
+
+        return selected_for_pruning[:num_to_prune]
+
+    def _prune_for_ip_diversity(
+        self,
+        topic: str,
+        peer_scores: list[tuple[ID, float]],
+        already_selected: list[ID],
+        num_needed: int,
+    ) -> list[ID]:
+        """
+        Select additional peers for pruning to maintain IP diversity.
+
+        :param topic: The topic
+        :param peer_scores: List of (peer_id, score) tuples sorted by score
+        :param already_selected: Peers already selected for pruning
+        :param num_needed: Number of additional peers needed
+        :return: List of additional peer IDs to prune
+        """
+        if self.scorer is None or num_needed <= 0:
+            return []
+
+        scorer = self.scorer  # Type narrowing
+        # Count IPs after removing already selected peers
+        ip_counts: defaultdict[str, int] = defaultdict(int)
+        remaining_peers: list[tuple[ID, float]] = []
+
+        for peer, score in peer_scores:
+            if peer not in already_selected:
+                remaining_peers.append((peer, score))
+                if peer in scorer.ip_by_peer:
+                    ip = scorer.ip_by_peer[peer]
+                    ip_counts[ip] += 1
+
+        # Find IPs with excessive peers (more than 2 peers per IP)
+        excessive_ips = {ip: count for ip, count in ip_counts.items() if count > 2}
+
+        selected: list[ID] = []
+
+        # Prune from excessive IPs, preferring lower-scoring peers
+        for peer, score in remaining_peers:
+            if len(selected) >= num_needed:
+                break
+
+            if peer in scorer.ip_by_peer:
+                peer_ip = scorer.ip_by_peer[peer]
+                if peer_ip in excessive_ips and excessive_ips[peer_ip] > 2:
+                    selected.append(peer)
+                    excessive_ips[peer_ip] -= 1
+
+        return selected
+
+    async def _maintain_mesh_quality(self, topic: str) -> None:
+        """
+        Perform ongoing mesh quality maintenance beyond basic degree bounds.
+
+        :param topic: The topic to maintain
+        """
+        if topic not in self.mesh or self.scorer is None:
+            return
+
+        mesh_peers = self.mesh[topic]
+        if len(mesh_peers) < 3:  # Too small to optimize
+            return
+
+        # Check if we should replace low-scoring peers with better alternatives
+        await self._consider_peer_replacement(topic)
+
+        # Ensure we maintain good connectivity patterns
+        self._optimize_mesh_connectivity(topic)
+
+    async def _consider_peer_replacement(self, topic: str) -> None:
+        """
+        Replace the worst mesh peer with a better alternative when beneficial.
+
+        Performs mesh mutation, sends PRUNE to the removed peer and GRAFT to the
+        new peer.
+
+        :param topic: The topic to consider
+        """
+        if self.scorer is None or self.pubsub is None:
+            return
+
+        if topic not in self.mesh or topic not in self.pubsub.peer_topics:
+            return
+
+        mesh_peers = list(self.mesh[topic])
+        if len(mesh_peers) < self.degree:
+            return  # Don't replace if we're below target
+
+        # Find the worst mesh peer
+        scorer = self.scorer  # Type narrowing
+        peer_scores = [(p, scorer.score(p, [topic])) for p in mesh_peers]
+        peer_scores.sort(key=lambda x: x[1])  # Sort by score ascending
+        worst_peer, worst_score = peer_scores[0]
+
+        # Find potential replacements
+        available_peers = set(self.pubsub.peer_topics[topic]) - set(mesh_peers)
+        if not available_peers:
+            return
+
+        # Find best available peer
+        best_replacement = None
+        best_score = worst_score
+
+        for peer in available_peers:
+            if self._check_back_off(peer, topic):
+                continue
+
+            if not self.supports_scoring(peer):
+                continue
+
+            peer_score = scorer.score(peer, [topic])
+            if peer_score > best_score + 0.1:  # Require meaningful improvement
+                best_replacement = peer
+                best_score = peer_score
+
+        if best_replacement is None:
+            return
+
+        # Perform replacement: mutate mesh and emit PRUNE/GRAFT
+        self.mesh[topic].discard(worst_peer)
+        self.mesh[topic].add(best_replacement)
+        self._notify_mesh_peer_added(best_replacement, topic)
+
+        if self.scorer is not None:
+            self.scorer.on_leave_mesh(worst_peer, topic)
+            self.scorer.on_join_mesh(best_replacement, topic)
+
+        # Add back_off so we don't immediately re-graft the pruned peer
+        self._add_back_off(worst_peer, topic, False)
+
+        # Track PRUNE time for GRAFT flood protection
+        self.graft_flood_tracking[worst_peer][topic] = time.time()
+
+        logger.debug(
+            "Replacing mesh peer %s (score: %.2f) with %s (score: %.2f) in topic %s",
+            worst_peer,
+            worst_score,
+            best_replacement,
+            best_score,
+            topic,
+        )
+
+        try:
+            await self.emit_prune(topic, worst_peer, self.do_px, False)
+            await self.emit_graft(topic, best_replacement)
+        except Exception as e:
+            logger.warning("Failed to emit PRUNE/GRAFT during peer replacement: %s", e)
+            # Revert mesh and scorer on failure
+            self.mesh[topic].add(worst_peer)
+            self._notify_mesh_peer_added(worst_peer, topic)
+            self.mesh[topic].discard(best_replacement)
+            if self.scorer is not None:
+                self.scorer.on_join_mesh(worst_peer, topic)
+                self.scorer.on_leave_mesh(best_replacement, topic)
+            # Clear back_off we added (peer stays in back_off until expiry)
+            if topic in self.back_off and worst_peer in self.back_off[topic]:
+                del self.back_off[topic][worst_peer]
+
+    def _optimize_mesh_connectivity(self, topic: str) -> None:
+        """
+        Optimize mesh connectivity patterns for better resilience.
+
+        Validates mesh invariants and applies lightweight optimizations.
+        IP diversity is handled by _ensure_mesh_diversity and _prune_for_ip_diversity.
+        Geographic/latency optimization would require additional metrics.
+
+        :param topic: The topic to optimize
+        """
+        if topic not in self.mesh or self.pubsub is None:
+            return
+
+        mesh_peers = self.mesh[topic]
+        effective_high = (
+            self.adaptive_degree_high
+            if self.adaptive_gossip_enabled
+            else self.degree_high
+        )
+
+        # Sanity check: mesh should not exceed degree_high (handled in mesh_heartbeat,
+        # but we verify here as a safeguard). No action needed if within bounds.
+        if len(mesh_peers) > effective_high + 2:
+            logger.debug(
+                "Mesh for topic %s exceeds expected bounds (%d > %d)",
+                topic,
+                len(mesh_peers),
+                effective_high,
+            )
+
+    def _periodic_security_cleanup(self) -> None:
+        """
+        Periodic cleanup of security-related data structures.
+        """
+        current_time = time.time()
+
+        # Clean up old equivocation detection entries
+        # Note: Message objects don't have _timestamp, so we'll just clear old entries
+        # based on a simple size limit instead
+        if len(self.equivocation_detection) > 1000:
+            # Keep only the most recent 500 entries
+            keys_to_remove = list(self.equivocation_detection.keys())[:-500]
+            for key in keys_to_remove:
+                del self.equivocation_detection[key]
+
+        # Clean up old rate limiting data
+        for peer_id in list(self.message_rate_limits.keys()):
+            for topic in list(self.message_rate_limits[peer_id].keys()):
+                timestamps = self.message_rate_limits[peer_id][topic]
+                # Remove timestamps older than 2 seconds
+                cutoff = current_time - 2.0
+                timestamps[:] = [t for t in timestamps if t > cutoff]
+
+                # Remove empty topic entries
+                if not timestamps:
+                    del self.message_rate_limits[peer_id][topic]
+
+            # Remove empty peer entries
+            if not self.message_rate_limits[peer_id]:
+                del self.message_rate_limits[peer_id]
+
+        # Clean up v1.4 rate limiting data
+        for peer_id in list(self.iwant_request_limits.keys()):
+            for request_type in list(self.iwant_request_limits[peer_id].keys()):
+                timestamps = self.iwant_request_limits[peer_id][request_type]
+                cutoff = current_time - 2.0
+                timestamps[:] = [t for t in timestamps if t > cutoff]
+
+                if not timestamps:
+                    del self.iwant_request_limits[peer_id][request_type]
+
+            if not self.iwant_request_limits[peer_id]:
+                del self.iwant_request_limits[peer_id]
+
+        for peer_id in list(self.ihave_message_limits.keys()):
+            for topic in list(self.ihave_message_limits[peer_id].keys()):
+                timestamps = self.ihave_message_limits[peer_id][topic]
+                cutoff = current_time - 2.0
+                timestamps[:] = [t for t in timestamps if t > cutoff]
+
+                if not timestamps:
+                    del self.ihave_message_limits[peer_id][topic]
+
+            if not self.ihave_message_limits[peer_id]:
+                del self.ihave_message_limits[peer_id]
+
+        # Clean up old GRAFT flood tracking (keep for 30 seconds)
+        graft_cutoff = current_time - 30.0
+        for peer_id in list(self.graft_flood_tracking.keys()):
+            for topic in list(self.graft_flood_tracking[peer_id].keys()):
+                if self.graft_flood_tracking[peer_id][topic] <= graft_cutoff:
+                    del self.graft_flood_tracking[peer_id][topic]
+
+            if not self.graft_flood_tracking[peer_id]:
+                del self.graft_flood_tracking[peer_id]

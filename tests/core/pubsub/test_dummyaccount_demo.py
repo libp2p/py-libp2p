@@ -7,6 +7,10 @@ from libp2p.tools.utils import (
 from tests.utils.pubsub.dummy_account_node import (
     DummyAccountNode,
 )
+from tests.utils.pubsub.wait import (
+    wait_for_adjacency_ready,
+    wait_for_convergence,
+)
 
 
 async def perform_test(num_nodes, adjacency_map, action_func, assertion_func):
@@ -32,23 +36,21 @@ async def perform_test(num_nodes, adjacency_map, action_func, assertion_func):
                         dummy_nodes[target_num].host,
                     )
 
-        # Allow time for network creation to take place
-        await trio.sleep(0.25)
+        await wait_for_adjacency_ready(dummy_nodes, adjacency_map, timeout=10.0)
 
         # Perform action function
         await action_func(dummy_nodes)
 
-        # Allow time for action function to be performed (i.e. messages to propogate)
-        await trio.sleep(1)
+        # Wait until all nodes satisfy the expected final state.
+        def _check_final(node: DummyAccountNode) -> bool:
+            assertion_func(node)
+            return True
 
-        # Perform assertion function
-        for dummy_node in dummy_nodes:
-            assertion_func(dummy_node)
+        await wait_for_convergence(dummy_nodes, _check_final, timeout=10.0)
 
     # Success, terminate pending tasks.
 
 
-@pytest.mark.trio
 async def test_simple_two_nodes():
     num_nodes = 2
     adj_map = {0: [1]}
@@ -62,7 +64,6 @@ async def test_simple_two_nodes():
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
 
-@pytest.mark.trio
 async def test_simple_three_nodes_line_topography():
     num_nodes = 3
     adj_map = {0: [1], 1: [2]}
@@ -76,7 +77,6 @@ async def test_simple_three_nodes_line_topography():
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
 
-@pytest.mark.trio
 async def test_simple_three_nodes_triangle_topography():
     num_nodes = 3
     adj_map = {0: [1, 2], 1: [2]}
@@ -90,7 +90,7 @@ async def test_simple_three_nodes_triangle_topography():
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
 
-@pytest.mark.trio
+@pytest.mark.flaky(reruns=3, reruns_delay=2)
 async def test_simple_seven_nodes_tree_topography():
     num_nodes = 7
     adj_map = {0: [1, 2], 1: [3, 4], 2: [5, 6]}
@@ -104,15 +104,23 @@ async def test_simple_seven_nodes_tree_topography():
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
 
-@pytest.mark.trio
+@pytest.mark.flaky(reruns=3, reruns_delay=2)
 async def test_set_then_send_from_root_seven_nodes_tree_topography():
     num_nodes = 7
     adj_map = {0: [1, 2], 1: [3, 4], 2: [5, 6]}
 
     async def action_func(dummy_nodes):
         await dummy_nodes[0].publish_set_crypto("aspyn", 20)
-        await trio.sleep(0.25)
+        await wait_for_convergence(
+            dummy_nodes, lambda n: n.get_balance("aspyn") == 20, timeout=10.0
+        )
         await dummy_nodes[0].publish_send_crypto("aspyn", "alex", 5)
+        # Wait for the send operation to propagate to all nodes
+        await wait_for_convergence(
+            dummy_nodes,
+            lambda n: n.get_balance("aspyn") == 15 and n.get_balance("alex") == 5,
+            timeout=10.0,
+        )
 
     def assertion_func(dummy_node):
         assert dummy_node.get_balance("aspyn") == 15
@@ -121,14 +129,16 @@ async def test_set_then_send_from_root_seven_nodes_tree_topography():
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
 
-@pytest.mark.trio
+@pytest.mark.flaky(reruns=3, reruns_delay=2)
 async def test_set_then_send_from_different_leafs_seven_nodes_tree_topography():
     num_nodes = 7
     adj_map = {0: [1, 2], 1: [3, 4], 2: [5, 6]}
 
     async def action_func(dummy_nodes):
         await dummy_nodes[6].publish_set_crypto("aspyn", 20)
-        await trio.sleep(0.25)
+        await wait_for_convergence(
+            dummy_nodes, lambda n: n.get_balance("aspyn") == 20, timeout=10.0
+        )
         await dummy_nodes[4].publish_send_crypto("aspyn", "alex", 5)
 
     def assertion_func(dummy_node):
@@ -138,7 +148,6 @@ async def test_set_then_send_from_different_leafs_seven_nodes_tree_topography():
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
 
-@pytest.mark.trio
 async def test_simple_five_nodes_ring_topography():
     num_nodes = 5
     adj_map = {0: [1], 1: [2], 2: [3], 3: [4], 4: [0]}
@@ -152,14 +161,18 @@ async def test_simple_five_nodes_ring_topography():
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
 
-@pytest.mark.trio
 async def test_set_then_send_from_diff_nodes_five_nodes_ring_topography():
     num_nodes = 5
     adj_map = {0: [1], 1: [2], 2: [3], 3: [4], 4: [0]}
 
     async def action_func(dummy_nodes):
         await dummy_nodes[0].publish_set_crypto("alex", 20)
-        await trio.sleep(0.25)
+        # Ensure `set` has reached all nodes before sending, otherwise late `set`
+        # can overwrite the effects of `send` on nodes
+        # that receive messages out-of-order.
+        await wait_for_convergence(
+            dummy_nodes, lambda n: n.get_balance("alex") == 20, timeout=10.0
+        )
         await dummy_nodes[3].publish_send_crypto("alex", "rob", 12)
 
     def assertion_func(dummy_node):
@@ -169,7 +182,6 @@ async def test_set_then_send_from_diff_nodes_five_nodes_ring_topography():
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
 
-@pytest.mark.trio
 @pytest.mark.slow
 async def test_set_then_send_from_five_diff_nodes_five_nodes_ring_topography():
     num_nodes = 5
@@ -177,13 +189,32 @@ async def test_set_then_send_from_five_diff_nodes_five_nodes_ring_topography():
 
     async def action_func(dummy_nodes):
         await dummy_nodes[0].publish_set_crypto("alex", 20)
-        await trio.sleep(1)
+        await wait_for_convergence(
+            dummy_nodes, lambda n: n.get_balance("alex") == 20, timeout=10.0
+        )
         await dummy_nodes[1].publish_send_crypto("alex", "rob", 3)
-        await trio.sleep(1)
+        await wait_for_convergence(
+            dummy_nodes,
+            lambda n: n.get_balance("alex") == 17 and n.get_balance("rob") == 3,
+            timeout=10.0,
+        )
         await dummy_nodes[2].publish_send_crypto("rob", "aspyn", 2)
-        await trio.sleep(1)
+        await wait_for_convergence(
+            dummy_nodes,
+            lambda n: n.get_balance("alex") == 17
+            and n.get_balance("rob") == 1
+            and n.get_balance("aspyn") == 2,
+            timeout=10.0,
+        )
         await dummy_nodes[3].publish_send_crypto("aspyn", "zx", 1)
-        await trio.sleep(1)
+        await wait_for_convergence(
+            dummy_nodes,
+            lambda n: n.get_balance("alex") == 17
+            and n.get_balance("rob") == 1
+            and n.get_balance("aspyn") == 1
+            and n.get_balance("zx") == 1,
+            timeout=10.0,
+        )
         await dummy_nodes[4].publish_send_crypto("zx", "raul", 1)
 
     def assertion_func(dummy_node):

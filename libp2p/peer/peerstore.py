@@ -1,13 +1,8 @@
-from collections import (
-    defaultdict,
-)
 from collections.abc import (
     AsyncIterable,
     Sequence,
 )
-from typing import (
-    Any,
-)
+import logging
 
 from multiaddr import (
     Multiaddr,
@@ -16,6 +11,7 @@ import trio
 from trio import MemoryReceiveChannel, MemorySendChannel
 
 from libp2p.abc import (
+    IHost,
     IPeerStore,
 )
 from libp2p.crypto.keys import (
@@ -23,7 +19,11 @@ from libp2p.crypto.keys import (
     PrivateKey,
     PublicKey,
 )
-from libp2p.peer.envelope import Envelope
+from libp2p.custom_types import (
+    MetadataValue,
+)
+from libp2p.peer.envelope import Envelope, seal_record
+from libp2p.peer.peer_record import PeerRecord
 
 from .id import (
     ID,
@@ -38,9 +38,104 @@ from .peerinfo import (
 
 PERMANENT_ADDR_TTL = 0
 
+logger = logging.getLogger(__name__)
 
-# TODO: Set up an async task for periodic peer-store cleanup
-# for expired addresses and records.
+
+def _peer_record_signer_matches(envelope: Envelope) -> bool:
+    """Return True if envelope signer identity matches record.peer_id."""
+    try:
+        record = envelope.record()
+        if ID.from_pubkey(envelope.public_key) != record.peer_id:
+            logger.debug(
+                "Rejected peer record: signer identity does not match record peer_id"
+            )
+            return False
+        return True
+    except Exception:
+        logger.debug("Rejected peer record: failed to validate signer identity")
+        return False
+
+
+def create_signed_peer_record(
+    peer_id: ID, addrs: list[Multiaddr], pvt_key: PrivateKey
+) -> Envelope:
+    """Creates a signed_peer_record wrapped in an Envelope"""
+    record = PeerRecord(peer_id, addrs)
+    envelope = seal_record(record, pvt_key)
+    return envelope
+
+
+def env_to_send_in_RPC(host: IHost) -> tuple[bytes, bool]:
+    """
+    Return the signed peer record (Envelope) to be sent in an RPC.
+
+    This function checks whether the host already has a cached signed peer record
+    (SPR). If one exists and its addresses match the host's current listen
+    addresses, the cached envelope is reused. Otherwise, a new signed peer record
+    is created, cached, and returned.
+
+    Parameters
+    ----------
+    host : IHost
+        The local host instance, providing access to peer ID, listen addresses,
+        private key, and the peerstore.
+
+    Returns
+    -------
+    tuple[bytes, bool]
+        A 2-tuple where the first element is the serialized envelope (bytes)
+        for the signed peer record, and the second element is a boolean flag
+        indicating whether a new record was created (True) or an existing cached
+        one was reused (False).
+
+    """
+    listen_addrs_set = {addr for addr in host.get_addrs()}
+    local_env = host.get_peerstore().get_local_record()
+
+    if local_env is None:
+        # No cached SPR yet -> create one
+        return issue_and_cache_local_record(host), True
+    else:
+        record_addrs_set = local_env._env_addrs_set()
+        if record_addrs_set == listen_addrs_set:
+            # Perfect match -> reuse cached envelope
+            return local_env.marshal_envelope(), False
+        else:
+            # Addresses changed -> issue a new SPR and cache it
+            return issue_and_cache_local_record(host), True
+
+
+def issue_and_cache_local_record(host: IHost) -> bytes:
+    """
+    Create and cache a new signed peer record (Envelope) for the host.
+
+    This function generates a new signed peer record from the host’s peer ID,
+    listen addresses, and private key. The resulting envelope is stored in
+    the peerstore as the local record for future reuse.
+
+    Parameters
+    ----------
+    host : IHost
+        The local host instance, providing access to peer ID, listen addresses,
+        private key, and the peerstore.
+
+    Returns
+    -------
+    bytes
+        The serialized envelope (bytes) representing the newly created signed
+        peer record.
+
+    """
+    env = create_signed_peer_record(
+        host.get_id(),
+        host.get_addrs(),
+        host.get_private_key(),
+    )
+    # Cache it for next time use
+    host.get_peerstore().set_local_record(env)
+    return env.marshal_envelope()
+
+
 class PeerRecordState:
     envelope: Envelope
     seq: int
@@ -53,11 +148,22 @@ class PeerRecordState:
 class PeerStore(IPeerStore):
     peer_data_map: dict[ID, PeerData]
 
-    def __init__(self, max_records: int = 10000) -> None:
-        self.peer_data_map = defaultdict(PeerData)
+    def __init__(self, max_records: int = 2000, max_peers: int = 1000) -> None:
+        self.peer_data_map = {}
         self.addr_update_channels: dict[ID, MemorySendChannel[Multiaddr]] = {}
         self.peer_record_map: dict[ID, PeerRecordState] = {}
+        self.local_peer_record: Envelope | None = None
         self.max_records = max_records
+        # Hard cap on peer_data_map size (covers routing table + active swarm).
+        self.max_peers = max_peers
+
+    def get_local_record(self) -> Envelope | None:
+        """Get the local-signed-record wrapped in Envelope"""
+        return self.local_peer_record
+
+    def set_local_record(self, envelope: Envelope) -> None:
+        """Set the local-signed-record wrapped in Envelope"""
+        self.local_peer_record = envelope
 
     def peer_info(self, peer_id: ID) -> PeerInfo:
         """
@@ -77,6 +183,10 @@ class PeerStore(IPeerStore):
         """
         return list(self.peer_data_map.keys())
 
+    def has_peer(self, peer_id: ID) -> bool:
+        """Return True if the peer is known to this store."""
+        return peer_id in self.peer_data_map
+
     def clear_peerdata(self, peer_id: ID) -> None:
         """Clears all data associated with the given peer_id."""
         if peer_id in self.peer_data_map:
@@ -87,6 +197,28 @@ class PeerStore(IPeerStore):
         # Clear the peer records
         if peer_id in self.peer_record_map:
             self.peer_record_map.pop(peer_id, None)
+
+    def _enforce_peer_limit(self) -> None:
+        """Evict oldest peers when peer_data_map exceeds max_peers."""
+        if len(self.peer_data_map) <= self.max_peers:
+            return
+        # Evict peers with no addresses first (empty/zombie entries), then
+        # expire-first (oldest TTL). This is O(n) but only runs during cleanup.
+        to_evict = len(self.peer_data_map) - self.max_peers
+
+        # Sort: empty entries first, then expired, then oldest TTL
+        def evict_priority(item: tuple[ID, PeerData]) -> tuple[bool, bool]:
+            pid, pd = item
+            has_addrs = bool(pd.get_addrs())
+            is_expired = pd.is_expired()
+            return (not has_addrs, is_expired)  # True sorts before False
+
+        candidates = sorted(
+            self.peer_data_map.items(), key=evict_priority, reverse=True
+        )
+        for peer_id, _ in candidates[:to_evict]:
+            self.peer_record_map.pop(peer_id, None)
+            del self.peer_data_map[peer_id]
 
     def valid_peer_ids(self) -> list[ID]:
         """
@@ -112,25 +244,36 @@ class PeerStore(IPeerStore):
                 self.maybe_delete_peer_record(peer_id)
                 del self.peer_record_map[peer_id]
 
-    async def start_cleanup_task(self, cleanup_interval: int = 3600) -> None:
-        """Start periodic cleanup of expired peer records and addresses."""
+    async def start_cleanup_task(self, cleanup_interval: int = 300) -> None:
+        """
+        Start periodic cleanup of expired peer records and addresses.
+
+        Runs every ``cleanup_interval`` seconds (default 300s / 5 minutes).
+        Previously defaulted to 3600s which meant peers with a 3600s TTL
+        accumulated for a full hour before any eviction — a memory leak.
+        """
         while True:
             await trio.sleep(cleanup_interval)
             self._cleanup_expired_records()
 
     def _cleanup_expired_records(self) -> None:
-        """Remove expired peer records and addresses"""
-        expired_peers = []
-
-        for peer_id, peer_data in self.peer_data_map.items():
-            if peer_data.is_expired():
-                expired_peers.append(peer_id)
-
+        """Remove expired peer records and addresses."""
+        expired_peers = [
+            peer_id
+            for peer_id, peer_data in self.peer_data_map.items()
+            if peer_data.is_expired()
+        ]
         for peer_id in expired_peers:
             self.maybe_delete_peer_record(peer_id)
             del self.peer_data_map[peer_id]
 
         self._enforce_record_limit()
+        self._enforce_peer_limit()
+        logger.debug(
+            "Peerstore cleanup: removed %d expired peers, %d remaining",
+            len(expired_peers),
+            len(self.peer_data_map),
+        )
 
     # --------PROTO-BOOK--------
 
@@ -149,7 +292,7 @@ class PeerStore(IPeerStore):
         :param peer_id: peer ID to add protocols for
         :param protocols: protocols to add
         """
-        peer_data = self.peer_data_map[peer_id]
+        peer_data = self.peer_data_map.setdefault(peer_id, PeerData())
         peer_data.add_protocols(list(protocols))
 
     def set_protocols(self, peer_id: ID, protocols: Sequence[str]) -> None:
@@ -157,7 +300,7 @@ class PeerStore(IPeerStore):
         :param peer_id: peer ID to set protocols for
         :param protocols: protocols to set
         """
-        peer_data = self.peer_data_map[peer_id]
+        peer_data = self.peer_data_map.setdefault(peer_id, PeerData())
         peer_data.set_protocols(list(protocols))
 
     def remove_protocols(self, peer_id: ID, protocols: Sequence[str]) -> None:
@@ -165,28 +308,31 @@ class PeerStore(IPeerStore):
         :param peer_id: peer ID to get info for
         :param protocols: unsupported protocols to remove
         """
-        peer_data = self.peer_data_map[peer_id]
-        peer_data.remove_protocols(protocols)
+        if peer_id not in self.peer_data_map:
+            return
+        self.peer_data_map[peer_id].remove_protocols(protocols)
 
     def supports_protocols(self, peer_id: ID, protocols: Sequence[str]) -> list[str]:
         """
         :return: all of the peer IDs stored in peer store
         """
-        peer_data = self.peer_data_map[peer_id]
-        return peer_data.supports_protocols(protocols)
+        if peer_id not in self.peer_data_map:
+            return []
+        return self.peer_data_map[peer_id].supports_protocols(protocols)
 
     def first_supported_protocol(self, peer_id: ID, protocols: Sequence[str]) -> str:
-        peer_data = self.peer_data_map[peer_id]
-        return peer_data.first_supported_protocol(protocols)
+        if peer_id not in self.peer_data_map:
+            return ""
+        return self.peer_data_map[peer_id].first_supported_protocol(protocols)
 
     def clear_protocol_data(self, peer_id: ID) -> None:
         """Clears prtocoldata"""
-        peer_data = self.peer_data_map[peer_id]
-        peer_data.clear_protocol_data()
+        if peer_id in self.peer_data_map:
+            self.peer_data_map[peer_id].clear_protocol_data()
 
     # ------METADATA---------
 
-    def get(self, peer_id: ID, key: str) -> Any:
+    def get(self, peer_id: ID, key: str) -> MetadataValue:
         """
         :param peer_id: peer ID to get peer data for
         :param key: the key to search value for
@@ -201,23 +347,22 @@ class PeerStore(IPeerStore):
             return val
         raise PeerStoreError("peer ID not found")
 
-    def put(self, peer_id: ID, key: str, val: Any) -> None:
+    def put(self, peer_id: ID, key: str, val: MetadataValue) -> None:
         """
         :param peer_id: peer ID to put peer data for
         :param key:
         :param value:
         """
-        peer_data = self.peer_data_map[peer_id]
+        peer_data = self.peer_data_map.setdefault(peer_id, PeerData())
         peer_data.put_metadata(key, val)
 
     def clear_metadata(self, peer_id: ID) -> None:
         """Clears metadata"""
-        peer_data = self.peer_data_map[peer_id]
-        peer_data.clear_metadata()
+        if peer_id in self.peer_data_map:
+            self.peer_data_map[peer_id].clear_metadata()
 
     # -----CERT-ADDR-BOOK-----
 
-    # TODO: Make proper use of this function
     def maybe_delete_peer_record(self, peer_id: ID) -> None:
         """
         Delete the signed peer record for a peer if it has no know
@@ -239,6 +384,7 @@ class PeerStore(IPeerStore):
 
         This function:
         - Extracts the peer ID and sequence number from the envelope
+        - Rejects the record if the signer identity does not match record.peer_id
         - Rejects the record if it's older (lower seq)
         - Updates the stored peer record and replaces associated addresses if accepted
 
@@ -246,6 +392,9 @@ class PeerStore(IPeerStore):
         :param ttl: Time-to-live for the included multiaddrs (in seconds).
         :return: True if the record was accepted and stored; False if it was rejected.
         """
+        if not _peer_record_signer_matches(envelope):
+            return False
+
         record = envelope.record()
         peer_id = record.peer_id
 
@@ -256,7 +405,7 @@ class PeerStore(IPeerStore):
         new_addrs = set(record.addrs)
 
         self.peer_record_map[peer_id] = PeerRecordState(envelope, record.seq)
-        self.peer_data_map[peer_id].clear_addrs()
+        self.peer_data_map.setdefault(peer_id, PeerData()).clear_addrs()
         self.add_addrs(peer_id, list(new_addrs), ttl)
 
         return True
@@ -310,7 +459,7 @@ class PeerStore(IPeerStore):
         :param addrs:
         :param ttl: time-to-live for the this record
         """
-        peer_data = self.peer_data_map[peer_id]
+        peer_data = self.peer_data_map.setdefault(peer_id, PeerData())
         peer_data.add_addrs(list(addrs))
         peer_data.set_ttl(ttl)
         peer_data.update_last_identified()
@@ -323,6 +472,8 @@ class PeerStore(IPeerStore):
                     pass  # Or consider logging / dropping / replacing stream
 
         self.maybe_delete_peer_record(peer_id)
+        if len(self.peer_data_map) > self.max_peers:
+            self._enforce_peer_limit()
 
     def addrs(self, peer_id: ID) -> list[Multiaddr]:
         """
@@ -343,9 +494,11 @@ class PeerStore(IPeerStore):
         """
         :param peer_id: peer ID to clear addrs for
         """
-        # Only clear addresses if the peer is in peer map
-        if peer_id in self.peer_data_map:
-            self.peer_data_map[peer_id].clear_addrs()
+        if peer_id not in self.peer_data_map:
+            return
+
+        peer_data = self.peer_data_map[peer_id]
+        peer_data.clear_addrs()
 
         self.maybe_delete_peer_record(peer_id)
 
@@ -392,7 +545,7 @@ class PeerStore(IPeerStore):
         :param pubkey:
         :raise PeerStoreError: if peer ID and pubkey does not match
         """
-        peer_data = self.peer_data_map[peer_id]
+        peer_data = self.peer_data_map.setdefault(peer_id, PeerData())
         if ID.from_pubkey(pubkey) != peer_id:
             raise PeerStoreError("peer ID and pubkey does not match")
         peer_data.add_pubkey(pubkey)
@@ -418,7 +571,7 @@ class PeerStore(IPeerStore):
         :param privkey:
         :raise PeerStoreError: if peer ID or peer privkey not found
         """
-        peer_data = self.peer_data_map[peer_id]
+        peer_data = self.peer_data_map.setdefault(peer_id, PeerData())
         if ID.from_pubkey(privkey.get_public_key()) != peer_id:
             raise PeerStoreError("peer ID and privkey does not match")
         peer_data.add_privkey(privkey)
@@ -456,8 +609,8 @@ class PeerStore(IPeerStore):
 
     def clear_keydata(self, peer_id: ID) -> None:
         """Clears the keys of the peer"""
-        peer_data = self.peer_data_map[peer_id]
-        peer_data.clear_keydata()
+        if peer_id in self.peer_data_map:
+            self.peer_data_map[peer_id].clear_keydata()
 
     # --------METRICS--------
 
@@ -469,7 +622,7 @@ class PeerStore(IPeerStore):
         :param peer_id: peer ID to get private key for
         :param RTT: the new latency value (round trip time)
         """
-        peer_data = self.peer_data_map[peer_id]
+        peer_data = self.peer_data_map.setdefault(peer_id, PeerData())
         peer_data.record_latency(RTT)
 
     def latency_EWMA(self, peer_id: ID) -> float:
@@ -477,13 +630,14 @@ class PeerStore(IPeerStore):
         :param peer_id: peer ID to get private key for
         :return: The latency EWMA value for that peer
         """
-        peer_data = self.peer_data_map[peer_id]
-        return peer_data.latency_EWMA()
+        if peer_id in self.peer_data_map:
+            return self.peer_data_map[peer_id].latency_EWMA()
+        return 0.0
 
     def clear_metrics(self, peer_id: ID) -> None:
         """Clear the latency metrics"""
-        peer_data = self.peer_data_map[peer_id]
-        peer_data.clear_metrics()
+        if peer_id in self.peer_data_map:
+            self.peer_data_map[peer_id].clear_metrics()
 
 
 class PeerStoreError(KeyError):
