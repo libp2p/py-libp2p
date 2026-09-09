@@ -19,6 +19,7 @@ from cryptography.hazmat.primitives import serialization
 from libp2p.transport.quic.transport import QUICTransport
 from libp2p.transport.quic.config import QUICTransportConfig
 from collections.abc import (
+    Callable,
     Mapping,
     Sequence,
 )
@@ -107,6 +108,12 @@ from libp2p.identity_utils import (
     load_identity,
     save_identity,
 )
+from libp2p.crypto.keystore import (
+    FileSystemKeyStore,
+    provider_from_keystore,
+    provider_from_path,
+    provider_new_ed25519,
+)
 
 import libp2p.security.secio.transport as secio
 from libp2p.stream_muxer.mplex.mplex import (
@@ -158,10 +165,12 @@ def set_default_muxer(muxer_name: Literal["YAMUX", "MPLEX"]) -> None:
 
 def save_keypair(key_pair: KeyPair, type: str= "ed25519") -> None:
     """
-    Persist a private key to disk in PEM format.
+    Persist a private key to disk in PEM format (legacy helper).
 
-    Currently supports only Ed25519 keys. Writes the key to a predefined
-    path for later retrieval.
+    Currently supports only Ed25519 keys and writes to a fixed path
+    (``libp2p.utils.paths.ED25519_PATH``). For general identity persistence
+    prefer ``save_identity`` / ``load_identity`` or ``FileSystemKeyStore``,
+    which use the libp2p protobuf private-key format and caller-chosen paths.
 
     :param key_pair: KeyPair object containing private and public keys.
     :param type: Type of key to save (default: "ed25519").
@@ -188,10 +197,11 @@ def save_keypair(key_pair: KeyPair, type: str= "ed25519") -> None:
 
 def load_keypair(type: str = "ed25519") -> KeyPair | None:
     """
-    Load a private key from disk and reconstruct its KeyPair.
+    Load a private key from disk and reconstruct its KeyPair (legacy helper).
 
-    Currently supports only Ed25519 keys. Returns None if the key file does
-    not exist.
+    Currently supports only Ed25519 keys from the fixed PEM path used by
+    ``save_keypair``. Prefer ``load_identity`` or ``FileSystemKeyStore.get``
+    for protobuf-based persistence at arbitrary paths.
 
     :param type: Type of key to load (default: "ed25519").
     :return: KeyPair object if found, or None.
@@ -286,6 +296,57 @@ def generate_peer_id_from(key_pair: KeyPair) -> ID:
     """
     public_key = key_pair.public_key
     return ID.from_pubkey(public_key)
+
+
+def _resolve_host_key_pair(
+    key_pair: KeyPair | None = None,
+    key_pair_provider: Callable[[], KeyPair] | None = None,
+    keystore: FileSystemKeyStore | None = None,
+    identity_name: str = "default",
+    auto_persist: bool | None = None,
+) -> KeyPair:
+    """
+    Resolve the host identity from explicit key, provider, or keystore.
+
+    At most one of ``key_pair``, ``key_pair_provider``, or ``keystore`` may be
+    supplied. When only ``keystore`` is set, an existing ``identity_name`` is
+    loaded; otherwise a new Ed25519 identity is generated and optionally
+    persisted (``auto_persist`` defaults to ``True`` when a keystore is set).
+
+    :param key_pair: Explicit keypair.
+    :param key_pair_provider: Callable that returns a ``KeyPair``.
+    :param keystore: Optional filesystem keystore.
+    :param identity_name: Key name within ``keystore`` (default ``\"default\"``).
+    :param auto_persist: Persist newly generated keys when using ``keystore``.
+    :return: Resolved ``KeyPair``.
+    :raises ValueError: If more than one identity source is provided.
+    """
+    sources = [
+        key_pair is not None,
+        key_pair_provider is not None,
+        keystore is not None,
+    ]
+    if sum(sources) > 1:
+        raise ValueError(
+            "Provide at most one of key_pair, key_pair_provider, or keystore"
+        )
+
+    if key_pair is not None:
+        return key_pair
+
+    if key_pair_provider is not None:
+        return key_pair_provider()
+
+    if keystore is not None:
+        should_persist = True if auto_persist is None else auto_persist
+        if keystore.has(identity_name):
+            return keystore.get(identity_name)
+        generated = generate_new_ed25519_identity()
+        if should_persist:
+            keystore.put(identity_name, generated)
+        return generated
+
+    return generate_new_ed25519_identity()
 
 
 def get_default_muxer_options() -> TMuxerOptions:
@@ -465,6 +526,10 @@ def _build_transports_for_swarm(
 
 def new_swarm(
     key_pair: KeyPair | None = None,
+    key_pair_provider: Callable[[], KeyPair] | None = None,
+    keystore: FileSystemKeyStore | None = None,
+    identity_name: str = "default",
+    auto_persist: bool | None = None,
     muxer_opt: TMuxerOptions | None = None,
     sec_opt: TSecurityOptions | None = None,
     peerstore_opt: IPeerStore | None = None,
@@ -505,7 +570,14 @@ def new_swarm(
        provided (``enable_quic``, ``enable_websocket``, ``enable_tcp``).
     4. **Default fallback** — TCP only.
 
-    :param key_pair: optional choice of the ``KeyPair``
+    :param key_pair: optional explicit ``KeyPair`` (mutually exclusive with
+        ``key_pair_provider`` and ``keystore``)
+    :param key_pair_provider: optional ``Callable[[], KeyPair]`` used to obtain
+        the host identity (issue #312)
+    :param keystore: optional ``FileSystemKeyStore`` for named identity load/save
+    :param identity_name: key name within ``keystore`` (default ``\"default\"``)
+    :param auto_persist: when using ``keystore``, persist newly generated keys
+        (defaults to ``True`` if ``keystore`` is set)
     :param muxer_opt: optional choice of stream muxer
     :param sec_opt: optional choice of security upgrade
     :param peerstore_opt: optional peerstore
@@ -552,19 +624,18 @@ def new_swarm(
     Note: Ed25519 keys are used by default for better interoperability with
           other libp2p implementations (Rust, Go) which often disable RSA support.
     """
-    # Identity Generation Flow:
-    # 1. If no keypair is provided, generate a new random Ed25519 keypair
-    # 2. If a keypair IS provided, use it (enables identity persistence)
-    # 3. Derive a deterministic peer ID from the keypair's public key
-    #
-    # For identity persistence, users can:
-    # - Save the keypair to disk and reload it on restart
-    # - Generate a keypair from a seed for deterministic identity
-    # - Pass the same keypair to new_host() or new_swarm()
-    if key_pair is None:
-        # Use Ed25519 by default for better interoperability with Rust/Go libp2p
-        # which often compile without RSA support
-        key_pair = generate_new_ed25519_identity()
+    # Identity resolution (opt-in persistence; default remains random Ed25519):
+    # 1. explicit key_pair
+    # 2. key_pair_provider()
+    # 3. keystore get/create(+persist) under identity_name
+    # 4. otherwise generate a new random Ed25519 keypair
+    key_pair = _resolve_host_key_pair(
+        key_pair=key_pair,
+        key_pair_provider=key_pair_provider,
+        keystore=keystore,
+        identity_name=identity_name,
+        auto_persist=auto_persist,
+    )
 
     # Generate deterministic peer ID from keypair
     # Same keypair always produces the same peer ID
@@ -722,6 +793,10 @@ def new_swarm(
 
 def new_host(
     key_pair: KeyPair | None = None,
+    key_pair_provider: Callable[[], KeyPair] | None = None,
+    keystore: FileSystemKeyStore | None = None,
+    identity_name: str = "default",
+    auto_persist: bool | None = None,
     muxer_opt: TMuxerOptions | None = None,
     sec_opt: TSecurityOptions | None = None,
     peerstore_opt: IPeerStore | None = None,
@@ -768,7 +843,14 @@ def new_host(
     3. ``enable_*`` flags.
     4. Default: TCP only.
 
-    :param key_pair: optional choice of the ``KeyPair``
+    :param key_pair: optional explicit ``KeyPair`` (mutually exclusive with
+        ``key_pair_provider`` and ``keystore``)
+    :param key_pair_provider: optional ``Callable[[], KeyPair]`` used to obtain
+        the host identity (issue #312)
+    :param keystore: optional ``FileSystemKeyStore`` for named identity load/save
+    :param identity_name: key name within ``keystore`` (default ``\"default\"``)
+    :param auto_persist: when using ``keystore``, persist newly generated keys
+        (defaults to ``True`` if ``keystore`` is set)
     :param muxer_opt: optional choice of stream muxer
     :param sec_opt: optional choice of security upgrade
     :param peerstore_opt: optional peerstore
@@ -855,6 +937,10 @@ def new_host(
         enable_webrtc=enable_webrtc,
         enable_webtransport=enable_webtransport,
         key_pair=key_pair,
+        key_pair_provider=key_pair_provider,
+        keystore=keystore,
+        identity_name=identity_name,
+        auto_persist=auto_persist,
         muxer_opt=muxer_opt,
         sec_opt=sec_opt,
         peerstore_opt=peerstore_opt,

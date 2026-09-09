@@ -105,6 +105,25 @@ class RSAPrivateKey(PrivateKey):
     def to_bytes(self) -> bytes:
         return self.impl.export_key("DER")
 
+    @classmethod
+    def from_bytes(cls, key_bytes: bytes) -> "RSAPrivateKey":
+        """
+        Reconstruct an RSA private key from DER-encoded bytes.
+
+        :param key_bytes: DER-encoded RSA private key (as produced by ``to_bytes``).
+        :return: An ``RSAPrivateKey`` instance.
+        :raises ValueError: If the bytes cannot be parsed as an RSA private key.
+        :raises CryptographyError: If the key size is invalid.
+        """
+        try:
+            rsakey = RSA.import_key(key_bytes)
+        except (ValueError, IndexError, TypeError) as e:
+            raise ValueError(f"Invalid RSA private key bytes: {e}") from e
+        if not rsakey.has_private():
+            raise ValueError("Key bytes do not contain an RSA private key")
+        validate_rsa_key_size(rsakey)
+        return cls(rsakey)
+
     def get_type(self) -> KeyType:
         return KeyType.RSA
 
