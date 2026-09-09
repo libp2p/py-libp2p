@@ -4,6 +4,14 @@ libp2p.records package
 Submodules
 ----------
 
+libp2p.records.ipns module
+--------------------------
+
+.. automodule:: libp2p.records.ipns
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 libp2p.records.pubkey module
 ----------------------------
 
@@ -32,6 +40,22 @@ libp2p.records.validator module
 -------------------------------
 
 .. automodule:: libp2p.records.validator
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Subpackages
+-----------
+
+.. toctree::
+   :maxdepth: 4
+
+   libp2p.records.pb
+
+Module contents
+---------------
+
+.. automodule:: libp2p.records
    :members:
    :undoc-members:
    :show-inheritance:

@@ -30,13 +30,33 @@ ______________________________________________________________________
 
 ### Transports
 
-| **Transport**                          | **Status** |                                     **Source**                                      |
-| -------------------------------------- | :--------: | :---------------------------------------------------------------------------------: |
-| **`libp2p-tcp`**                       |     ✅     | [source](https://github.com/libp2p/py-libp2p/blob/main/libp2p/transport/tcp/tcp.py) |
-| **`libp2p-quic`**                      |     ✅     |    [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/transport/quic)    |
-| **`libp2p-websocket`**                 |     ✅     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/transport/websocket)  |
-| **`libp2p-webrtc-browser-to-server`**  |     🌱     |                                                                                     |
-| **`libp2p-webrtc-private-to-private`** |     🌱     |                                                                                     |
+| **Transport**                          | **Status** |                                      **Source**                                       |
+| -------------------------------------- | :--------: | :-----------------------------------------------------------------------------------: |
+| **`libp2p-tcp`**                       |     ✅     |  [source](https://github.com/libp2p/py-libp2p/blob/main/libp2p/transport/tcp/tcp.py)  |
+| **`libp2p-quic`**                      |     ✅     |     [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/transport/quic)     |
+| **`libp2p-websocket`**                 |     ✅     |  [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/transport/websocket)   |
+| **`libp2p-webtransport`**              |     🌱     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/transport/webtransport) |
+| **`libp2p-webrtc-browser-to-server`**  |     🌱     |                                                                                       |
+| **`libp2p-webrtc-private-to-private`** |     🌱     |                                                                                       |
+
+WebRTC-Direct (browser/server) uses the spec **STUN path** by default: inbound
+dials hit a shared UDP port and the listener infers the offer from the first
+STUN packet; outbound dials synthesise an ICE-Lite answer from the multiaddr
+with no default public STUN servers. This is the only signalling path that
+interoperates with go-libp2p / js-libp2p / browsers. An experimental HTTP
+`POST /sdp` harness (`WebRTCTransportConfig(enable_sdp_http_harness=True)`) is
+**for py↔py debugging only** and is *not* interoperable — leave it off in
+production.
+
+**Choosing a dial version.** The listener always accepts both v1 and v2; the
+dialer picks with `WebRTCTransportConfig(webrtc_direct_dial_version=1|2)`:
+
+- **v1** (default today) — the migration path (SDP ufrag/pwd munging). Kept the
+  default while [libp2p/specs#715](https://github.com/libp2p/specs/pull/715) is
+  unmerged so existing v1 peers keep working.
+- **v2** (recommended) — the specs#715 flow, no SDP munging. Prefer it for new
+  deployments; **browser dialling needs v2** once `NoSdpMangleUfrag` support is
+  widespread. The default flips to v2 once specs#715 lands.
 
 ______________________________________________________________________
 

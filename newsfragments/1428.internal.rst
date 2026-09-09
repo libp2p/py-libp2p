@@ -1,0 +1,1 @@
+De-flaked remaining timed-cache expiry tests by polling until entries expire instead of fixed ``trio.sleep``, and stopped waiting via ``LastSeenCache.has()`` (which refreshes TTL).

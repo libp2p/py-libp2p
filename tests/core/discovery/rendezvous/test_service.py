@@ -11,6 +11,7 @@ import varint
 from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.discovery.rendezvous.config import (
     MAX_DISCOVER_LIMIT,
+    MAX_MESSAGE_SIZE,
     MAX_NAMESPACE_LENGTH,
     MAX_TTL,
     RENDEZVOUS_PROTOCOL,
@@ -388,3 +389,28 @@ class TestRendezvousService:
 
         # Verify response was written
         assert mock_stream.write.called
+
+    @pytest.mark.trio
+    async def test_stream_handler_rejects_oversized_message(
+        self, service, sample_peer_id
+    ):
+        """Oversized varint length must be rejected without reading a huge body."""
+        mock_stream = Mock()
+        mock_stream.muxed_conn.peer_id = sample_peer_id
+        mock_stream.read = AsyncMock()
+        mock_stream.write = AsyncMock()
+        mock_stream.close = AsyncMock()
+
+        claimed = MAX_MESSAGE_SIZE + 1
+        varint_bytes = varint.encode(claimed)
+        varint_reads = [bytes([b]) for b in varint_bytes]
+        # A body chunk must never be consumed after the oversize check.
+        body_sentinel = b"SHOULD_NOT_BE_READ"
+        mock_stream.read.side_effect = varint_reads + [body_sentinel]
+
+        await service._handle_stream(mock_stream)
+
+        mock_stream.write.assert_not_called()
+        mock_stream.close.assert_called_once()
+        # Only varint bytes should have been read (one read call per byte).
+        assert mock_stream.read.await_count == len(varint_bytes)

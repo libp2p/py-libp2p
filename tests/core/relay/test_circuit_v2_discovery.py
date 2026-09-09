@@ -14,7 +14,7 @@ from libp2p.relay.circuit_v2.protocol import (
     PROTOCOL_ID,
     STOP_PROTOCOL_ID,
 )
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     background_trio_service,
 )
 from libp2p.tools.constants import (
@@ -650,9 +650,10 @@ async def test_relay_discovery_multiple_relays_with_mixed_reservations():
 
             # get_relay() should prioritize relays with reservations
             selected = client_discovery.get_relay()
-            assert selected in [relay_host1.get_id(), relay_host3.get_id()], (
-                "Should select relay with reservation"
-            )
+            assert selected in [
+                relay_host1.get_id(),
+                relay_host3.get_id(),
+            ], "Should select relay with reservation"
 
             logger.info("Mixed reservations test passed")
 

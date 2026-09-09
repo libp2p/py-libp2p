@@ -1,0 +1,1 @@
+De-flaked GossipSub direct-peer tests by replacing fixed ``trio.sleep`` waits with bounded ``wait_for`` / ``wait_for_peer`` readiness checks.

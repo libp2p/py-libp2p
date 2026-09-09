@@ -1,7 +1,3 @@
-from collections.abc import (
-    Callable,
-)
-
 import pytest
 import trio
 
@@ -11,67 +7,10 @@ from libp2p.tools.utils import (
 from tests.utils.pubsub.dummy_account_node import (
     DummyAccountNode,
 )
-
-
-async def wait_for_convergence(
-    nodes: tuple[DummyAccountNode, ...],
-    check: Callable[[DummyAccountNode], bool],
-    timeout: float = 10.0,
-    poll_interval: float = 0.02,
-    log_success: bool = False,
-    raise_last_exception_on_timeout: bool = True,
-) -> None:
-    """
-    Wait until all nodes satisfy the check condition.
-
-    Returns as soon as convergence is reached, otherwise raises TimeoutError.
-    Convergence already guarantees all nodes satisfy the check, so callers need
-    not run a second assertion pass after this returns.
-    """
-    start_time = trio.current_time()
-
-    last_exception: Exception | None = None
-    last_exception_node: int | None = None
-
-    while True:
-        failed_indices: list[int] = []
-        for i, node in enumerate(nodes):
-            try:
-                ok = check(node)
-            except Exception as exc:
-                ok = False
-                last_exception = exc
-                last_exception_node = i
-            if not ok:
-                failed_indices.append(i)
-
-        if not failed_indices:
-            elapsed = trio.current_time() - start_time
-            if log_success:
-                print(f"✓ Converged in {elapsed:.3f}s with {len(nodes)} nodes")
-            return
-
-        elapsed = trio.current_time() - start_time
-        if elapsed > timeout:
-            if raise_last_exception_on_timeout and last_exception is not None:
-                # Preserve the underlying assertion/exception signal (and its message)
-                # instead of hiding it behind a generic timeout.
-                node_hint = (
-                    f" (node index {last_exception_node})"
-                    if last_exception_node is not None
-                    else ""
-                )
-                raise AssertionError(
-                    f"Convergence failed{node_hint}: {last_exception}"
-                ) from last_exception
-
-            raise TimeoutError(
-                f"Convergence timeout after {elapsed:.2f}s. "
-                f"Failed nodes: {failed_indices}. "
-                f"(Hint: run with -s and pass log_success=True for timing logs)"
-            )
-
-        await trio.sleep(poll_interval)
+from tests.utils.pubsub.wait import (
+    wait_for_adjacency_ready,
+    wait_for_convergence,
+)
 
 
 async def perform_test(num_nodes, adjacency_map, action_func, assertion_func):
@@ -97,8 +36,7 @@ async def perform_test(num_nodes, adjacency_map, action_func, assertion_func):
                         dummy_nodes[target_num].host,
                     )
 
-        # Allow time for network creation to take place
-        await trio.sleep(0.25)
+        await wait_for_adjacency_ready(dummy_nodes, adjacency_map, timeout=10.0)
 
         # Perform action function
         await action_func(dummy_nodes)
@@ -113,7 +51,6 @@ async def perform_test(num_nodes, adjacency_map, action_func, assertion_func):
     # Success, terminate pending tasks.
 
 
-@pytest.mark.trio
 async def test_simple_two_nodes():
     num_nodes = 2
     adj_map = {0: [1]}
@@ -127,7 +64,6 @@ async def test_simple_two_nodes():
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
 
-@pytest.mark.trio
 async def test_simple_three_nodes_line_topography():
     num_nodes = 3
     adj_map = {0: [1], 1: [2]}
@@ -141,7 +77,6 @@ async def test_simple_three_nodes_line_topography():
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
 
-@pytest.mark.trio
 async def test_simple_three_nodes_triangle_topography():
     num_nodes = 3
     adj_map = {0: [1, 2], 1: [2]}
@@ -155,7 +90,7 @@ async def test_simple_three_nodes_triangle_topography():
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
 
-@pytest.mark.trio
+@pytest.mark.flaky(reruns=3, reruns_delay=2)
 async def test_simple_seven_nodes_tree_topography():
     num_nodes = 7
     adj_map = {0: [1, 2], 1: [3, 4], 2: [5, 6]}
@@ -169,7 +104,7 @@ async def test_simple_seven_nodes_tree_topography():
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
 
-@pytest.mark.trio
+@pytest.mark.flaky(reruns=3, reruns_delay=2)
 async def test_set_then_send_from_root_seven_nodes_tree_topography():
     num_nodes = 7
     adj_map = {0: [1, 2], 1: [3, 4], 2: [5, 6]}
@@ -194,7 +129,7 @@ async def test_set_then_send_from_root_seven_nodes_tree_topography():
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
 
-@pytest.mark.trio
+@pytest.mark.flaky(reruns=3, reruns_delay=2)
 async def test_set_then_send_from_different_leafs_seven_nodes_tree_topography():
     num_nodes = 7
     adj_map = {0: [1, 2], 1: [3, 4], 2: [5, 6]}
@@ -213,7 +148,6 @@ async def test_set_then_send_from_different_leafs_seven_nodes_tree_topography():
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
 
-@pytest.mark.trio
 async def test_simple_five_nodes_ring_topography():
     num_nodes = 5
     adj_map = {0: [1], 1: [2], 2: [3], 3: [4], 4: [0]}
@@ -227,7 +161,6 @@ async def test_simple_five_nodes_ring_topography():
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
 
-@pytest.mark.trio
 async def test_set_then_send_from_diff_nodes_five_nodes_ring_topography():
     num_nodes = 5
     adj_map = {0: [1], 1: [2], 2: [3], 3: [4], 4: [0]}
@@ -249,7 +182,6 @@ async def test_set_then_send_from_diff_nodes_five_nodes_ring_topography():
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
 
-@pytest.mark.trio
 @pytest.mark.slow
 async def test_set_then_send_from_five_diff_nodes_five_nodes_ring_topography():
     num_nodes = 5

@@ -21,6 +21,7 @@ from libp2p.network.stream.exceptions import (
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
+from libp2p.peer.peerstore import env_to_send_in_RPC
 from libp2p.relay.circuit_v2.config import RelayConfig, RelayRole
 from libp2p.relay.circuit_v2.discovery import (
     RelayDiscovery,
@@ -28,6 +29,7 @@ from libp2p.relay.circuit_v2.discovery import (
 )
 from libp2p.relay.circuit_v2.pb.circuit_pb2 import (
     HopMessage,
+    Reservation,
 )
 from libp2p.relay.circuit_v2.protocol import (
     STOP_PROTOCOL_ID,
@@ -367,22 +369,52 @@ async def test_circuit_v2_transport_message_routing_through_relay():
         # Step 1: Destination connects to Relay
         with trio.fail_after(CONNECT_TIMEOUT):
             await connect(target_host, relay_host)
-            assert relay_host.get_id() in target_host.get_network().connections
-            assert target_host.get_id() in relay_host.get_network().connections
+            # Poll until the connection is visible in both swarms rather than
+            # sleeping a fixed amount and hoping it settled.
+            while not (
+                relay_host.get_id() in target_host.get_network().connections
+                and target_host.get_id() in relay_host.get_network().connections
+            ):
+                await trio.sleep(SLEEP_TIME)
 
-        await trio.sleep(SLEEP_TIME)
+        # Step 2: Destination makes a reservation on the relay.
+        with trio.fail_after(CONNECT_TIMEOUT):
+            dest_relay_stream = await target_host.new_stream(
+                relay_host.get_id(), [PROTOCOL_ID]
+            )
+            envelope_bytes, _ = env_to_send_in_RPC(target_host)
+            reserve_msg = HopMessage(
+                type=HopMessage.RESERVE,
+                peer=target_host.get_id().to_bytes(),
+                senderRecord=envelope_bytes,
+            )
+            await dest_relay_stream.write(reserve_msg.SerializeToString())
+            # Read and discard the STATUS response from the relay
+            await dest_relay_stream.read(1024)
 
-        # Step 2: Source connects to Relay
+        # Wait until the relay has actually registered the reservation before the
+        # source dials through it (the circuit dial fails without it).
+        with trio.fail_after(CONNECT_TIMEOUT):
+            while not relay_protocol.resource_manager.has_reservation(
+                target_host.get_id()
+            ):
+                await trio.sleep(SLEEP_TIME)
+
+        # Step 3: Source connects to Relay
         with trio.fail_after(CONNECT_TIMEOUT):
             await connect(client_host, relay_host)
-            assert relay_host.get_id() in client_host.get_network().connections
-            assert client_host.get_id() in relay_host.get_network().connections
+            # Poll until the connection is visible in both swarms rather than
+            # sleeping a fixed amount and hoping it settled.
+            while not (
+                relay_host.get_id() in client_host.get_network().connections
+                and client_host.get_id() in relay_host.get_network().connections
+            ):
+                await trio.sleep(SLEEP_TIME)
 
-        await trio.sleep(SLEEP_TIME)
         relay_id = relay_host.get_id()
         client_discovery.get_relay = lambda: relay_id
 
-        # Step 3: Source tries to dial the destination via p2p-circuit and opens stream
+        # Step 4: Source tries to dial the destination via p2p-circuit and opens stream
         relay_addr = relay_host.get_addrs()[0]
         dest_id = target_host.get_id()
         p2p_circuit_addr = Multiaddr(f"{relay_addr}/p2p-circuit/p2p/{dest_id}")
@@ -870,9 +902,10 @@ async def test_circuit_v2_transport_relay_selection_fallback_no_reservation():
         # Should still select relays even without reservations
         selected1 = await client_transport._select_relay(target_info)
         assert selected1 is not None, "Should select a relay even without reservations"
-        assert selected1 in [relay_id1, relay_id2], (
-            "Should select from available relays"
-        )
+        assert selected1 in [
+            relay_id1,
+            relay_id2,
+        ], "Should select from available relays"
 
         logger.info("Fallback to non-reserved relays test passed")
 
@@ -1099,32 +1132,11 @@ def circuit_v2_transport():
     return transport
 
 
-def _metrics_for(transport, relay):
-    """
-    Find metric dict for a relay by comparing
-    to_string() to avoid identity issues.
-    """
-    for k, v in transport._relay_metrics.items():
-        # some tests set relay.to_string.return_value
-        try:
-            if k.to_string() == relay.to_string():
-                return v
-        except Exception:
-            # fallback if to_string is not a callable on the mock
-            try:
-                if k.to_string.return_value == relay.to_string.return_value:
-                    return v
-            except Exception:
-                continue
-    raise AssertionError("Metrics for relay not found")
-
-
 @pytest.mark.trio
 async def test_select_relay_no_relays(circuit_v2_transport, peer_info, mocker):
     """Test _select_relay when no relays are available."""
     circuit_v2_transport.discovery.get_relays.return_value = []
     circuit_v2_transport.client_config.enable_auto_relay = True
-    circuit_v2_transport._relay_list = []
     mock_sleep = mocker.patch("trio.sleep", new=AsyncMock())
 
     result = await circuit_v2_transport._select_relay(peer_info)
@@ -1134,7 +1146,6 @@ async def test_select_relay_no_relays(circuit_v2_transport, peer_info, mocker):
         circuit_v2_transport.discovery.get_relays.call_count
         == circuit_v2_transport.client_config.max_auto_relay_attempts
     )
-    assert circuit_v2_transport._relay_list == []
     assert (
         mock_sleep.call_count
         == circuit_v2_transport.client_config.max_auto_relay_attempts
@@ -1390,7 +1401,6 @@ async def test_select_relay_backoff_timing(circuit_v2_transport, peer_info, mock
     """Test _select_relay exponential backoff on empty scored_relays."""
     circuit_v2_transport.discovery.get_relays.return_value = []
     circuit_v2_transport.client_config.enable_auto_relay = True
-    circuit_v2_transport._relay_list = []
     mock_sleep = mocker.patch("trio.sleep", new=AsyncMock())
     circuit_v2_transport.client_config.max_auto_relay_attempts = 3
 
@@ -1595,7 +1605,8 @@ async def test_dial_peer_info_uses_stored_multiaddr(protocol):
     peer_info = PeerInfo(peer_id, [])
 
     circuit_ma = multiaddr.Multiaddr(
-        f"/ip4/127.0.0.1/tcp/4001/p2p/{relay_peer_id.to_base58()}/p2p-circuit/p2p/{peer_id.to_base58()}"
+        f"/ip4/127.0.0.1/tcp/4001/p2p/{relay_peer_id.to_base58()}"
+        f"/p2p-circuit/p2p/{peer_id.to_base58()}"
     )
     relay_addr = multiaddr.Multiaddr(
         f"/ip4/127.0.0.1/tcp/4001/p2p/{relay_peer_id.to_base58()}"
@@ -1660,6 +1671,179 @@ async def test_dial_peer_info_creates_and_stores_circuit(protocol):
     peerstore.add_addrs.assert_called_once()
     assert isinstance(conn, TrackedRawConnection)
     assert conn.is_initiator
+
+
+@pytest.mark.trio
+async def test_dial_peer_info_includes_reservation_proof(protocol):
+    mock_host = Mock()
+    peerstore = Mock()
+    mock_host.get_peerstore.return_value = peerstore
+
+    relay_key = create_new_key_pair()
+    relay_peer_id = ID.from_pubkey(relay_key.public_key)
+    relay_addr = Multiaddr(f"/ip4/127.0.0.1/tcp/4001/p2p/{relay_peer_id.to_base58()}")
+    relay_info = PeerInfo(relay_peer_id, [relay_addr])
+
+    dest_key = create_new_key_pair()
+    dest_peer_id = ID.from_pubkey(dest_key.public_key)
+    dest_info = PeerInfo(dest_peer_id, [])
+
+    peerstore.addrs.side_effect = lambda pid: (
+        [] if pid == dest_peer_id else [relay_addr]
+    )
+    peerstore.peer_info.return_value = relay_info
+
+    mock_host.connect = AsyncMock(return_value=None)
+    relay_stream = AsyncMock()
+    relay_stream.write = AsyncMock()
+    relay_stream.read = AsyncMock(
+        return_value=HopMessage(
+            type=HopMessage.STATUS,
+            status=create_status(code=StatusCode.OK, message="connected"),
+        ).SerializeToString()
+    )
+    mock_host.new_stream = AsyncMock(return_value=relay_stream)
+
+    transport = CircuitV2Transport(
+        host=mock_host,
+        config=Mock(enable_client=False),
+        protocol=protocol,
+    )
+    transport._select_relay = AsyncMock(return_value=relay_peer_id)
+
+    reservation_expiry = int(time.time()) + 120
+    transport._reservation_proofs[relay_peer_id] = Reservation(
+        expire=reservation_expiry,
+        voucher=b"voucher-bytes",
+        signature=b"signature-bytes",
+    )
+
+    with patch(
+        "libp2p.relay.circuit_v2.transport.env_to_send_in_RPC",
+        return_value=(b"", None),
+    ):
+        await transport.dial_peer_info(dest_info)
+
+    outbound_bytes = relay_stream.write.await_args_list[0].args[0]
+    outbound_hop = HopMessage()
+    outbound_hop.ParseFromString(outbound_bytes)
+
+    assert outbound_hop.type == HopMessage.CONNECT
+    assert outbound_hop.reservation.expire == reservation_expiry
+    assert outbound_hop.reservation.voucher == b"voucher-bytes"
+    assert outbound_hop.reservation.signature == b"signature-bytes"
+
+
+@pytest.mark.trio
+async def test_dial_peer_info_opens_new_stream_after_reserve(protocol):
+    """RESERVE then CONNECT must use distinct HOP streams (rust-libp2p interop)."""
+    mock_host = Mock()
+    peerstore = Mock()
+    mock_host.get_peerstore.return_value = peerstore
+
+    relay_key = create_new_key_pair()
+    relay_peer_id = ID.from_pubkey(relay_key.public_key)
+    relay_addr = Multiaddr(f"/ip4/127.0.0.1/tcp/4001/p2p/{relay_peer_id.to_base58()}")
+    relay_info = PeerInfo(relay_peer_id, [relay_addr])
+
+    dest_key = create_new_key_pair()
+    dest_peer_id = ID.from_pubkey(dest_key.public_key)
+    dest_info = PeerInfo(dest_peer_id, [])
+
+    peerstore.addrs.side_effect = lambda pid: (
+        [] if pid == dest_peer_id else [relay_addr]
+    )
+    peerstore.peer_info.return_value = relay_info
+
+    mock_host.connect = AsyncMock(return_value=None)
+
+    reserve_stream = AsyncMock()
+    reserve_stream.close = AsyncMock()
+    connect_stream = AsyncMock()
+    connect_stream.write = AsyncMock()
+    connect_stream.read = AsyncMock(
+        return_value=HopMessage(
+            type=HopMessage.STATUS,
+            status=create_status(code=StatusCode.OK, message="connected"),
+        ).SerializeToString()
+    )
+    mock_host.new_stream = AsyncMock(side_effect=[reserve_stream, connect_stream])
+
+    transport = CircuitV2Transport(
+        host=mock_host,
+        config=Mock(enable_client=True),
+        protocol=protocol,
+    )
+    transport._select_relay = AsyncMock(return_value=relay_peer_id)
+    transport._make_reservation = AsyncMock(return_value=True)
+
+    with patch(
+        "libp2p.relay.circuit_v2.transport.env_to_send_in_RPC",
+        return_value=(b"", None),
+    ):
+        conn = await transport.dial_peer_info(dest_info)
+
+    assert mock_host.new_stream.await_count == 2
+    reserve_stream.close.assert_awaited_once()
+    transport._make_reservation.assert_awaited_once_with(reserve_stream, relay_peer_id)
+    connect_stream.write.assert_awaited()
+    outbound_bytes = connect_stream.write.await_args_list[0].args[0]
+    outbound_hop = HopMessage()
+    outbound_hop.ParseFromString(outbound_bytes)
+    assert outbound_hop.type == HopMessage.CONNECT
+    assert isinstance(conn, TrackedRawConnection)
+    assert conn.stream is connect_stream
+
+
+@pytest.mark.trio
+async def test_dial_peer_info_reuses_stream_when_client_disabled(protocol):
+    """Without client reservation, CONNECT uses the single opened HOP stream."""
+    mock_host = Mock()
+    peerstore = Mock()
+    mock_host.get_peerstore.return_value = peerstore
+
+    relay_key = create_new_key_pair()
+    relay_peer_id = ID.from_pubkey(relay_key.public_key)
+    relay_addr = Multiaddr(f"/ip4/127.0.0.1/tcp/4001/p2p/{relay_peer_id.to_base58()}")
+    relay_info = PeerInfo(relay_peer_id, [relay_addr])
+
+    dest_key = create_new_key_pair()
+    dest_peer_id = ID.from_pubkey(dest_key.public_key)
+    dest_info = PeerInfo(dest_peer_id, [])
+
+    peerstore.addrs.side_effect = lambda pid: (
+        [] if pid == dest_peer_id else [relay_addr]
+    )
+    peerstore.peer_info.return_value = relay_info
+
+    mock_host.connect = AsyncMock(return_value=None)
+    relay_stream = AsyncMock()
+    relay_stream.write = AsyncMock()
+    relay_stream.read = AsyncMock(
+        return_value=HopMessage(
+            type=HopMessage.STATUS,
+            status=create_status(code=StatusCode.OK, message="connected"),
+        ).SerializeToString()
+    )
+    mock_host.new_stream = AsyncMock(return_value=relay_stream)
+
+    transport = CircuitV2Transport(
+        host=mock_host,
+        config=Mock(enable_client=False),
+        protocol=protocol,
+    )
+    transport._select_relay = AsyncMock(return_value=relay_peer_id)
+    transport._make_reservation = AsyncMock(return_value=True)
+
+    with patch(
+        "libp2p.relay.circuit_v2.transport.env_to_send_in_RPC",
+        return_value=(b"", None),
+    ):
+        await transport.dial_peer_info(dest_info)
+
+    assert mock_host.new_stream.await_count == 1
+    transport._make_reservation.assert_not_awaited()
+    relay_stream.write.assert_awaited()
 
 
 def test_valid_circuit_multiaddr(circuit_v2_transport):
@@ -1792,7 +1976,6 @@ def test_connection_type_relayed_exists():
     """Test that ConnectionType.RELAYED exists and has correct value."""
     from libp2p.connection_types import ConnectionType
 
-    # Verify RELAYED connection type exists
     assert hasattr(ConnectionType, "RELAYED")
     assert ConnectionType.RELAYED.value == "relayed"
 
@@ -1801,44 +1984,33 @@ def test_connection_type_direct_exists():
     """Test that ConnectionType.DIRECT exists and has correct value."""
     from libp2p.connection_types import ConnectionType
 
-    # Verify DIRECT connection type exists
     assert hasattr(ConnectionType, "DIRECT")
     assert ConnectionType.DIRECT.value == "direct"
 
 
 def test_circuit_multiaddr_format():
     """Test that circuit multiaddrs are properly formatted with /p2p-circuit."""
-    from libp2p.crypto.secp256k1 import create_new_key_pair
-
-    # Create mock peer IDs
     relay_key_pair = create_new_key_pair()
     relay_peer_id = ID.from_pubkey(relay_key_pair.public_key)
 
     dest_key_pair = create_new_key_pair()
     dest_peer_id = ID.from_pubkey(dest_key_pair.public_key)
 
-    # Test that circuit multiaddrs are properly formatted
-    # /p2p/{relay_id}/p2p-circuit/p2p/{dest_id}
     circuit_ma_str = (
         f"/p2p/{relay_peer_id.to_base58()}/p2p-circuit/p2p/{dest_peer_id.to_base58()}"
     )
     circuit_ma = multiaddr.Multiaddr(circuit_ma_str)
 
-    # Verify the multiaddr contains p2p-circuit
     ma_str = str(circuit_ma)
     assert "/p2p-circuit/" in ma_str, (
         f"Multiaddr should contain /p2p-circuit/: {ma_str}"
     )
 
-    # Verify structure: should have relay peer, then p2p-circuit, then destination peer
     parts = ma_str.split("/")
-    # parts will be like ['', 'p2p', '<relay_id>', 'p2p-circuit', 'p2p', '<dest_id>']
     try:
         p2p_circuit_idx = parts.index("p2p-circuit")
-        # p2p-circuit should be preceded by relay peer id (3rd element, after 'p2p')
         assert p2p_circuit_idx > 2, "p2p-circuit should not be at the beginning"
         assert parts[p2p_circuit_idx - 2] == "p2p", "Should have p2p before relay id"
-        # p2p-circuit should be followed by destination peer
         assert p2p_circuit_idx + 2 < len(parts), (
             "Should have destination peer after p2p-circuit"
         )
@@ -1850,12 +2022,9 @@ def test_circuit_multiaddr_format():
 def test_raw_connection_accepts_relayed_type():
     """Test that RawConnection accepts ConnectionType.RELAYED."""
     from libp2p.connection_types import ConnectionType
-    from libp2p.network.connection.raw_connection import RawConnection
 
-    # Create a mock stream
     mock_stream = Mock()
 
-    # Create a mock multiaddr
     relay_key_pair = create_new_key_pair()
     relay_peer_id = ID.from_pubkey(relay_key_pair.public_key)
     dest_key_pair = create_new_key_pair()
@@ -1865,7 +2034,6 @@ def test_raw_connection_accepts_relayed_type():
         f"/p2p/{relay_peer_id.to_base58()}/p2p-circuit/p2p/{dest_peer_id.to_base58()}"
     )
 
-    # Create RawConnection with RELAYED type
     raw_conn = RawConnection(
         stream=mock_stream,
         initiator=True,
@@ -1873,10 +2041,8 @@ def test_raw_connection_accepts_relayed_type():
         addresses=[circuit_ma],
     )
 
-    # Verify the connection type is RELAYED
     assert raw_conn.get_connection_type() == ConnectionType.RELAYED
 
-    # Verify the multiaddr includes p2p-circuit
     addrs = raw_conn.get_transport_addresses()
     assert len(addrs) == 1
     assert "/p2p-circuit/" in str(addrs[0])
@@ -1885,16 +2051,12 @@ def test_raw_connection_accepts_relayed_type():
 def test_raw_connection_default_is_direct():
     """Test that RawConnection defaults to ConnectionType.DIRECT."""
     from libp2p.connection_types import ConnectionType
-    from libp2p.network.connection.raw_connection import RawConnection
 
-    # Create a mock stream
     mock_stream = Mock()
 
-    # Create RawConnection without specifying type (should default to DIRECT)
     raw_conn = RawConnection(
         stream=mock_stream,
         initiator=True,
     )
 
-    # Verify the default connection type is DIRECT
     assert raw_conn.get_connection_type() == ConnectionType.DIRECT

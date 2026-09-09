@@ -1,0 +1,1 @@
+Fixed GossipSub publish-before-identify timing issue by queueing messages for peers whose protocol negotiation is still in progress, ensuring deterministic message delivery even in rapid connect-and-publish scenarios.

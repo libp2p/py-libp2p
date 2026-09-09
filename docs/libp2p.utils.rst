@@ -35,3 +35,27 @@ libp2p.utils.version module
    :members:
    :undoc-members:
    :show-inheritance:
+
+libp2p.utils.paths module
+-------------------------
+
+.. automodule:: libp2p.utils.paths
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+libp2p.utils.address_validation module
+---------------------------------------
+
+.. automodule:: libp2p.utils.address_validation
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+libp2p.utils.dns_utils module
+------------------------------
+
+.. automodule:: libp2p.utils.dns_utils
+   :members:
+   :undoc-members:
+   :show-inheritance:

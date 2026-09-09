@@ -46,7 +46,15 @@ typecheck:
 	pre-commit run mypy-local --all-files && pre-commit run pyrefly-local --all-files
 
 test:
-	python -m pytest tests -n auto
+	python -m pytest tests -n auto -m "not serial_only" --durations=40 --durations-min=1.0
+	python -m pytest \
+		tests/core/identity/identify/test_identify.py::test_identify_protocol \
+		tests/core/identity/identify/test_identify_integration.py::test_identify_protocol_varint_format_integration \
+		tests/core/identity/identify/test_identify_integration.py::test_identify_protocol_raw_format_integration \
+		tests/core/identity/identify/test_identify_integration.py::test_identify_multi_transport_host_addresses \
+		tests/core/test_libp2p/test_libp2p.py::test_host_connect \
+		tests/core/transport/quic/test_integration.py::test_yamux_stress_ping \
+		-n 0 --durations=40 --durations-min=1.0
 
 pr: clean fix lint typecheck test
 
@@ -65,7 +73,8 @@ PB = libp2p/crypto/pb/crypto.proto \
 	libp2p/discovery/rendezvous/pb/rendezvous.proto \
 	libp2p/bitswap/pb/bitswap.proto \
 	libp2p/bitswap/pb/dag_pb.proto \
-	libp2p/bitswap/pb/unixfs.proto
+	libp2p/bitswap/pb/unixfs.proto \
+	libp2p/records/pb/ipns.proto
 
 PY = $(PB:.proto=_pb2.py)
 PYI = $(PB:.proto=_pb2.pyi)

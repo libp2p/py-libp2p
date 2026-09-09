@@ -32,7 +32,7 @@ from libp2p.security.noise.transport import (
     Transport as NoiseTransport,
 )
 from libp2p.stream_muxer.yamux.yamux import Yamux
-from libp2p.tools.async_service import background_trio_service
+from libp2p.tools.anyio_service import background_trio_service
 from libp2p.tools.constants import MAX_READ_LEN
 from libp2p.transport.upgrader import TransportUpgrader
 from libp2p.transport.websocket.transport import WebsocketTransport
@@ -86,17 +86,17 @@ async def create_websocket_host(
         upgrader = create_plaintext_upgrader(key_pair)
 
     transport = WebsocketTransport(upgrader)
-    swarm = Swarm(peer_id, peer_store, upgrader, transport)
+    swarm = Swarm(peer_id, peer_store, upgrader, [transport])
     host = BasicHost(swarm)
 
     # Start swarm with background_trio_service
     # The Swarm's run() method will set the background nursery on the transport
     async with background_trio_service(swarm):
         # Wait for Swarm to start and set the background nursery
-        # The Swarm's run() method sets event_listener_nursery_created AFTER setting
-        # the background nursery on the transport, so waiting for this event ensures
-        # the transport has the nursery available
-        await swarm.event_listener_nursery_created.wait()
+        # The Swarm's run() method sets event_background_nursery_created AFTER
+        # setting the background nursery on the transport, so waiting for this
+        # event ensures the transport has the nursery available
+        await swarm.event_background_nursery_created.wait()
 
         # Optionally listen on addresses
         if listen_addrs:

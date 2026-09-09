@@ -33,12 +33,6 @@ if ENABLE_INLINING:
         def digest(self) -> bytes:
             return self._digest
 
-    # Register identity hash function if FuncReg is available
-    if hasattr(multihash, "FuncReg"):
-        multihash.FuncReg.register(
-            IDENTITY_MULTIHASH_CODE, "identity", hash_new=lambda: IdentityHash()
-        )
-
 
 class ID:
     _bytes: bytes
@@ -186,6 +180,11 @@ class ID:
             return NotImplemented
 
     def __hash__(self) -> int:
+        # Hash the raw bytes (cheap, cached by CPython), NOT the base58 string.
+        # base58 encoding is pure-Python big-integer division — computing it
+        # on every hash made peer-ID hashing (dict/set lookups, peer_ids()
+        # scans over tens of thousands of peers) the dominant CPU cost on
+        # production nodes.  Consistent with __eq__ (which compares _bytes).
         return hash(self._bytes)
 
     @classmethod
@@ -197,11 +196,15 @@ class ID:
     @classmethod
     def from_pubkey(cls, key: PublicKey) -> "ID":
         serialized_key = key.serialize()
-        algo = multihash.Func.sha2_256
+        # Use identity hash (no hashing) for small keys, otherwise use SHA2-256
         if ENABLE_INLINING and len(serialized_key) <= MAX_INLINE_KEY_LENGTH:
-            algo = IDENTITY_MULTIHASH_CODE
-        mh_digest = multihash.digest(serialized_key, algo)
-        return cls(mh_digest.encode())
+            # Identity multihash: just encode the key directly with code 0x00
+            mh_bytes = multihash.encode(serialized_key, IDENTITY_MULTIHASH_CODE)
+        else:
+            # SHA2-256: hash first, then encode
+            digest = hashlib.sha256(serialized_key).digest()
+            mh_bytes = multihash.encode(digest, "sha2-256")
+        return cls(mh_bytes)
 
     def extract_public_key(self) -> PublicKey | None:
         """

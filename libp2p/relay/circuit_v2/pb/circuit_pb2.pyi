@@ -166,6 +166,7 @@ class Status(google.protobuf.message.Message):
         PERMISSION_DENIED: Status._Code.ValueType  # 102
         CONNECTION_FAILED: Status._Code.ValueType  # 200
         DIAL_REFUSED: Status._Code.ValueType  # 201
+        NO_RESERVATION: Status._Code.ValueType  # 204
         STOP_FAILED: Status._Code.ValueType  # 300
         MALFORMED_MESSAGE: Status._Code.ValueType  # 400
 
@@ -176,6 +177,7 @@ class Status(google.protobuf.message.Message):
     PERMISSION_DENIED: Status.Code.ValueType  # 102
     CONNECTION_FAILED: Status.Code.ValueType  # 200
     DIAL_REFUSED: Status.Code.ValueType  # 201
+    NO_RESERVATION: Status.Code.ValueType  # 204
     STOP_FAILED: Status.Code.ValueType  # 300
     MALFORMED_MESSAGE: Status.Code.ValueType  # 400
 

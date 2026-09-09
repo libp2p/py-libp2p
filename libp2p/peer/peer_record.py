@@ -4,7 +4,7 @@ import time
 from typing import Any
 
 from multiaddr import Multiaddr
-from multicodec import Code, get_prefix
+from multicodec import Code
 from multicodec.code_table import LIBP2P_PEER_RECORD
 
 from libp2p.abc import IPeerRecord
@@ -14,7 +14,10 @@ from libp2p.peer.peerinfo import PeerInfo
 
 PEER_RECORD_ENVELOPE_DOMAIN = "libp2p-peer-record"
 PEER_RECORD_ENVELOPE_CODE: Code = LIBP2P_PEER_RECORD
-PEER_RECORD_ENVELOPE_PAYLOAD_TYPE = get_prefix(str(PEER_RECORD_ENVELOPE_CODE))
+# go-libp2p uses raw bytes [0x03, 0x01] for the peer-record payload type
+# (NOT varint-encoded). See: https://github.com/libp2p/go-libp2p/blob/master/core/peer/record.go
+# PeerRecordEnvelopePayloadType = []byte{0x03, 0x01}
+PEER_RECORD_ENVELOPE_PAYLOAD_TYPE = bytes([0x03, 0x01])
 
 _last_timestamp_lock = threading.Lock()
 _last_timestamp: int = 0

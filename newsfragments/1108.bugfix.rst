@@ -1,0 +1,1 @@
+Fixed mplex so a remote stream reset does not discard data that was already buffered. This matches Yamux and allows reading a ping payload that arrives with a concurrent reset.

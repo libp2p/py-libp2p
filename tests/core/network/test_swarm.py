@@ -26,7 +26,10 @@ from libp2p.network.exceptions import (
 from libp2p.network.swarm import (
     Swarm,
 )
-from libp2p.tools.async_service import (
+from libp2p.peer.id import (
+    ID,
+)
+from libp2p.tools.anyio_service import (
     background_trio_service,
 )
 from libp2p.tools.utils import (
@@ -45,6 +48,31 @@ class _FakeQUICTransport:
         self.private_key = private_key
         self.config = config
         self.enable_autotls = enable_autotls
+
+
+def test_swarm_legacy_keyword_raises_typeerror():
+    from unittest.mock import Mock
+
+    with pytest.raises(TypeError, match="no longer accepts 'transport='"):
+        Swarm(Mock(), Mock(), Mock(), transport=Mock())
+
+
+def test_swarm_positional_backward_compatibility():
+    from unittest.mock import Mock
+
+    peer_id = Mock()
+    peerstore = Mock()
+    upgrader = Mock()
+
+    # Passing a single transport positionally should be wrapped in a list internally
+    # and added to the transport manager.
+    transport = Mock()
+    swarm1 = Swarm(peer_id, peerstore, upgrader, transport)
+    assert len(swarm1.transport_manager.get_transports()) == 1
+
+    # Passing a list of transports positionally
+    swarm2 = Swarm(peer_id, peerstore, upgrader, [transport])
+    assert len(swarm2.transport_manager.get_transports()) == 1
 
 
 @pytest.mark.trio
@@ -124,6 +152,18 @@ async def test_swarm_close_peer(security_protocol):
         await trio.sleep(0.01)
         # 0  1  2
         assert len(swarms[1].connections) == 0 and len(swarms[2].connections) == 0
+
+
+@pytest.mark.trio
+async def test_swarm_close_is_idempotent(security_protocol):
+    async with SwarmFactory.create_and_listen(
+        security_protocol=security_protocol
+    ) as swarm:
+        await swarm.close()
+        assert swarm._closing is True
+        # Second close must be a no-op (HostFactory + SwarmFactory double-close path).
+        await swarm.close()
+        assert swarm._closing is True
 
 
 @pytest.mark.trio
@@ -207,6 +247,8 @@ async def test_swarm_multiaddr(security_protocol):
 
         def clear():
             swarms[0].peerstore.clear_addrs(swarms[1].get_peer_id())
+            if hasattr(swarms[0], "_negative_peer_cache"):
+                swarms[0]._negative_peer_cache.evict(str(swarms[1].get_peer_id()))
 
         clear()
         # No addresses
@@ -233,6 +275,7 @@ async def test_swarm_multiaddr(security_protocol):
         with pytest.raises(SwarmException):
             await swarms[0].dial_peer(swarms[1].get_peer_id())
 
+        clear()
         # Test one address
         addrs = tuple(
             addr
@@ -257,14 +300,14 @@ async def test_swarm_multiaddr(security_protocol):
 def test_new_swarm_defaults_to_tcp():
     swarm = new_swarm()
     assert isinstance(swarm, Swarm)
-    assert isinstance(swarm.transport, TCP)
+    assert isinstance(swarm.transport_manager.get_transports()[0], TCP)
 
 
 def test_new_swarm_tcp_multiaddr_supported():
     addr = Multiaddr("/ip4/127.0.0.1/tcp/9999")
     swarm = new_swarm(listen_addrs=[addr])
     assert isinstance(swarm, Swarm)
-    assert isinstance(swarm.transport, TCP)
+    assert isinstance(swarm.transport_manager.get_transports()[0], TCP)
 
 
 def test_new_swarm_quic_multiaddr_supported():
@@ -273,15 +316,13 @@ def test_new_swarm_quic_multiaddr_supported():
     addr = Multiaddr("/ip4/127.0.0.1/udp/9999/quic")
     swarm = new_swarm(listen_addrs=[addr])
     assert isinstance(swarm, Swarm)
-    assert isinstance(swarm.transport, QUICTransport)
+    assert isinstance(swarm.transport_manager.get_transports()[0], QUICTransport)
 
 
 def test_new_swarm_quic_paths_propagate_enable_autotls(monkeypatch):
     import libp2p as libp2p_module
-    from libp2p.transport import transport_registry
 
     key_pair = generate_new_ed25519_identity()
-    original_quic_transport = libp2p_module.QUICTransport
 
     # Path 1: direct QUIC creation when listen_addrs is None and enable_quic=True.
     monkeypatch.setattr(libp2p_module, "QUICTransport", _FakeQUICTransport)
@@ -291,47 +332,22 @@ def test_new_swarm_quic_paths_propagate_enable_autotls(monkeypatch):
         enable_autotls=True,
     )
     assert isinstance(swarm_direct, Swarm)
-    assert isinstance(swarm_direct.transport, _FakeQUICTransport)
-    assert swarm_direct.transport.enable_autotls is True
+    transport1 = swarm_direct.transport_manager.get_transports()[0]
+    assert isinstance(transport1, _FakeQUICTransport)
+    assert transport1.enable_autotls is True
 
-    # Path 2: registry-based creation should receive enable_autotls in kwargs.
-    registry_calls = []
-
-    def fake_create_transport_for_multiaddr(maddr, upgrader, **kwargs):
-        registry_calls.append(kwargs)
-        return _FakeQUICTransport(
-            kwargs["private_key"],
-            config=kwargs.get("config"),
-            enable_autotls=kwargs.get("enable_autotls", False),
-        )
-
-    monkeypatch.setattr(
-        transport_registry,
-        "create_transport_for_multiaddr",
-        fake_create_transport_for_multiaddr,
-    )
+    # Path 2: list_addrs based creation should receive enable_autotls in kwargs.
     swarm_registry = new_swarm(
         key_pair=key_pair,
         listen_addrs=[Multiaddr("/ip4/127.0.0.1/udp/9999/quic")],
         enable_autotls=True,
     )
-    assert registry_calls[0]["enable_autotls"] is True
     assert isinstance(swarm_registry, Swarm)
-    assert isinstance(swarm_registry.transport, _FakeQUICTransport)
-    assert swarm_registry.transport.enable_autotls is True
+    transport2 = swarm_registry.transport_manager.get_transports()[0]
+    assert isinstance(transport2, _FakeQUICTransport)
+    assert transport2.enable_autotls is True
 
-    # Path 3: forced-QUIC fallback when enable_quic=True but registry gives non-QUIC.
-    monkeypatch.setattr(libp2p_module, "QUICTransport", original_quic_transport)
-
-    def fake_create_transport_for_multiaddr_non_quic(maddr, upgrader, **kwargs):
-        return TCP()
-
-    monkeypatch.setattr(
-        transport_registry,
-        "create_transport_for_multiaddr",
-        fake_create_transport_for_multiaddr_non_quic,
-    )
-    monkeypatch.setattr(libp2p_module, "QUICTransport", _FakeQUICTransport)
+    # Path 3: forced-QUIC fallback when enable_quic=True but no QUIC addr provided.
     swarm_forced = new_swarm(
         key_pair=key_pair,
         listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/9999")],
@@ -339,8 +355,9 @@ def test_new_swarm_quic_paths_propagate_enable_autotls(monkeypatch):
         enable_autotls=True,
     )
     assert isinstance(swarm_forced, Swarm)
-    assert isinstance(swarm_forced.transport, _FakeQUICTransport)
-    assert swarm_forced.transport.enable_autotls is True
+    transport3 = swarm_forced.transport_manager.get_transports()[0]
+    assert isinstance(transport3, _FakeQUICTransport)
+    assert transport3.enable_autotls is True
 
 
 def test_new_swarm_defaults_to_ed25519():
@@ -489,6 +506,10 @@ async def test_swarm_listen_multiple_addresses_connectivity(security_protocol):
                             f"Connection from {full_addr} should be established"
                         )
 
+                        # Clean up connection for next interface test
+                        await swarm2.close_peer(peer_info.peer_id)
+                        await trio.sleep(0.05)
+
                     except Exception as e:
                         pytest.fail(
                             f"Failed to establish libp2p connection to {full_addr}: {e}"
@@ -607,3 +628,48 @@ async def test_swarm_peer_id_validation(security_protocol):
         # Verify connections are established
         assert correct_peer_id in swarms[0].connections
         assert swarms[0].get_peer_id() in swarms[1].connections
+
+
+@pytest.mark.trio
+async def test_swarm_skips_unsupported_multiaddrs():
+    """
+    Regression for #391: peerstore UDP/QUIC-only addresses must not dial via
+    TCP. TransportManager filters them and dial_peer raises SwarmException.
+    """
+    swarm = new_swarm()
+    peer_id = ID.from_pubkey(generate_new_ed25519_identity().public_key)
+    unsupported = [
+        Multiaddr("/ip4/127.0.0.1/udp/9090"),
+        Multiaddr("/ip4/127.0.0.1/udp/9090/quic"),
+    ]
+    swarm.peerstore.add_addrs(peer_id, unsupported, ttl=3600)
+
+    with pytest.raises(SwarmException, match="No supported transport"):
+        await swarm.dial_peer(peer_id)
+
+
+@pytest.mark.trio
+async def test_swarm_filters_unsupported_and_dials_tcp():
+    """
+    Mixed peerstore: unsupported addrs are skipped; a reachable TCP addr is used.
+    """
+    async with SwarmFactory.create_batch_and_listen(2) as swarms:
+        dialer, listener = swarms[0], swarms[1]
+        peer_id = listener.get_peer_id()
+        tcp_addrs = tuple(
+            addr
+            for transport in listener.listeners.values()
+            for addr in transport.get_addrs()
+        )
+        assert tcp_addrs
+
+        mixed = [
+            Multiaddr("/ip4/127.0.0.1/udp/9090"),
+            Multiaddr("/ip4/127.0.0.1/udp/9090/quic-v1"),
+            *tcp_addrs,
+        ]
+        dialer.peerstore.add_addrs(peer_id, mixed, ttl=3600)
+
+        connections = await dialer.dial_peer(peer_id)
+        assert len(connections) > 0
+        assert peer_id in dialer.connections

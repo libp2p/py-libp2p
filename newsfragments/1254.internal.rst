@@ -1,0 +1,1 @@
+Improved OSO observability report reliability by correctly detecting rcmgr metric availability, continuing vulnerability checks after single-package lookup failures, and making dependency graph output project-name aware.

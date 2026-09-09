@@ -38,7 +38,7 @@ from libp2p.peer.peerinfo import (
     PeerInfo,
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     Service,
 )
 from libp2p.utils.multiaddr_utils import (
@@ -52,8 +52,10 @@ from .config import (
 from .discovery import (
     RelayDiscovery,
 )
+from .exceptions import RelayConnectionError
 from .pb.circuit_pb2 import (
     HopMessage,
+    Reservation,
     StopMessage,
 )
 from .performance_tracker import (
@@ -131,20 +133,11 @@ class TrackedRawConnection(IRawConnection):
         return self._wrapped.get_remote_address()
 
     def get_transport_addresses(self) -> list[multiaddr.Multiaddr]:
-        """
-        Get the actual transport addresses used by this connection.
-
-        For relayed connections, this should include /p2p-circuit in the path.
-        Delegates to wrapped connection but ensures relay context is preserved.
-        """
+        """Delegate to wrapped connection."""
         return self._wrapped.get_transport_addresses()
 
     def get_connection_type(self) -> ConnectionType:
-        """
-        Get the type of connection.
-
-        This is always RELAYED since TrackedRawConnection wraps relay connections.
-        """
+        """Always RELAYED since this wraps relay connections."""
         return ConnectionType.RELAYED
 
     def __getattr__(self, name: str) -> Any:
@@ -200,15 +193,24 @@ class CircuitV2Transport(ITransport):
         # Performance tracker for intelligent relay selection
         self.performance_tracker = RelayPerformanceTracker()
 
-        # Stored addresses and DHT (from origin/main)
-        self._last_relay_index = -1
-        self._relay_list: list[ID] = []
-        self._relay_metrics: dict[ID, dict[str, float | int]] = {}
         self._reservations: dict[ID, float] = {}
+        self._reservation_proofs: dict[ID, Reservation] = {}
         self._refreshing = False
         self.dht: KadDHT | None = None
         if config.enable_dht_discovery:
             self.dht = KadDHT(host, DHTMode.CLIENT)
+
+    def can_dial(self, maddr: multiaddr.Multiaddr) -> bool:
+        """Return True if this transport can dial the given multiaddr."""
+        return any(p.code == P_P2P_CIRCUIT for p in maddr.protocols())
+
+    def can_listen(self, maddr: multiaddr.Multiaddr) -> bool:
+        """Return True if this transport can listen on the given multiaddr."""
+        return any(p.code == P_P2P_CIRCUIT for p in maddr.protocols())
+
+    def protocols(self) -> list[str]:
+        """Return the list of protocol names handled by this transport."""
+        return ["p2p-circuit"]
 
     async def dial(  # type: ignore[override]
         self,
@@ -395,6 +397,15 @@ class CircuitV2Transport(ITransport):
                     logger.warning(
                         "Failed to make reservation with relay %s", relay_peer_id
                     )
+                # rust-libp2p (and similar) relays finish each HOP substream after one
+                # exchange. After RESERVE, open a new stream for CONNECT so the relay
+                # does not drop the substream before we read the STATUS response.
+                await relay_stream.close()
+                relay_stream = await self.host.new_stream(relay_peer_id, [PROTOCOL_ID])
+                if not relay_stream:
+                    raise ConnectionError(
+                        f"Could not open stream to relay {relay_peer_id} for CONNECT"
+                    )
             # Create signed peer record to send with the HOP message
             envelope_bytes, _ = env_to_send_in_RPC(self.host)
 
@@ -404,6 +415,10 @@ class CircuitV2Transport(ITransport):
                 peer=dest_info.peer_id.to_bytes(),
                 senderRecord=envelope_bytes,
             )
+
+            reservation_proof = self._reservation_proofs.get(relay_peer_id)
+            if reservation_proof and reservation_proof.expire > int(time.time()):
+                connect_msg.reservation.CopyFrom(reservation_proof)
             await relay_stream.write(connect_msg.SerializeToString())
 
             # Read response with timeout
@@ -427,7 +442,11 @@ class CircuitV2Transport(ITransport):
             status_msg = getattr(resp.status, "message", "Unknown error")
 
             if status_code != StatusCode.OK:
-                raise ConnectionError(f"Relay connection failed: {status_msg}")
+                raise RelayConnectionError(
+                    f"Relay connection failed: {status_msg}",
+                    status_code=status_code,
+                    status_msg=status_msg,
+                )
 
             # Record successful connection attempt
             latency_ms = (trio.current_time() - connection_start_time) * 1000
@@ -597,7 +616,11 @@ class CircuitV2Transport(ITransport):
 
             if status_code != StatusCode.OK:
                 await relay_stream.close()
-                raise ConnectionError(f"Relay connection failed: {status_msg}")
+                raise RelayConnectionError(
+                    f"Relay connection failed: {status_msg}",
+                    status_code=status_code,
+                    status_msg=status_msg,
+                )
 
             raw_conn = RawConnection(
                 stream=relay_stream,
@@ -755,36 +778,6 @@ class CircuitV2Transport(ITransport):
         except Exception:
             return False
 
-    async def _measure_relay(
-        self, relay_id: ID, scored_relays: list[tuple[ID, float]]
-    ) -> None:
-        metrics = self._relay_metrics.setdefault(
-            relay_id, {"latency": 0, "failures": 0, "last_seen": 0}
-        )
-        start = time.monotonic()
-        available = await self._is_relay_available(relay_id)
-        latency = time.monotonic() - start
-
-        if not available:
-            metrics["failures"] += 1
-            return
-
-        metrics.update(
-            {
-                "latency": latency,
-                "failures": max(0.0, metrics["failures"] - 1),
-                "last_seen": time.time(),
-            }
-        )
-
-        score = (
-            1000
-            - (metrics["failures"] * 10)
-            - (latency * 100)
-            - ((time.time() - metrics["last_seen"]) * 0.1)
-        )
-        scored_relays.append((relay_id, score))
-
     async def reserve(
         self, stream: INetStream, relay_peer_id: ID, nursery: trio.Nursery
     ) -> bool:
@@ -880,7 +873,13 @@ class CircuitV2Transport(ITransport):
                 return False
 
             self._reservations[relay_peer_id] = expires
-            logger.info("Reserved peer %s (ttl=%.1fs)", relay_peer_id, expires)
+            self._reservation_proofs[relay_peer_id] = Reservation(
+                expire=expires,
+                voucher=getattr(resp.reservation, "voucher", b""),
+                signature=getattr(resp.reservation, "signature", b""),
+            )
+            ttl = max(0, expires - int(time.time()))
+            logger.info("Reserved peer %s (ttl=%ss)", relay_peer_id, ttl)
 
             return True
 
@@ -904,6 +903,7 @@ class CircuitV2Transport(ITransport):
                 for relay_peer_id in expired:
                     logger.info("Reservation expired for peer %s", relay_peer_id)
                     del self._reservations[relay_peer_id]
+                    self._reservation_proofs.pop(relay_peer_id, None)
 
                 to_refresh = [
                     relay_peer_id
@@ -1098,7 +1098,7 @@ class CircuitV2Listener(Service, IListener):
         finally:
             logger.debug("CircuitV2Listener stopped")
 
-    async def listen(self, maddr: multiaddr.Multiaddr, nursery: trio.Nursery) -> bool:
+    async def listen(self, maddr: multiaddr.Multiaddr) -> None:
         """
         Start listening on the given multiaddr.
 
@@ -1106,13 +1106,6 @@ class CircuitV2Listener(Service, IListener):
         ----------
         maddr : multiaddr.Multiaddr
             The multiaddr to listen on
-        nursery : trio.Nursery
-            The nursery to run tasks in
-
-        Returns
-        -------
-        bool
-            True if listening successfully started
 
         """
         # Convert string to Multiaddr if needed
@@ -1122,7 +1115,6 @@ class CircuitV2Listener(Service, IListener):
             else multiaddr.Multiaddr(maddr)
         )
         self.multiaddrs.append(addr)
-        return True
 
     def get_addrs(self) -> tuple[multiaddr.Multiaddr, ...]:
         """

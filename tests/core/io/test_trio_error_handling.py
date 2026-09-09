@@ -4,7 +4,7 @@ Test cases for trio error handling in TrioTCPStream and RawConnection.
 This module tests:
 - ClosedResourceError is silently handled (local cleanup — backward compat)
 - BrokenResourceError raises ConnectionClosedError (remote reset — issue #376)
-- ConnectionClosedError propagates through RawConnection as RawConnError
+- ConnectionClosedError propagates through RawConnection directly
 - ConnectionClosedError has correct attributes (transport="tcp")
 - ConnectionClosedError is a subclass of IOException (backward compat)
 """
@@ -19,9 +19,6 @@ from libp2p.io.exceptions import (
     IOException,
 )
 from libp2p.io.trio import TrioTCPStream
-from libp2p.network.connection.exceptions import (
-    RawConnError,
-)
 from libp2p.network.connection.raw_connection import (
     RawConnection,
 )
@@ -269,9 +266,8 @@ class TestTrioErrorHandling:
         """
         Test full error propagation chain for read.
 
-        BrokenResourceError -> ConnectionClosedError -> RawConnError.
-        When TrioTCPStream raises ConnectionClosedError (subclass of
-        IOException), RawConnection catches it and re-raises as RawConnError.
+        BrokenResourceError -> ConnectionClosedError.
+        RawConnection should propagate ConnectionClosedError directly.
         """
         mock_stream = Mock()
         mock_stream.receive_some = AsyncMock(
@@ -281,20 +277,17 @@ class TestTrioErrorHandling:
         tcp_stream = TrioTCPStream(mock_stream)
         raw_conn = RawConnection(tcp_stream, initiator=True)
 
-        with pytest.raises(RawConnError) as exc_info:
+        with pytest.raises(ConnectionClosedError) as exc_info:
             await raw_conn.read(1024)
 
-        # Verify the chain: RawConnError wraps ConnectionClosedError
-        cause = exc_info.value.__cause__
-        assert isinstance(cause, ConnectionClosedError)
-        assert cause.transport == "tcp"
+        assert exc_info.value.transport == "tcp"
 
     @pytest.mark.trio
     async def test_raw_conn_write_raises_on_broken_resource(self) -> None:
         """
         Test full error propagation chain for write.
 
-        BrokenResourceError -> ConnectionClosedError -> RawConnError.
+        BrokenResourceError -> ConnectionClosedError.
         Same propagation test for the write path.
         """
         mock_stream = Mock()
@@ -305,13 +298,10 @@ class TestTrioErrorHandling:
         tcp_stream = TrioTCPStream(mock_stream)
         raw_conn = RawConnection(tcp_stream, initiator=True)
 
-        with pytest.raises(RawConnError) as exc_info:
+        with pytest.raises(ConnectionClosedError) as exc_info:
             await raw_conn.write(b"test data")
 
-        # Verify the chain: RawConnError wraps ConnectionClosedError
-        cause = exc_info.value.__cause__
-        assert isinstance(cause, ConnectionClosedError)
-        assert cause.transport == "tcp"
+        assert exc_info.value.transport == "tcp"
 
     # ---- ConnectionClosedError hierarchy and attribute tests ----
 

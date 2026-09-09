@@ -10,6 +10,7 @@ from libp2p.io.abc import (
     ReadWriteCloser,
 )
 from libp2p.io.exceptions import (
+    ConnectionClosedError,
     IOException,
 )
 
@@ -37,10 +38,18 @@ class RawConnection(IRawConnection):
         self._actual_addresses = addresses
 
     async def write(self, data: bytes) -> None:
-        """Raise `RawConnError` if the underlying connection breaks."""
+        """
+        Raise `RawConnError` if the underlying connection breaks.
+
+        ``ConnectionClosedError`` (a subclass of ``IOException``) is allowed
+        to propagate directly so that upstream code (e.g. yamux) can catch
+        it by type instead of doing string matching.
+        """
         try:
             await self.stream.write(data)
-        except IOException as error:
+        except ConnectionClosedError:
+            raise
+        except (IOException, ConnectionResetError) as error:
             raise RawConnError from error
 
     async def read(self, n: int | None = None) -> bytes:
@@ -48,11 +57,14 @@ class RawConnection(IRawConnection):
         Read up to ``n`` bytes from the underlying stream. This call is
         delegated directly to the underlying ``self.reader``.
 
-        Raise `RawConnError` if the underlying connection breaks
+        Raise `RawConnError` if the underlying connection breaks.
+        ``ConnectionClosedError`` is allowed to propagate directly.
         """
         try:
             return await self.stream.read(n)
-        except IOException as error:
+        except ConnectionClosedError:
+            raise
+        except (IOException, ConnectionResetError) as error:
             raise RawConnError from error
 
     async def close(self) -> None:

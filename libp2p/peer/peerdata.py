@@ -90,7 +90,7 @@ class PeerData(IPeerData):
             if protocol in self.protocols:
                 return protocol
 
-        return "None supported"
+        return ""
 
     def clear_protocol_data(self) -> None:
         """Clear all protocols"""
@@ -232,7 +232,7 @@ class PeerData(IPeerData):
 
     def is_expired(self) -> bool:
         """
-        :return: true, if last_identified+ttl > current_time
+        :return: true, if last_identified+ttl < current_time
         """
         # for ttl = 0; peer_data is always valid
         if self.ttl > 0 and self.last_identified + self.ttl < int(time.time()):

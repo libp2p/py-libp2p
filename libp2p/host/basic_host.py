@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from collections.abc import (
     AsyncIterator,
+    Callable,
     Sequence,
 )
 from contextlib import (
     AbstractAsyncContextManager,
     asynccontextmanager,
 )
+from datetime import datetime, timezone
 import logging
 from typing import (
     TYPE_CHECKING,
@@ -15,9 +17,13 @@ from typing import (
 )
 import weakref
 
+if TYPE_CHECKING:
+    from libp2p.network.tag_store import TagStore
+
 from cryptography import x509
 from cryptography.x509.oid import ExtensionOID
 import multiaddr
+from multiaddr.exceptions import MultiaddrError, ProtocolLookupError
 import trio
 
 import libp2p
@@ -41,13 +47,20 @@ from libp2p.custom_types import (
     TProtocol,
 )
 from libp2p.discovery.bootstrap.bootstrap import BootstrapDiscovery
-from libp2p.discovery.mdns.mdns import MDNSDiscovery
+from libp2p.discovery.mdns.mdns import (
+    MDNSDiscovery,
+    create_mdns_discovery,
+)
 from libp2p.discovery.upnp.upnp import UpnpManager
 from libp2p.host.defaults import (
     get_default_protocols,
 )
 from libp2p.host.exceptions import (
     StreamFailure,
+)
+from libp2p.host.observed_addr_manager import (
+    NATDeviceType,
+    ObservedAddrManager,
 )
 from libp2p.host.ping import (
     ID as PING_PROTOCOL_ID,
@@ -60,7 +73,9 @@ from libp2p.identity.identify.pb.identify_pb2 import (
 )
 from libp2p.identity.identify_push.identify_push import (
     ID_PUSH as IdentifyPushID,
-    _update_peerstore_from_identify,
+)
+from libp2p.identity.update import (
+    update_peerstore_from_identify,
 )
 from libp2p.peer.id import (
     ID,
@@ -68,7 +83,7 @@ from libp2p.peer.id import (
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
-from libp2p.peer.peerstore import create_signed_peer_record
+from libp2p.peer.peerstore import PeerStoreError, create_signed_peer_record
 from libp2p.protocol_muxer.exceptions import (
     MultiselectClientError,
     MultiselectError,
@@ -89,12 +104,8 @@ from libp2p.security.tls.autotls.acme import (
     compute_b36_peer_id,
 )
 from libp2p.security.tls.autotls.broker import BrokerClient
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     background_trio_service,
-)
-from libp2p.transport.quic.connection import QUICConnection
-from libp2p.utils.multiaddr_utils import (
-    join_multiaddrs,
 )
 import libp2p.utils.paths
 from libp2p.utils.varint import (
@@ -106,6 +117,8 @@ if TYPE_CHECKING:
         OrderedDict,
     )
 
+    from libp2p.network.tag_store import TagStore
+
 # Upon host creation, host takes in options,
 # including the list of addresses on which to listen.
 # Host then parses these options and delegates to its Network instance,
@@ -114,6 +127,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 DEFAULT_NEGOTIATE_TIMEOUT = 30  # Increased to 30s for high-concurrency scenarios
 # Under load with 5 concurrent negotiations, some may take longer due to contention
+
+# Matches go-libp2p's ``AddrsFactory``: transform the live candidate address
+# list into the set the host should advertise.
+AddrsFactory = Callable[[list[multiaddr.Multiaddr]], list[multiaddr.Multiaddr]]
 
 _SAFE_CACHED_PROTOCOLS: set[TProtocol] = {
     PING_PROTOCOL_ID,
@@ -128,11 +145,14 @@ _IDENTIFY_PROTOCOLS: set[TProtocol] = {
 
 class _IdentifyNotifee(INotifee):
     """
-    Network notifee that triggers automatic identify when new connections arrive.
+    Network notifee that triggers automatic outbound Identify when new
+    connections arrive (all muxers, inbound and outbound), matching go-libp2p
+    ``Connected`` → ``IdentifyWait`` behavior.
     """
 
     def __init__(self, host: BasicHost):
         self._host_ref = weakref.ref(host)
+        self._push_identify_scheduled: bool = False
 
     async def connected(self, network: INetwork, conn: INetConn) -> None:
         host = self._host_ref()
@@ -153,7 +173,27 @@ class _IdentifyNotifee(INotifee):
         return None
 
     async def listen(self, network: INetwork, multiaddr: multiaddr.Multiaddr) -> None:
-        return None
+        host = self._host_ref()
+        if host is None:
+            return
+        # Debounce: when multiple addresses are bound in rapid succession,
+        # only push identify once after the current batch completes.
+        if self._push_identify_scheduled:
+            return
+        self._push_identify_scheduled = True
+
+        async def _deferred_push() -> None:
+            # Yield control so all listen() calls in the current batch complete
+            await trio.sleep(0)
+            self._push_identify_scheduled = False
+            h = self._host_ref()
+            if h is not None:
+                try:
+                    await h._push_identify_to_all_peers()
+                except Exception:
+                    pass  # Best-effort; don't crash the notifee chain
+
+        trio.lowlevel.spawn_system_task(_deferred_push)
 
     async def listen_close(
         self, network: INetwork, multiaddr: multiaddr.Multiaddr
@@ -183,16 +223,18 @@ class BasicHost(IHost):
         network: INetworkService,
         enable_mDNS: bool = False,
         enable_upnp: bool = False,
-        enable_autotls: bool = False,
         bootstrap: list[str] | None = None,
         default_protocols: OrderedDict[TProtocol, StreamHandlerFn] | None = None,
         negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
         resource_manager: ResourceManager | None = None,
-        psk: str | None = None,
+        metric_recv_channel: trio.MemoryReceiveChannel[Any] | None = None,
         *,
         bootstrap_allow_ipv6: bool = False,
         bootstrap_dns_timeout: float = 10.0,
         bootstrap_dns_max_retries: int = 3,
+        announce_addrs: Sequence[multiaddr.Multiaddr] | None = None,
+        addrs_factory: AddrsFactory | None = None,
+        disable_identify_address_discovery: bool = False,
     ) -> None:
         """
         Initialize a BasicHost instance.
@@ -208,6 +250,29 @@ class BasicHost(IHost):
         :param bootstrap_allow_ipv6: If True, bootstrap uses IPv6+TCP when available.
         :param bootstrap_dns_timeout: DNS resolution timeout in seconds per attempt.
         :param bootstrap_dns_max_retries: Max DNS resolution retries (with backoff).
+        :param announce_addrs: Optional static addresses to advertise instead of
+            the live candidate list.  ``None`` (default) uses listen addresses
+            augmented with confirmed observed addresses from
+            :class:`~libp2p.host.observed_addr_manager.ObservedAddrManager`.
+            An empty list advertises no addresses. When set, this list acts
+            as a static ``AddrsFactory`` (mirroring go-libp2p's
+            ``applyAddrsFactory``) and wins over observed addresses:
+            observations are still **recorded** by the manager (for
+            :meth:`get_nat_type` and future AutoNAT consumers) but are
+            **not** emitted by :meth:`get_addrs`. Mutually exclusive with
+            ``addrs_factory``. See also :meth:`get_addrs`.
+        :param addrs_factory: Optional callable matching go-libp2p's
+            ``AddrsFactory``. Receives the live candidate list (transport
+            addresses plus confirmed observed addresses when Identify
+            address discovery is enabled) and returns the addresses to
+            advertise. Mutually exclusive with ``announce_addrs``.
+        :param disable_identify_address_discovery: When ``True``, do not
+            create an :class:`~libp2p.host.observed_addr_manager.ObservedAddrManager`
+            and never record Identify ``observed_addr`` reports (parity with
+            go-libp2p's ``DisableIdentifyAddressDiscovery``). The Identify
+            protocol itself still runs for peer metadata; only observed-address
+            discovery is skipped. Useful with a known public address via
+            ``announce_addrs`` / ``addrs_factory``.
         """
         self._network = network
         self._network.set_stream_handler(self._swarm_stream_handler)
@@ -238,7 +303,7 @@ class BasicHost(IHost):
         self.multiselect_client = MultiselectClient()
         self.mDNS = None
         if enable_mDNS:
-            self.mDNS = MDNSDiscovery(network)
+            self.mDNS = create_mdns_discovery(network, host=self)
 
         # Initialize bootstrap discovery container. Keep attribute defined so
         # we can avoid hasattr checks elsewhere.
@@ -251,7 +316,28 @@ class BasicHost(IHost):
                 dns_resolution_timeout=bootstrap_dns_timeout,
                 dns_max_retries=bootstrap_dns_max_retries,
             )
-        self.psk = psk
+
+        # Address announcement configuration (#1268 / #1311)
+        if announce_addrs is not None and addrs_factory is not None:
+            raise ValueError("cannot specify both announce_addrs and addrs_factory")
+        self._disable_identify_address_discovery = disable_identify_address_discovery
+        if announce_addrs is not None:
+            static_addrs = list(announce_addrs)
+
+            def _static_addrs_factory(
+                _candidates: list[multiaddr.Multiaddr],
+                _addrs: list[multiaddr.Multiaddr] = static_addrs,
+            ) -> list[multiaddr.Multiaddr]:
+                return list(_addrs)
+
+            self._addrs_factory: AddrsFactory | None = _static_addrs_factory
+        else:
+            self._addrs_factory = addrs_factory
+        # Observed-address tracking (#1284 / #1250). Omit the manager when
+        # Identify address discovery is disabled (go DisableIdentifyAddressDiscovery).
+        self._observed_addr_manager: ObservedAddrManager | None = (
+            None if disable_identify_address_discovery else ObservedAddrManager()
+        )
 
         # Cache a signed-record if the local-node in the PeerStore
         envelope = create_signed_peer_record(
@@ -271,8 +357,13 @@ class BasicHost(IHost):
 
         # Automatic identify coordination
         self._identify_inflight: set[ID] = set()
-        self._identified_peers: set[ID] = set()
+        self._identified_peers: dict[ID, str] = {}
+        self._identify_tasks: set[trio.CancelScope] = set()
         self._network.register_notifee(_IdentifyNotifee(self))
+        self._closed = False
+
+        # Metrics
+        self.metric_recv_channel = metric_recv_channel
 
     def get_id(self) -> ID:
         """
@@ -298,36 +389,58 @@ class BasicHost(IHost):
         """
         return self.peerstore
 
+    @property
+    def conn_manager(self) -> TagStore:
+        """
+        Return the connection manager (TagStore) from the underlying network.
+
+        Delegates to the Swarm's tag_store, the same object — not a copy.
+        Protocol code can use ``host.conn_manager.tag_peer(...)`` without
+        navigating ``host.get_network().tag_store``, matching go-libp2p's
+        ``h.ConnManager()`` accessor.
+
+        Returns
+        -------
+        TagStore
+            The tag store managing peer priorities and protections.
+
+        """
+        return self._network.tag_store  # type: ignore[attr-defined]
+
     def _detect_negotiate_timeout_from_transport(self) -> float | None:
         """
         Detect negotiate timeout from transport configuration.
 
-        Checks if the network uses a QUIC transport and returns its
-        NEGOTIATE_TIMEOUT config value for coordination.
+        Iterates all registered transports in the swarm's
+        :attr:`~libp2p.network.swarm.Swarm.transport_manager` and returns the
+        ``NEGOTIATE_TIMEOUT`` value from the first transport that exposes it
+        (currently QUIC).
 
-        :return: Negotiate timeout from transport config, or None if not available
+        :return: Negotiate timeout in seconds from transport config, or None.
         """
         try:
-            # Check if network has a transport attribute (Swarm pattern)
-            # Type ignore: transport exists on Swarm but not in INetworkService
-            if hasattr(self._network, "transport"):
-                transport = getattr(self._network, "transport", None)  # type: ignore
-                # Check if it's a QUIC transport
-                if (
-                    transport is not None
-                    and hasattr(transport, "_config")
-                    and hasattr(transport._config, "NEGOTIATE_TIMEOUT")
-                ):
-                    timeout = getattr(transport._config, "NEGOTIATE_TIMEOUT", None)  # type: ignore
-                    if timeout is not None:
-                        logger.debug(
-                            f"Detected negotiate timeout {timeout}s "
-                            "from QUIC transport config"
-                        )
-                        return float(timeout)
+            # Prefer the new multi-transport API (transport_manager).
+            if hasattr(self._network, "transport_manager"):
+                tm = getattr(self._network, "transport_manager", None)
+                if tm is not None:
+                    for transport in tm.get_transports():
+                        if hasattr(transport, "_config") and hasattr(
+                            transport._config, "NEGOTIATE_TIMEOUT"
+                        ):
+                            timeout = getattr(
+                                transport._config, "NEGOTIATE_TIMEOUT", None
+                            )
+                            if timeout is not None:
+                                logger.debug(
+                                    "Detected negotiate timeout %ss from %s config",
+                                    timeout,
+                                    type(transport).__name__,
+                                )
+                                return float(timeout)
+
         except Exception as e:
-            # Silently fail - this is optional coordination
-            logger.debug(f"Could not detect negotiate timeout from transport: {e}")
+            # Silently fail — this is optional coordination.
+            logger.debug("Could not detect negotiate timeout from transport: %s", e)
 
         return None
 
@@ -349,19 +462,85 @@ class BasicHost(IHost):
 
     def get_addrs(self) -> list[multiaddr.Multiaddr]:
         """
-        Return all the multiaddr addresses this host is listening to.
+        Return the multiaddr addresses this host advertises to peers.
 
-        Note: This method appends the /p2p/{peer_id} suffix to the addresses.
-        Use get_transport_addrs() for raw transport addresses.
+        Behavior (mirrors go-libp2p's ``AddrsFactory`` pipeline):
+
+        * Build a live candidate list from transport listen addresses,
+          augmented with confirmed observed addresses when Identify address
+          discovery is enabled (no ``ObservedAddrManager`` when
+          ``disable_identify_address_discovery`` is set).
+        * If ``announce_addrs`` or ``addrs_factory`` was provided, apply that
+          factory to the candidate list. Static ``announce_addrs`` ignores
+          the candidates and returns the fixed list (observations may still
+          be recorded for ``get_nat_type`` when discovery is enabled).
+        * Otherwise advertise the candidate list as-is.
+        * Finally append the ``/p2p/{peer_id}`` suffix to each address.
+
+        Use :meth:`get_transport_addrs` for the raw transport addresses
+        without any observed-address augmentation or ``/p2p`` suffix.
         """
         p2p_part = multiaddr.Multiaddr(f"/p2p/{self.get_id()!s}")
-        return [join_multiaddrs(addr, p2p_part) for addr in self.get_transport_addrs()]
+
+        candidates = list(self.get_transport_addrs())
+        if self._observed_addr_manager is not None:
+            seen = {str(a) for a in candidates}
+            for obs_addr in self._observed_addr_manager.addrs():
+                key = str(obs_addr)
+                if key not in seen:
+                    seen.add(key)
+                    candidates.append(obs_addr)
+
+        if self._addrs_factory is not None:
+            addrs = list(self._addrs_factory(candidates))
+        else:
+            addrs = candidates
+
+        result = []
+        for addr in addrs:
+            # Strip any existing /p2p/ component, then always append our own.
+            # This avoids identity confusion when announce addrs contain a
+            # mismatched peer ID (mirrors js-libp2p behaviour).
+            try:
+                p2p_value = addr.value_for_protocol("p2p")
+            except ProtocolLookupError:
+                p2p_value = None
+            if p2p_value:
+                addr = addr.decapsulate(multiaddr.Multiaddr(f"/p2p/{p2p_value}"))
+            result.append(addr.encapsulate(p2p_part))
+        return result
 
     def get_connected_peers(self) -> list[ID]:
         """
         :return: all the ids of peers this host is currently connected to
         """
         return list(self._network.connections.keys())
+
+    def get_nat_type(self) -> tuple[NATDeviceType, NATDeviceType]:
+        """
+        Return the classified NAT device type for TCP and UDP transports.
+
+        Thin pass-through to
+        :meth:`libp2p.host.observed_addr_manager.ObservedAddrManager.get_nat_type`,
+        which infers NAT behaviour from the distribution of externally
+        observed addresses reported through Identify. Matches go-libp2p's
+        ``host.getNATType()`` algorithm.
+
+        When ``disable_identify_address_discovery`` is enabled there is no
+        observed-address manager, so ``(UNKNOWN, UNKNOWN)`` is returned.
+        Identify itself still runs; only observed-address discovery is skipped.
+
+        .. note::
+           Experimental API. Intended primarily for AutoNAT / hole-punch
+           consumers; the return values, thresholds, and method name may
+           evolve as those subsystems land in py-libp2p.
+
+        :return: ``(tcp_nat_type, udp_nat_type)``, each one of
+            :class:`~libp2p.host.observed_addr_manager.NATDeviceType`.
+        """
+        if self._observed_addr_manager is None:
+            return (NATDeviceType.UNKNOWN, NATDeviceType.UNKNOWN)
+        return self._observed_addr_manager.get_nat_type()
 
     def run(
         self,
@@ -388,28 +567,56 @@ class BasicHost(IHost):
                     upnp_manager = self.upnp
                     logger.debug("Starting UPnP discovery and port mapping")
                     if await upnp_manager.discover():
-                        for addr in self.get_addrs():
+                        for addr in self.get_transport_addrs():
                             if port := addr.value_for_protocol("tcp"):
                                 await upnp_manager.add_port_mapping(int(port), "TCP")
                 if self.bootstrap is not None:
                     logger.debug("Starting Bootstrap Discovery")
                     await self.bootstrap.start()
 
-                try:
-                    yield
-                finally:
-                    if self.mDNS is not None:
-                        self.mDNS.stop()
-                    if self.upnp and self.upnp.get_external_ip():
-                        upnp_manager = self.upnp
-                        logger.debug("Removing UPnP port mappings")
-                        for addr in self.get_addrs():
-                            if port := addr.value_for_protocol("tcp"):
-                                await upnp_manager.remove_port_mapping(int(port), "TCP")
-                    if self.bootstrap is not None:
-                        self.bootstrap.stop()
+                async with trio.open_nursery() as nursery:
+                    try:
+                        yield
+                    finally:
+                        nursery.cancel_scope.cancel()
+                await self._shutdown_background_services()
 
         return _run()
+
+    async def _shutdown_background_services(self) -> None:
+        """
+        Best-effort stop of mDNS, UPnP, and bootstrap.
+
+        Safe to call multiple times: service references are cleared after stop
+        so a second call is a no-op (avoids double ``zeroconf.close()``).
+        """
+        if self.mDNS is not None:
+            try:
+                logger.debug("Stopping mDNS Discovery")
+                self.mDNS.stop()
+            except Exception as e:
+                logger.warning(f"Error stopping mDNS during shutdown: {e}")
+            self.mDNS = None
+
+        upnp_manager = self.upnp
+        if upnp_manager is not None:
+            self.upnp = None
+            try:
+                if upnp_manager.get_external_ip():
+                    logger.debug("Removing UPnP port mappings")
+                    for addr in self.get_transport_addrs():
+                        if port := addr.value_for_protocol("tcp"):
+                            await upnp_manager.remove_port_mapping(int(port), "TCP")
+            except Exception as e:
+                logger.warning(f"Error removing UPnP mappings during shutdown: {e}")
+
+        if self.bootstrap is not None:
+            try:
+                logger.debug("Stopping Bootstrap Discovery")
+                self.bootstrap.stop()
+            except Exception as e:
+                logger.warning(f"Error stopping bootstrap during shutdown: {e}")
+            self.bootstrap = None
 
     def set_stream_handler(
         self, protocol_id: TProtocol, stream_handler: StreamHandlerFn
@@ -421,6 +628,14 @@ class BasicHost(IHost):
         :param stream_handler: a stream handler function
         """
         self.multiselect.add_handler(protocol_id, stream_handler)
+
+    def remove_stream_handler(self, protocol_id: TProtocol) -> None:
+        """
+        Remove the stream handler for the given `protocol_id`.
+
+        :param protocol_id: protocol id to remove
+        """
+        self.multiselect.remove_handler(protocol_id)
 
     def _preferred_protocol(
         self, peer_id: ID, protocol_ids: Sequence[TProtocol]
@@ -441,8 +656,7 @@ class BasicHost(IHost):
         :return: first supported protocol, or None if not cached
         """
         try:
-            # Check if peer exists in peerstore first (avoid auto-creation)
-            if peer_id not in self.peerstore.peer_ids():
+            if not self.peerstore.has_peer(peer_id):
                 return None
 
             # Only use protocol caching if we have a connection to this peer
@@ -478,6 +692,12 @@ class BasicHost(IHost):
                 "Will negotiate protocol."
             )
         return None
+
+    def get_metrics_recv_channel(self) -> trio.MemoryReceiveChannel[Any] | None:
+        """
+        Returns the recving end of the channel, used for metric events
+        """
+        return self.metric_recv_channel
 
     async def initiate_autotls_procedure(self, public_ip: str | None = None) -> None:
         """
@@ -707,6 +927,7 @@ class BasicHost(IHost):
             )
             protocol_choices = [preferred]
 
+        success = False
         try:
             muxed_conn = getattr(net_stream, "muxed_conn", None)
             stream_semaphore = (
@@ -741,6 +962,7 @@ class BasicHost(IHost):
                 communicator,
                 negotiate_timeout,
             )
+            success = True
         except MultiselectClientError as error:
             # Enhanced error logging for debugging
             error_msg = str(error)
@@ -805,9 +1027,15 @@ class BasicHost(IHost):
                 f"  Registry Stats: {registry_stats}"
             )
 
-            await net_stream.reset()
             raise StreamFailure(f"failed to open a stream to peer {peer_id}") from error
         finally:
+            if not success:
+                # Shield cleanup from cancellation
+                with trio.CancelScope(shield=True):  # type: ignore[call-arg]
+                    try:
+                        await net_stream.reset()
+                    except Exception as e:
+                        logger.debug(f"Failed to reset stream during cleanup: {e}")
             if semaphore_acquired and semaphore_to_use is not None:
                 semaphore_to_use.release()
 
@@ -831,16 +1059,27 @@ class BasicHost(IHost):
         """
         new_stream = await self._network.new_stream(peer_id)
 
+        success = False
         try:
             response = await self.multiselect_client.query_multistream_command(
                 MultiselectCommunicator(new_stream), command, response_timeout
             )
+            success = True
+            return response
         except MultiselectClientError as error:
-            logger.debug("fail to open a stream to peer %s, error=%s", peer_id, error)
-            await new_stream.reset()
-            raise StreamFailure(f"failed to open a stream to peer {peer_id}") from error
-
-        return response
+            raise StreamFailure(
+                f"failed to query command {command} to peer {peer_id}"
+            ) from error
+        finally:
+            with trio.CancelScope(shield=True):  # type: ignore[call-arg]
+                try:
+                    if success:
+                        await new_stream.close()
+                    else:
+                        await new_stream.reset()
+                except Exception as e:
+                    logger.debug(f"Failed to clean up command stream: {e}")
+        raise StreamFailure(f"failed to query command {command} to peer {peer_id}")
 
     async def connect(self, peer_info: PeerInfo) -> None:
         """
@@ -891,57 +1130,25 @@ class BasicHost(IHost):
             # Kick off identify in the background so protocol caching can engage.
             self._schedule_identify(peer_info.peer_id, reason="connect")
 
-    async def _run_identify(self, peer_id: ID) -> None:
-        """
-        Run identify protocol with a peer to discover supported protocols.
-
-        This method opens an identify stream, receives the peer's information,
-        and stores the supported protocols in the peerstore for later use.
-        This enables protocol caching to skip multiselect negotiation.
-
-        :param peer_id: ID of the peer to identify
-        """
-        try:
-            # Import here to avoid circular dependency
-            from libp2p.identity.identify.identify import (
-                ID as IDENTIFY_ID,
-            )
-            from libp2p.identity.identify_push.identify_push import (
-                _update_peerstore_from_identify,
-                read_length_prefixed_protobuf,
-            )
-
-            # Open identify stream (this will use multiselect negotiation)
-            stream = await self.new_stream(peer_id, [IDENTIFY_ID])
-
-            # Read identify response (length-prefixed protobuf)
-            response = await read_length_prefixed_protobuf(
-                stream, use_varint_format=True
-            )
-            await stream.close()
-
-            # Parse the identify message
-            from libp2p.identity.identify.pb.identify_pb2 import Identify
-
-            identify_msg = Identify()
-            identify_msg.ParseFromString(response)
-
-            # Store protocols in peerstore
-            await _update_peerstore_from_identify(self.peerstore, peer_id, identify_msg)
-
-            logger.debug(
-                f"Identify completed for peer {peer_id}, "
-                f"protocols: {list(identify_msg.protocols)}"
-            )
-        except Exception as e:
-            # Don't fail the connection if identify fails
-            # Protocol caching just won't be available for this peer
-            logger.debug(f"Failed to run identify for peer {peer_id}: {e}")
-
     async def disconnect(self, peer_id: ID) -> None:
         await self._network.close_peer(peer_id)
 
     async def close(self) -> None:
+        """
+        Close the host and its underlying network service.
+
+        Cleanup order is intentional: stop background services, cancel
+        inflight identify tasks, then close the network. Idempotent.
+        """
+        if self._closed:
+            return
+        self._closed = True
+
+        await self._shutdown_background_services()
+
+        for cs in self._identify_tasks:
+            cs.cancel()
+        self._identify_tasks.clear()
         await self._network.close()
 
     def _schedule_identify(self, peer_id: ID, *, reason: str) -> None:
@@ -949,16 +1156,29 @@ class BasicHost(IHost):
         Ensure identify is running for `peer_id`. If a task is already running or
         cached protocols exist, this is a no-op.
         """
-        if (
-            peer_id == self.get_id()
-            or self._has_cached_protocols(peer_id)
-            or peer_id in self._identify_inflight
-        ):
+        if peer_id == self.get_id():
+            return
+        if peer_id in self._identify_inflight:
+            return
+        # Add to inflight before checks to prevent duplicate tasks
+        self._identify_inflight.add(peer_id)
+        if self._has_cached_protocols(peer_id):
+            self._identify_inflight.discard(peer_id)
             return
         if not self._should_identify_peer(peer_id):
+            self._identify_inflight.discard(peer_id)
             return
-        self._identify_inflight.add(peer_id)
-        trio.lowlevel.spawn_system_task(self._identify_task_entry, peer_id, reason)
+        cs = trio.CancelScope()
+        self._identify_tasks.add(cs)
+
+        async def _tracked_identify() -> None:
+            with cs:
+                try:
+                    await self._identify_task_entry(peer_id, reason)
+                finally:
+                    self._identify_tasks.discard(cs)
+
+        trio.lowlevel.spawn_system_task(_tracked_identify)
 
     async def _identify_task_entry(self, peer_id: ID, reason: str) -> None:
         try:
@@ -975,11 +1195,18 @@ class BasicHost(IHost):
             return True
         cacheable = [str(p) for p in _SAFE_CACHED_PROTOCOLS]
         try:
-            if peer_id not in self.peerstore.peer_ids():
+            if not self.peerstore.has_peer(peer_id):
                 return False
             supported = self.peerstore.supports_protocols(peer_id, cacheable)
             return bool(supported)
+        except PeerStoreError:
+            return False
         except Exception:
+            logger.debug(
+                "Unexpected error checking cached protocols for %s",
+                peer_id,
+                exc_info=True,
+            )
             return False
 
     async def _identify_peer(self, peer_id: ID, *, reason: str) -> None:
@@ -994,9 +1221,9 @@ class BasicHost(IHost):
         swarm_conn = connections[0]
         event_started = getattr(swarm_conn, "event_started", None)
         if event_started is not None and not event_started.is_set():
-            try:
+            with trio.move_on_after(5.0) as _ev_cs:
                 await event_started.wait()
-            except Exception:
+            if _ev_cs.cancelled_caught:
                 return
 
         try:
@@ -1006,11 +1233,82 @@ class BasicHost(IHost):
             return
 
         try:
-            data = await read_length_prefixed_protobuf(stream, use_varint_format=True)
+            with trio.move_on_after(10.0) as _id_cs:
+                try:
+                    data = await read_length_prefixed_protobuf(
+                        stream, use_varint_format=True
+                    )
+                except Exception:
+                    # Remote may use legacy raw protobuf format
+                    data = await stream.read()
+            if _id_cs.cancelled_caught:
+                logger.debug("Identify[%s]: read timed out for %s", reason, peer_id)
+                try:
+                    await stream.reset()
+                except Exception:
+                    pass
+                return
             identify_msg = IdentifyMsg()
             identify_msg.ParseFromString(data)
-            await _update_peerstore_from_identify(self.peerstore, peer_id, identify_msg)
-            self._identified_peers.add(peer_id)
+            await update_peerstore_from_identify(self.peerstore, peer_id, identify_msg)
+            # Only mark as identified if still connected (avoid stale entries)
+            if self._network.get_connections(peer_id):
+                ts = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+                self._identified_peers[peer_id] = ts
+
+            if identify_msg.HasField("observed_addr") and identify_msg.observed_addr:
+                if self._observed_addr_manager is None:
+                    logger.debug(
+                        "Identify[%s]: ignoring observed_addr "
+                        "(Identify address discovery disabled)",
+                        reason,
+                    )
+                else:
+                    try:
+                        our_observed = multiaddr.Multiaddr(identify_msg.observed_addr)
+                        logger.debug(
+                            "Identify[%s]: recording observed_addr %s from peer %s",
+                            reason,
+                            our_observed,
+                            peer_id,
+                        )
+                        self._observed_addr_manager.record_observation(
+                            swarm_conn, our_observed, self.get_transport_addrs()
+                        )
+                    except MultiaddrError as exc:
+                        # Malformed observed_addr bytes or unknown protocols from a
+                        # misbehaving peer. Expected at low rates; log quietly.
+                        logger.debug(
+                            "ObservedAddrManager: ignoring malformed observed_addr "
+                            "from peer %s: %s",
+                            peer_id,
+                            exc,
+                        )
+                    except ValueError as exc:
+                        logger.debug(
+                            "ObservedAddrManager: ignoring invalid observed_addr "
+                            "value from peer %s: %s",
+                            peer_id,
+                            exc,
+                        )
+                    except Exception as exc:
+                        # Unexpected failure: surface at warning with traceback so
+                        # regressions don't disappear into debug logs.
+                        logger.warning(
+                            "ObservedAddrManager: unexpected failure recording "
+                            "observation from peer %s: %s",
+                            peer_id,
+                            exc,
+                            exc_info=True,
+                        )
+            else:
+                logger.debug(
+                    "Identify[%s]: peer %s returned no observed_addr; "
+                    "ObservedAddrManager not updated on this exchange",
+                    reason,
+                    peer_id,
+                )
+
             logger.debug(
                 "Identify[%s]: cached %s protocols for peer %s",
                 reason,
@@ -1033,23 +1331,11 @@ class BasicHost(IHost):
         peer_id = getattr(conn.muxed_conn, "peer_id", None)
         if peer_id is None:
             return
-        muxed_conn = getattr(conn, "muxed_conn", None)
-        is_initiator = False
-        if muxed_conn is not None and hasattr(muxed_conn, "is_initiator"):
-            try:
-                is_initiator = bool(muxed_conn.is_initiator())
-            except Exception:
-                is_initiator = False
-        if not is_initiator:
-            # Only the dialer (initiator) needs to actively run identify.
-            return
-        if not self._is_quic_muxer(muxed_conn):
-            return
         event_started = getattr(conn, "event_started", None)
         if event_started is not None and not event_started.is_set():
-            try:
+            with trio.move_on_after(5.0) as _ev_cs2:
                 await event_started.wait()
-            except Exception:
+            if _ev_cs2.cancelled_caught:
                 return
         self._schedule_identify(peer_id, reason="notifee-connected")
 
@@ -1057,7 +1343,10 @@ class BasicHost(IHost):
         peer_id = getattr(conn.muxed_conn, "peer_id", None)
         if peer_id is None:
             return
-        self._identified_peers.discard(peer_id)
+        self._identified_peers.pop(peer_id, None)
+        self._identify_inflight.discard(peer_id)
+        if self._observed_addr_manager is not None:
+            self._observed_addr_manager.remove_conn(conn)
 
     def _get_first_connection(self, peer_id: ID) -> INetConn | None:
         connections = self._network.get_connections(peer_id)
@@ -1065,15 +1354,76 @@ class BasicHost(IHost):
             return connections[0]
         return None
 
-    def _is_quic_muxer(self, muxed_conn: IMuxedConn | None) -> bool:
-        return isinstance(muxed_conn, QUICConnection)
+    async def _push_identify_to_all_peers(self) -> None:
+        """
+        Push identify updates to all connected peers.
+
+        Called when the host's addresses or protocols change, per the
+        identify/push spec: ``When a peer's basic information changes, for
+        example, because they've obtained a new public listen address, they
+        can use identify/push to inform others about the new information.``
+        """
+        from libp2p.identity.identify_push.identify_push import (
+            push_identify_to_peers,
+        )
+
+        try:
+            await push_identify_to_peers(self)
+        except Exception:
+            pass  # Best-effort push; don't crash the host
 
     def _should_identify_peer(self, peer_id: ID) -> bool:
+        """
+        True if we can run outbound Identify on the first connection to this peer.
+
+        Any stream muxer registered with the swarm (TCP/yamux, QUIC, WebSocket,
+        etc.) qualifies; go-libp2p runs Identify on every ``Connected`` conn.
+        """
         connection = self._get_first_connection(peer_id)
         if connection is None:
             return False
+        if connection.is_closed:
+            return False
         muxed_conn = getattr(connection, "muxed_conn", None)
-        return self._is_quic_muxer(muxed_conn)
+        if muxed_conn is None:
+            return False
+        return not muxed_conn.is_closed
+
+    def get_connection_health(self, peer_id: ID) -> dict[str, Any]:
+        """
+        Get health summary for peer connections.
+        Delegates to the network layer if health monitoring is available.
+        """
+        if hasattr(self._network, "get_peer_health_summary"):
+            return self._network.get_peer_health_summary(peer_id)
+        return {}
+
+    def get_network_health_summary(self) -> dict[str, Any]:
+        """
+        Get overall network health summary.
+        Delegates to the network layer if health monitoring is available.
+        """
+        if hasattr(self._network, "get_global_health_summary"):
+            return self._network.get_global_health_summary()
+        return {}
+
+    def export_health_metrics(self, format: str = "json") -> str:
+        """
+        Export health metrics in specified format.
+        Delegates to the network layer if health monitoring is available.
+        """
+        if hasattr(self._network, "export_health_metrics"):
+            return self._network.export_health_metrics(format)
+        return "{}" if format == "json" else ""
+
+    async def get_health_monitor_status(self) -> dict[str, Any]:
+        """
+        Get status information about the health monitoring service.
+        Delegates to the network layer if health monitoring is available.
+        """
+        if hasattr(self._network, "get_health_monitor_status"):
+            return await self._network.get_health_monitor_status()
+        return {"enabled": False}
 
     # Reference: `BasicHost.newStreamHandler` in Go.
     async def _swarm_stream_handler(self, net_stream: INetStream) -> None:

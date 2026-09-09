@@ -23,7 +23,6 @@ import trio
 
 from libp2p.abc import IRawConnection
 from libp2p.io.exceptions import ConnectionClosedError
-from libp2p.network.connection.exceptions import RawConnError
 from libp2p.network.connection.raw_connection import RawConnection
 from libp2p.tools.constants import LISTEN_MADDR
 from libp2p.transport.tcp.tcp import TCP
@@ -52,8 +51,8 @@ def _force_reset(conn: IRawConnection) -> None:
 async def test_read_after_abrupt_reset_raises_error() -> None:
     """
     When the remote side sends a TCP RST (abrupt reset), a subsequent read()
-    on the local side must raise ``RawConnError`` wrapping
-    ``ConnectionClosedError``, NOT silently return b"".
+    on the local side must raise ``ConnectionClosedError``, NOT silently
+    return b"".
     """
     async with trio.open_nursery() as nursery:
         local_conn: IRawConnection | None = None
@@ -68,7 +67,7 @@ async def test_read_after_abrupt_reset_raises_error() -> None:
 
         transport = TCP()
         listener = transport.create_listener(on_accept)
-        await listener.listen(LISTEN_MADDR, nursery)
+        await listener.listen(LISTEN_MADDR)
         local_conn = await transport.dial(listener.get_addrs()[0])
         await ready.wait()
 
@@ -82,16 +81,14 @@ async def test_read_after_abrupt_reset_raises_error() -> None:
         await trio.sleep(0.05)
 
         # Reading from the local side should raise, not return b""
-        with pytest.raises(RawConnError) as exc_info:
+        with pytest.raises(ConnectionClosedError) as exc_info:
             await local_conn.read(1024)
 
-        cause = exc_info.value.__cause__
-        assert isinstance(cause, ConnectionClosedError)
-        assert cause.transport == "tcp"
-        logger.info(
-            "read() raised RawConnError -> ConnectionClosedError on RST: %s", cause
-        )
+        exc = exc_info.value
+        assert exc.transport == "tcp"
+        logger.info("read() raised ConnectionClosedError on RST: %s", exc)
 
+        await listener.close()
         nursery.cancel_scope.cancel()
 
 
@@ -99,7 +96,7 @@ async def test_read_after_abrupt_reset_raises_error() -> None:
 async def test_write_after_abrupt_reset_raises_error() -> None:
     """
     When the remote side sends a TCP RST, a subsequent write() on the local
-    side must raise ``RawConnError`` wrapping ``ConnectionClosedError``.
+    side must raise ``ConnectionClosedError``.
     """
     async with trio.open_nursery() as nursery:
         local_conn: IRawConnection | None = None
@@ -114,7 +111,7 @@ async def test_write_after_abrupt_reset_raises_error() -> None:
 
         transport = TCP()
         listener = transport.create_listener(on_accept)
-        await listener.listen(LISTEN_MADDR, nursery)
+        await listener.listen(LISTEN_MADDR)
         local_conn = await transport.dial(listener.get_addrs()[0])
         await ready.wait()
 
@@ -130,18 +127,16 @@ async def test_write_after_abrupt_reset_raises_error() -> None:
         # Write until the broken-pipe / reset is detected.
         # The first write may succeed (kernel buffers it), but subsequent
         # writes will fail because the peer sent RST.
-        with pytest.raises(RawConnError) as exc_info:
+        with pytest.raises(ConnectionClosedError) as exc_info:
             for _ in range(100):
                 await local_conn.write(b"x" * 4096)
                 await trio.sleep(0.01)
 
-        cause = exc_info.value.__cause__
-        assert isinstance(cause, ConnectionClosedError)
-        assert cause.transport == "tcp"
-        logger.info(
-            "write() raised RawConnError -> ConnectionClosedError on RST: %s", cause
-        )
+        exc = exc_info.value
+        assert exc.transport == "tcp"
+        logger.info("write() raised ConnectionClosedError on RST: %s", exc)
 
+        await listener.close()
         nursery.cancel_scope.cancel()
 
 
@@ -164,7 +159,7 @@ async def test_graceful_close_read_returns_eof() -> None:
 
         transport = TCP()
         listener = transport.create_listener(on_accept)
-        await listener.listen(LISTEN_MADDR, nursery)
+        await listener.listen(LISTEN_MADDR)
         local_conn = await transport.dial(listener.get_addrs()[0])
         await ready.wait()
 
@@ -179,6 +174,7 @@ async def test_graceful_close_read_returns_eof() -> None:
         assert data == b""
         logger.info("Graceful close correctly returned EOF (b'')")
 
+        await listener.close()
         nursery.cancel_scope.cancel()
 
 
@@ -201,7 +197,7 @@ async def test_normal_data_transfer_works() -> None:
 
         transport = TCP()
         listener = transport.create_listener(on_accept)
-        await listener.listen(LISTEN_MADDR, nursery)
+        await listener.listen(LISTEN_MADDR)
         local_conn = await transport.dial(listener.get_addrs()[0])
         await ready.wait()
 
@@ -218,4 +214,5 @@ async def test_normal_data_transfer_works() -> None:
 
         logger.info("Normal data transfer works as expected")
 
+        await listener.close()
         nursery.cancel_scope.cancel()

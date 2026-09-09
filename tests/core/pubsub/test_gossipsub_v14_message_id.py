@@ -12,7 +12,6 @@ import base64
 import hashlib
 
 import pytest
-import trio
 
 from libp2p.pubsub.gossipsub import (
     PROTOCOL_ID_V14,
@@ -29,6 +28,7 @@ from libp2p.pubsub.pubsub import (
 )
 from libp2p.tools.utils import connect
 from tests.utils.factories import PubsubFactory
+from tests.utils.pubsub.wait import wait_for_pubsub_payload
 
 
 def create_test_message() -> rpc_pb2.Message:
@@ -162,24 +162,29 @@ async def test_pubsub_with_message_id_generator():
     async with PubsubFactory.create_batch_with_gossipsub(
         2, protocols=[PROTOCOL_ID_V14], msg_id_constructor=generator
     ) as pubsubs:
+        peer0_id = pubsubs[0].host.get_id()
+        peer1_id = pubsubs[1].host.get_id()
+
         # Connect peers
         await connect(pubsubs[0].host, pubsubs[1].host)
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(peer1_id, timeout=10)
+        await pubsubs[1].wait_for_peer(peer0_id, timeout=10)
 
         # Subscribe to topic
         topic = "generator-test"
         queue1 = await pubsubs[1].subscribe(topic)
         await pubsubs[0].subscribe(topic)
-        await trio.sleep(1.0)
+        await pubsubs[0].wait_for_subscription(peer1_id, topic, timeout=10)
+        await pubsubs[1].wait_for_subscription(peer0_id, topic, timeout=10)
+        await pubsubs[0].wait_for_mesh(peer1_id, topic, timeout=10)
+        await pubsubs[1].wait_for_mesh(peer0_id, topic, timeout=10)
 
         # Publish message
         test_data = b"test message for generator"
         await pubsubs[0].publish(topic, test_data)
-        await trio.sleep(0.5)
 
         # Verify message was received
-        msg = await queue1.get()
-        assert msg.data == test_data
+        await wait_for_pubsub_payload(queue1, test_data, timeout=10.0)
 
 
 @pytest.mark.trio
@@ -192,24 +197,29 @@ async def test_pubsub_with_callable_msg_id():
     async with PubsubFactory.create_batch_with_gossipsub(
         2, protocols=[PROTOCOL_ID_V14], msg_id_constructor=custom_msg_id
     ) as pubsubs:
+        peer0_id = pubsubs[0].host.get_id()
+        peer1_id = pubsubs[1].host.get_id()
+
         # Connect peers
         await connect(pubsubs[0].host, pubsubs[1].host)
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(peer1_id, timeout=10)
+        await pubsubs[1].wait_for_peer(peer0_id, timeout=10)
 
         # Subscribe to topic
         topic = "callable-test"
         queue1 = await pubsubs[1].subscribe(topic)
         await pubsubs[0].subscribe(topic)
-        await trio.sleep(1.0)
+        await pubsubs[0].wait_for_subscription(peer1_id, topic, timeout=10)
+        await pubsubs[1].wait_for_subscription(peer0_id, topic, timeout=10)
+        await pubsubs[0].wait_for_mesh(peer1_id, topic, timeout=10)
+        await pubsubs[1].wait_for_mesh(peer0_id, topic, timeout=10)
 
         # Publish message
         test_data = b"test message for callable"
         await pubsubs[0].publish(topic, test_data)
-        await trio.sleep(0.5)
 
         # Verify message was received
-        msg = await queue1.get()
-        assert msg.data == test_data
+        await wait_for_pubsub_payload(queue1, test_data, timeout=10.0)
 
 
 @pytest.mark.trio
@@ -278,25 +288,30 @@ async def test_message_id_deduplication():
     async with PubsubFactory.create_batch_with_gossipsub(
         2, protocols=[PROTOCOL_ID_V14], msg_id_constructor=content_gen
     ) as pubsubs:
+        peer0_id = pubsubs[0].host.get_id()
+        peer1_id = pubsubs[1].host.get_id()
+
         # Connect peers
         await connect(pubsubs[0].host, pubsubs[1].host)
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(peer1_id, timeout=10)
+        await pubsubs[1].wait_for_peer(peer0_id, timeout=10)
 
         # Subscribe to topic
         topic = "dedup-test"
         queue1 = await pubsubs[1].subscribe(topic)
         await pubsubs[0].subscribe(topic)
-        await trio.sleep(1.0)
+        await pubsubs[0].wait_for_subscription(peer1_id, topic, timeout=10)
+        await pubsubs[1].wait_for_subscription(peer0_id, topic, timeout=10)
+        await pubsubs[0].wait_for_mesh(peer1_id, topic, timeout=10)
+        await pubsubs[1].wait_for_mesh(peer0_id, topic, timeout=10)
 
         # Publish same message twice
         test_data = b"duplicate message"
         await pubsubs[0].publish(topic, test_data)
         await pubsubs[0].publish(topic, test_data)
-        await trio.sleep(0.5)
 
         # With content-addressed IDs, should receive at least one message
-        msg = await queue1.get()
-        assert msg.data == test_data
+        await wait_for_pubsub_payload(queue1, test_data, timeout=10.0)
         # Note: Exact deduplication behavior depends on implementation details
 
 
