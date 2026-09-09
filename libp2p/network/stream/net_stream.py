@@ -1,3 +1,4 @@
+from collections.abc import Awaitable, Callable
 from enum import (
     Enum,
     auto,
@@ -6,6 +7,7 @@ import logging
 from typing import (
     TYPE_CHECKING,
     Any,
+    cast,
 )
 
 import trio
@@ -333,7 +335,17 @@ class NetStream(INetStream):
                     "Cannot close write on stream; stream is in error state"
                 )
 
-        await self.muxed_stream.close()
+        # Yamux/Mplex ``close()`` is already a write half-close (sends FIN and
+        # keeps the read side open). QUICStream.close() closes BOTH directions,
+        # which would make a subsequent read return EOF immediately (e.g. the
+        # perf protocol: client half-closes after its request and then reads the
+        # server's reply). Prefer a dedicated ``close_write()`` when the muxed
+        # stream provides one.
+        close_write = getattr(self.muxed_stream, "close_write", None)
+        if callable(close_write):
+            await cast(Callable[[], Awaitable[None]], close_write)()
+        else:
+            await self.muxed_stream.close()
 
         async with self._state_lock:
             if self._state == StreamState.OPEN:

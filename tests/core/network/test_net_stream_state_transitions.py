@@ -111,3 +111,62 @@ async def test_state_transition_lifecycle(mock_stream):
     await mock_stream.set_state(StreamState.CLOSE_BOTH)
     assert await mock_stream.state == StreamState.CLOSE_BOTH
     assert await mock_stream.is_operational() is False
+
+
+class HalfCloseMuxedStream(MockMuxedStream):
+    """Muxed stream exposing a dedicated write half-close (like QUICStream)."""
+
+    def __init__(self):
+        super().__init__()
+        self.close_calls = 0
+        self.close_write_calls = 0
+
+    async def close(self) -> None:
+        self.close_calls += 1
+
+    async def close_write(self) -> None:
+        self.close_write_calls += 1
+
+
+class FullCloseOnlyMuxedStream(MockMuxedStream):
+    """Muxed stream whose close() is already a half-close (Yamux/Mplex)."""
+
+    def __init__(self):
+        super().__init__()
+        self.close_calls = 0
+
+    async def close(self) -> None:
+        self.close_calls += 1
+
+
+@pytest.mark.trio
+async def test_close_write_prefers_muxed_close_write():
+    """
+    close_write() must not close the read side when the muxer can half-close.
+
+    QUICStream.close() closes both directions; calling it for a write
+    half-close makes the next read return EOF immediately (perf download
+    received 0 bytes).
+    """
+    muxed = HalfCloseMuxedStream()
+    stream = NetStream(muxed, None, None)
+    await stream.set_state(StreamState.OPEN)
+
+    await stream.close_write()
+
+    assert muxed.close_write_calls == 1
+    assert muxed.close_calls == 0
+    assert await stream.state == StreamState.CLOSE_WRITE
+
+
+@pytest.mark.trio
+async def test_close_write_falls_back_to_close():
+    """Yamux/Mplex only expose close(), which is already a write half-close."""
+    muxed = FullCloseOnlyMuxedStream()
+    stream = NetStream(muxed, None, None)
+    await stream.set_state(StreamState.OPEN)
+
+    await stream.close_write()
+
+    assert muxed.close_calls == 1
+    assert await stream.state == StreamState.CLOSE_WRITE

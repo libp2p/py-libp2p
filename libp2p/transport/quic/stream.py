@@ -290,6 +290,12 @@ class QUICStream(IMuxedStream):
         except QUICStreamResetError:
             # Stream was reset while reading
             raise
+        except _QUICStreamEOF:
+            # Peer half-closed (FIN) while we were waiting for data. This is a
+            # normal end-of-stream, not a stream error: resetting here would
+            # tear down our own write side, which the peer may still be
+            # reading (e.g. perf: client sends request + FIN, then reads reply).
+            raise
         except Exception as e:
             logger.error(f"Error reading from stream {self.stream_id}: {e}")
             await self._handle_stream_error(e)
@@ -336,6 +342,23 @@ class QUICStream(IMuxedStream):
             if "unknown peer-initiated stream" in str(e):
                 raise QUICStreamClosedError(
                     f"Stream {self.stream_id} was already closed in QUIC layer"
+                ) from e
+            logger.error(f"Error writing to stream {self.stream_id}: {e}")
+            await self._handle_stream_error(e)
+            raise
+        except AssertionError as e:
+            # aioquic asserts on "cannot call write() after FIN" / "after reset()".
+            # Our write side is already closed; surface that as a closed-stream
+            # error instead of resetting the stream (which would also kill the
+            # peer's still-open read side).
+            msg = str(e)
+            if "after FIN" in msg or "after reset" in msg:
+                self._write_closed = True
+                logger.debug(
+                    f"Write on stream {self.stream_id} after local FIN/reset: {e}"
+                )
+                raise QUICStreamClosedError(
+                    f"Stream {self.stream_id} write side is closed"
                 ) from e
             logger.error(f"Error writing to stream {self.stream_id}: {e}")
             await self._handle_stream_error(e)
