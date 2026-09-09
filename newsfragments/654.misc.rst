@@ -1,0 +1,1 @@
+Raise minimum versions for pycryptodome (>=3.19.1, GHSA-j225-cvw7-qrx7) and pynacl (>=1.6.2, GHSA-mrfv-m5wm-5w6w); coincurve remains pinned at 21.0.0.

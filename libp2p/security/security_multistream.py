@@ -19,16 +19,17 @@ from libp2p.peer.id import (
     ID,
 )
 from libp2p.protocol_muxer.exceptions import (
+    MultiselectClientError,
     MultiselectError,
+)
+from libp2p.protocol_muxer.generic_selector import (
+    GenericMultistreamSelector,
 )
 from libp2p.protocol_muxer.multiselect import (
     Multiselect,
 )
 from libp2p.protocol_muxer.multiselect_client import (
     MultiselectClient,
-)
-from libp2p.protocol_muxer.multiselect_communicator import (
-    MultiselectCommunicator,
 )
 
 logger = logging.getLogger(__name__)
@@ -48,17 +49,25 @@ class SecurityMultistream(ABC):
     Go implementation: github.com/libp2p/go-conn-security-multistream/ssms.go
     """
 
-    transports: "OrderedDict[TProtocol, ISecureTransport]"
-    multiselect: Multiselect
-    multiselect_client: MultiselectClient
+    _selector: "GenericMultistreamSelector[ISecureTransport]"
 
     def __init__(self, secure_transports_by_protocol: TSecurityOptions) -> None:
-        self.transports = OrderedDict()
-        self.multiselect = Multiselect()
-        self.multiselect_client = MultiselectClient()
+        self._selector = GenericMultistreamSelector()
 
         for protocol, transport in secure_transports_by_protocol.items():
             self.add_transport(protocol, transport)
+
+    @property
+    def transports(self) -> "OrderedDict[TProtocol, ISecureTransport]":
+        return self._selector.handlers
+
+    @property
+    def multiselect(self) -> Multiselect:
+        return self._selector.multiselect
+
+    @property
+    def multiselect_client(self) -> MultiselectClient:
+        return self._selector.multiselect_client
 
     def add_transport(self, protocol: TProtocol, transport: ISecureTransport) -> None:
         """
@@ -69,12 +78,7 @@ class SecurityMultistream(ABC):
         :param protocol: the protocol name, which is negotiated in multiselect.
         :param transport: the corresponding transportation to the ``protocol``.
         """
-        # If protocol is already added before, remove it and add it again.
-        self.transports.pop(protocol, None)
-        self.transports[protocol] = transport
-        # Note: None is added as the handler for the given protocol since
-        # we only care about selecting the protocol, not any handler function
-        self.multiselect.add_handler(protocol, None)
+        self._selector.add_handler(protocol, transport)
 
     async def secure_inbound(self, conn: IRawConnection) -> ISecureConn:
         """
@@ -85,22 +89,40 @@ class SecurityMultistream(ABC):
         :return: secure connection object (that implements secure_conn_interface)
         """
         logger.debug("SecurityMultistream.secure_inbound: selecting transport")
-        transport = await self.select_transport(conn, False)
+        protocol, transport = await self.select_transport_and_protocol(conn, False)
         logger.debug("SecurityMultistream: transport selected, securing")
         secure_conn = await transport.secure_inbound(conn)
+        setattr(secure_conn, "negotiated_security_protocol", str(protocol))
         logger.debug("SecurityMultistream: secure connection established")
         return secure_conn
 
     async def secure_outbound(self, conn: IRawConnection, peer_id: ID) -> ISecureConn:
         """
         Secure the connection, either locally or by communicating with opposing
-        node via conn, for an inbound connection (i.e. we are the initiator)
+        node via conn, for an outbound connection (i.e. we are the initiator)
 
         :return: secure connection object (that implements secure_conn_interface)
         """
-        transport = await self.select_transport(conn, True)
+        protocol, transport = await self.select_transport_and_protocol(conn, True)
         secure_conn = await transport.secure_outbound(conn, peer_id)
+        setattr(secure_conn, "negotiated_security_protocol", str(protocol))
         return secure_conn
+
+    async def select_transport_and_protocol(
+        self,
+        conn: IRawConnection,
+        is_initiator: bool,
+    ) -> tuple[TProtocol, ISecureTransport]:
+        """
+        Select a transport and return both the negotiated protocol id and transport.
+        """
+        try:
+            protocol, transport = await self._selector.select(conn, is_initiator)
+        except (MultiselectError, MultiselectClientError) as error:
+            raise MultiselectError(
+                "Failed to negotiate a security protocol: no protocol selected"
+            ) from error
+        return protocol, transport
 
     async def select_transport(
         self, conn: IRawConnection, is_initiator: bool
@@ -113,19 +135,5 @@ class SecurityMultistream(ABC):
         :param is_initiator: true if we are the initiator, false otherwise
         :return: selected secure transport
         """
-        protocol: TProtocol | None
-        communicator = MultiselectCommunicator(conn)
-        if is_initiator:
-            # Select protocol if initiator
-            protocol = await self.multiselect_client.select_one_of(
-                list(self.transports.keys()), communicator
-            )
-        else:
-            # Select protocol if non-initiator
-            protocol, _ = await self.multiselect.negotiate(communicator)
-        if protocol is None:
-            raise MultiselectError(
-                "Failed to negotiate a security protocol: no protocol selected"
-            )
-        # Return transport from protocol
-        return self.transports[protocol]
+        _, transport = await self.select_transport_and_protocol(conn, is_initiator)
+        return transport

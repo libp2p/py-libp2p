@@ -250,8 +250,10 @@ async def test_identify_push_multiple_peers_integration(security_protocol):
             # Wait a bit for the push to complete
             await trio.sleep(0.1)
 
-            # Check that host_a's peerstore has not been updated with host_c's info
-            assert host_c.get_id() not in host_a.get_peerstore().peer_ids()
+            # push_identify_to_peers only streams to connected peers; after c↔a
+            # disconnect, host_a must not be a push target. (host_a may still list
+            # host_c in peerstore from earlier Identify when c dialed in.)
+            assert host_a.get_id() not in host_c.get_connected_peers()
             # Check that host_b's peerstore has been updated with host_c's info
             assert host_c.get_id() in host_b.get_peerstore().peer_ids()
 

@@ -1,7 +1,10 @@
+from unittest.mock import Mock
+
 import pytest
+from multiaddr import Multiaddr
 import trio
 
-from libp2p.abc import ISecureConn
+from libp2p.abc import ConnectionType, ISecureConn
 from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.peer.id import ID
 from libp2p.stream_muxer.exceptions import (
@@ -36,7 +39,7 @@ class DummySecuredConn(ISecureConn):
     async def close(self) -> None:
         pass
 
-    def get_remote_address(self):
+    def get_remote_address(self) -> tuple[str, int] | None:
         return None
 
     def get_local_address(self):
@@ -46,13 +49,33 @@ class DummySecuredConn(ISecureConn):
         return ID(b"local")
 
     def get_local_private_key(self) -> PrivateKey:
-        return PrivateKey()  # Dummy key
+        return Mock(spec=PrivateKey)  # Dummy key
 
     def get_remote_peer(self) -> ID:
         return ID(b"remote")
 
     def get_remote_public_key(self) -> PublicKey:
-        return PublicKey()  # Dummy key
+        return Mock(spec=PublicKey)  # Dummy key
+
+    def get_transport_addresses(self) -> list[Multiaddr]:
+        """Mock implementation of get_transport_addresses."""
+        return []
+
+    def get_connection_type(self) -> ConnectionType:
+        """Mock implementation of get_connection_type."""
+        return ConnectionType.DIRECT
+
+
+class DummySecuredConnWithRemote(DummySecuredConn):
+    """Secured conn stub that reports a fixed transport remote endpoint."""
+
+    def get_remote_address(self) -> tuple[str, int] | None:
+        return ("203.0.113.7", 4001)
+
+
+def test_yamux_mux_get_remote_address_delegates_to_secured_conn() -> None:
+    mux = Yamux(DummySecuredConnWithRemote(), DUMMY_PEER_ID)
+    assert mux.get_remote_address() == ("203.0.113.7", 4001)
 
 
 class MockMuxedConn:

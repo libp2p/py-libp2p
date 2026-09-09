@@ -1,4 +1,5 @@
 import logging
+import time
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -8,6 +9,7 @@ from multiaddr import Multiaddr
 import trio
 
 from libp2p.abc import (
+    ConnectionType,
     IMuxedConn,
     IMuxedStream,
     INetConn,
@@ -20,6 +22,8 @@ from libp2p.rcmgr import Direction
 from libp2p.stream_muxer.exceptions import (
     MuxedConnUnavailable,
 )
+from libp2p.stream_muxer.mplex.mplex import MPLEX_PROTOCOL_ID
+from libp2p.stream_muxer.yamux.yamux import PROTOCOL_ID as YAMUX_PROTOCOL_ID
 
 if TYPE_CHECKING:
     from libp2p.network.swarm import Swarm  # noqa: F401
@@ -37,18 +41,37 @@ class SwarmConn(INetConn):
     streams: set[NetStream]
     event_closed: trio.Event
     _resource_scope: Any | None
+    _direction: Direction
+    _actual_transport_addresses: list[Multiaddr] | None
+    _connection_type: ConnectionType
+    _negotiated_security_protocol: str | None
+    _negotiated_muxer_protocol: str | None
+    _metric_send_channel: trio.MemorySendChannel[Any] | None = None
 
     def __init__(
         self,
         muxed_conn: IMuxedConn,
         swarm: "Swarm",
+        direction: Direction | str = Direction.UNKNOWN,
     ) -> None:
         self.muxed_conn = muxed_conn
         self.swarm = swarm
         self.streams = set()
         self.event_closed = trio.Event()
         self.event_started = trio.Event()
+        # Track connection creation time for pruning
+        self._created_at = time.time()
         self._resource_scope = None
+        # Track connection direction (inbound/outbound)
+        # Support both Direction enum and string for backward compatibility
+        if isinstance(direction, Direction):
+            self._direction = direction
+        else:
+            self._direction = Direction.from_string(str(direction))
+        self._actual_transport_addresses = None
+        self._connection_type = ConnectionType.UNKNOWN
+        self._negotiated_security_protocol = None
+        self._negotiated_muxer_protocol = None
         # Provide back-references/hooks expected by NetStream
         try:
             setattr(self.muxed_conn, "swarm", self.swarm)
@@ -64,21 +87,48 @@ class SwarmConn(INetConn):
                 f"for peer {muxed_conn.peer_id}: {e}"
             )
             # optional conveniences
-        if hasattr(muxed_conn, "on_close"):
+        # Attach close hook if possible; tolerate implementations without it
+        try:
             logging.debug(f"Setting on_close for peer {muxed_conn.peer_id}")
             setattr(muxed_conn, "on_close", self._on_muxed_conn_closed)
-        else:
-            # If on_close doesn't exist, create it. This ensures compatibility
-            # with muxer implementations that don't have on_close support.
-            logging.debug(
-                f"muxed_conn for peer {muxed_conn.peer_id} has no on_close attribute, "
-                "creating it"
+        except Exception as e:
+            logging.warning(
+                f"Could not attach on_close hook for peer {muxed_conn.peer_id}: {e}"
             )
-            setattr(muxed_conn, "on_close", self._on_muxed_conn_closed)
+            # The muxed_conn doesn't support on_close; this is acceptable
 
     def set_resource_scope(self, scope: Any) -> None:
         """Set the resource scope for this connection."""
         self._resource_scope = scope
+
+    @property
+    def direction(self) -> Direction:
+        """
+        Get the connection direction.
+
+        Returns
+        -------
+        Direction
+            INBOUND if we accepted the connection, OUTBOUND if we initiated it.
+
+        """
+        return self._direction
+
+    @direction.setter
+    def direction(self, value: Direction | str) -> None:
+        """
+        Set the connection direction.
+
+        Parameters
+        ----------
+        value : Direction | str
+            The direction value (enum or string).
+
+        """
+        if isinstance(value, Direction):
+            self._direction = value
+        else:
+            self._direction = Direction.from_string(str(value))
 
     @property
     def is_closed(self) -> bool:
@@ -102,10 +152,22 @@ class SwarmConn(INetConn):
         if self._resource_scope is not None:
             try:
                 # Release the resource scope
+                import inspect
+
                 if hasattr(self._resource_scope, "close"):
-                    self._resource_scope.close()
+                    close_method = getattr(self._resource_scope, "close")
+                    # Check if close() is a coroutine
+                    if inspect.iscoroutinefunction(close_method):
+                        await close_method()
+                    else:
+                        # Synchronous close
+                        close_method()
                 elif hasattr(self._resource_scope, "release"):
-                    self._resource_scope.release()
+                    release_method = getattr(self._resource_scope, "release")
+                    if inspect.iscoroutinefunction(release_method):
+                        await release_method()
+                    else:
+                        release_method()
                 logging.debug(
                     f"Released resource scope for peer {self.muxed_conn.peer_id}"
                 )
@@ -114,11 +176,15 @@ class SwarmConn(INetConn):
             finally:
                 self._resource_scope = None
 
-        # Close the muxed connection
-        try:
-            await self.muxed_conn.close()
-        except Exception as e:
-            logging.warning(f"Error while closing muxed connection: {e}")
+        # Close the muxed connection — UNLESS this SwarmConn is a duplicate
+        # wrapper that shares its muxed connection with another SwarmConn
+        # (marked by Swarm.add_conn deduplication).  Closing a shared muxed
+        # connection would tear down the live connection we kept (Bug 3).
+        if not getattr(self, "_shared_muxed_conn", False):
+            try:
+                await self.muxed_conn.close()
+            except Exception as e:
+                logging.warning(f"Error while closing muxed connection: {e}")
 
         # Perform proper cleanup of resources
         await self._cleanup()
@@ -128,13 +194,15 @@ class SwarmConn(INetConn):
         logging.debug(f"Removing connection for peer {self.muxed_conn.peer_id}")
         self.swarm.remove_conn(self)
 
-        # Only close the connection if it's not already closed
-        # Be defensive here to avoid exceptions during cleanup
-        try:
-            if not self.muxed_conn.is_closed:
-                await self.muxed_conn.close()
-        except Exception as e:
-            logging.warning(f"Error closing muxed connection: {e}")
+        # Only close the connection if it's not already closed and not shared
+        # with another SwarmConn (dedup duplicate).  Be defensive here to avoid
+        # exceptions during cleanup.
+        if not getattr(self, "_shared_muxed_conn", False):
+            try:
+                if not self.muxed_conn.is_closed:
+                    await self.muxed_conn.close()
+            except Exception as e:
+                logging.warning(f"Error closing muxed connection: {e}")
 
         # This is just for cleaning up state. The connection has already been closed.
         # We *could* optimize this but it really isn't worth it.
@@ -156,17 +224,60 @@ class SwarmConn(INetConn):
     async def _handle_new_streams(self) -> None:
         self.event_started.set()
         async with trio.open_nursery() as nursery:
-            while True:
+            # Also exit the loop once this SwarmConn has been closed — this
+            # lets a duplicate (shared-muxed-conn) wrapper stop promptly
+            # instead of accepting streams into a dead connection.
+            while not self.event_closed.is_set():
                 try:
                     stream = await self.muxed_conn.accept_stream()
-                except MuxedConnUnavailable:
+                except MuxedConnUnavailable as e:
+                    from libp2p.utils.connection_shutdown import (
+                        log_expected_connection_shutdown,
+                    )
+
+                    log_expected_connection_shutdown(
+                        component="SwarmConn.accept_stream",
+                        peer_id=self.muxed_conn.peer_id,
+                        direction="remote",
+                        exc=e,
+                    )
                     await self.close()
+                    break
+                except Exception as e:
+                    from libp2p.utils.connection_shutdown import (
+                        is_expected_connection_shutdown,
+                        log_expected_connection_shutdown,
+                    )
+
+                    if is_expected_connection_shutdown(e):
+                        log_expected_connection_shutdown(
+                            component="SwarmConn.accept_stream",
+                            peer_id=self.muxed_conn.peer_id,
+                            direction="remote",
+                            exc=e,
+                        )
+                    else:
+                        logging.debug(
+                            f"Connection closed for peer {self.muxed_conn.peer_id}: {e}"
+                        )
+                    await self.close()
+                    break
+                # The connection may have been closed while we were waiting
+                # for a stream — drop the stream instead of handling it.
+                if self.event_closed.is_set():
                     break
                 # Asynchronously handle the accepted stream, to avoid blocking
                 # the next stream.
                 nursery.start_soon(self._handle_muxed_stream, stream)
 
     async def _handle_muxed_stream(self, muxed_stream: IMuxedStream) -> None:
+        # Acquire semaphore slot for inbound stream (queues if at capacity)
+        semaphore = getattr(self.swarm, "_stream_semaphore", None)
+        semaphore_acquired = False
+        if semaphore is not None:
+            await semaphore.acquire()
+            semaphore_acquired = True
+
         # Acquire inbound stream resource if a manager is configured
         rm = getattr(self.swarm, "_resource_manager", None)
         peer_id_str = str(getattr(self.muxed_conn, "peer_id", ""))
@@ -178,6 +289,9 @@ class SwarmConn(INetConn):
                 acquired = False
 
         if rm is not None and not acquired:
+            # Release semaphore since we're rejecting this stream
+            if semaphore_acquired and semaphore is not None:
+                semaphore.release()
             # Deny stream: best-effort reset/close
             try:
                 await muxed_stream.reset()  # type: ignore[attr-defined]
@@ -189,22 +303,19 @@ class SwarmConn(INetConn):
             return
 
         net_stream = await self._add_stream(muxed_stream)
+        # Tag stream with direction so notify_closed_stream releases resources
+        net_stream._direction = Direction.INBOUND
         try:
             await self.swarm.common_stream_handler(net_stream)
         finally:
-            # Always remove the stream when the handler finishes
-            # Use simple remove_stream since stream handles notifications itself
+            # Safety net: ensure stream is removed from connection tracking
             self.remove_stream(net_stream)
-            # Release inbound stream resource
-            if rm is not None and acquired:
-                try:
-                    rm.release_stream(peer_id_str, Direction.INBOUND)
-                except Exception:
-                    pass
+            # Release resources via notify_closed_stream (idempotent guard)
+            if not net_stream._resource_released:
+                await self.swarm.notify_closed_stream(net_stream)
 
     async def _add_stream(self, muxed_stream: IMuxedStream) -> NetStream:
-        #
-        net_stream = NetStream(muxed_stream, self)
+        net_stream = NetStream(muxed_stream, self, self._metric_send_channel)
         # Set Stream state to OPEN if the event has already started.
         # This is to ensure that the new streams created after connection has started
         # are immediately set to OPEN state.
@@ -233,7 +344,10 @@ class SwarmConn(INetConn):
 
     def get_transport_addresses(self) -> list[Multiaddr]:
         """
-        Retrieve the transport addresses used by this connection.
+        Retrieve the actual transport addresses used by this connection.
+
+        Returns the real IP/port addresses, not peerstore addresses.
+        For relayed connections, should include /p2p-circuit in the path.
 
         Returns
         -------
@@ -241,13 +355,118 @@ class SwarmConn(INetConn):
             A list of multiaddresses used by the transport.
 
         """
-        # Return the addresses from the peerstore for this peer
+        if self._actual_transport_addresses is not None:
+            return self._actual_transport_addresses
+        # Fallback to peerstore addresses if not set
         try:
             peer_id = self.muxed_conn.peer_id
             return self.swarm.peerstore.addrs(peer_id)
         except Exception as e:
             logging.warning(f"Error getting transport addresses: {e}")
             return []
+
+    def get_connection_type(self) -> ConnectionType:
+        """
+        Get the type of connection (direct, relayed, etc.)
+        """
+        return self._connection_type
+
+    def set_transport_info(
+        self, addresses: list[Multiaddr], conn_type: ConnectionType
+    ) -> None:
+        """
+        Set the actual transport addresses and connection type.
+
+        This should be called during connection establishment with the real
+        transport information.
+        """
+        self._actual_transport_addresses = addresses
+        self._connection_type = conn_type
+
+    def set_negotiated_protocols(
+        self,
+        security_protocol: str | None,
+        muxer_protocol: str | None,
+    ) -> None:
+        self._negotiated_security_protocol = security_protocol
+        self._negotiated_muxer_protocol = muxer_protocol
+
+    def get_negotiated_security_protocol(self) -> str | None:
+        if self._negotiated_security_protocol is not None:
+            return self._negotiated_security_protocol
+
+        for conn in (
+            self.muxed_conn,
+            getattr(self.muxed_conn, "secured_conn", None),
+        ):
+            protocol = getattr(conn, "negotiated_security_protocol", None)
+            if protocol is not None:
+                return str(protocol)
+        return None
+
+    def get_negotiated_muxer_protocol(self) -> str | None:
+        if self._negotiated_muxer_protocol is not None:
+            return self._negotiated_muxer_protocol
+
+        protocol = getattr(self.muxed_conn, "negotiated_muxer_protocol", None)
+        if protocol is not None:
+            return str(protocol)
+
+        muxed_conn_type = type(self.muxed_conn).__name__
+        if muxed_conn_type == "Yamux":
+            return YAMUX_PROTOCOL_ID
+        if muxed_conn_type == "Mplex":
+            return str(MPLEX_PROTOCOL_ID)
+        return None
+
+    def _get_connection_type_metadata(self) -> ConnectionType:
+        if self._connection_type != ConnectionType.UNKNOWN:
+            return self._connection_type
+        try:
+            conn_type = self.muxed_conn.get_connection_type()
+            if conn_type != ConnectionType.UNKNOWN:
+                return conn_type
+        except Exception:
+            pass
+
+        transport_addresses = self.get_transport_addresses()
+        if any("/p2p-circuit" in str(addr) for addr in transport_addresses):
+            return ConnectionType.RELAYED
+        if transport_addresses:
+            return ConnectionType.DIRECT
+        return self._connection_type
+
+    def get_transport_family(self) -> str:
+        for addr in self.get_transport_addresses():
+            addr_text = str(addr)
+            if "/webtransport" in addr_text:
+                return "webtransport"
+            if "/quic-v1" in addr_text:
+                return "quic-v1"
+            if "/wss" in addr_text:
+                return "wss"
+            if "/ws" in addr_text:
+                return "ws"
+            if "/tcp/" in addr_text:
+                return "tcp"
+            if "/udp/" in addr_text:
+                return "udp"
+        return "unknown"
+
+    def get_interop_metadata(self) -> dict[str, Any]:
+        transport_family = self.get_transport_family()
+        muxer_protocol = self.get_negotiated_muxer_protocol()
+        if muxer_protocol is None and transport_family == "quic-v1":
+            muxer_protocol = "n/a"
+        return {
+            "transport_family": transport_family,
+            "transport_addresses": [
+                str(addr) for addr in self.get_transport_addresses()
+            ],
+            "connection_type": self._get_connection_type_metadata().value,
+            "security_protocol": self.get_negotiated_security_protocol(),
+            "muxer_protocol": muxer_protocol,
+        }
 
     def remove_stream(self, stream: NetStream) -> None:
         if stream not in self.streams:

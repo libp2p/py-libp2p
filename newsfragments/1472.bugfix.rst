@@ -1,0 +1,2 @@
+AnyIOManager cancellation now waits on an ``anyio.Event`` instead of busy-polling,
+matching TrioManager so service shutdown is prompt under load (fixes Windows CI flake).

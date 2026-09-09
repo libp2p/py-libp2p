@@ -9,14 +9,17 @@ import trio
 import varint
 
 from libp2p.abc import IHost
+from libp2p.io.exceptions import IncompleteReadError, MessageTooLarge
 from libp2p.peer.id import ID as PeerID
 from libp2p.peer.peerinfo import PeerInfo
+from libp2p.utils.varint import read_varint_prefixed_bytes_limited
 
 from .config import (
     DEFAULT_DISCOVER_LIMIT,
     DEFAULT_TIMEOUT,
     DEFAULT_TTL,
     MAX_DISCOVER_LIMIT,
+    MAX_MESSAGE_SIZE,
     MAX_NAMESPACE_LENGTH,
     MAX_TTL,
     MIN_TTL,
@@ -228,33 +231,20 @@ class RendezvousClient:
 
             # Read response with timeout
             with trio.move_on_after(DEFAULT_TIMEOUT) as cancel_scope:
-                # Read response length
-                length_bytes = b""
-                while True:
-                    b = await stream.read(1)
-                    if not b:
-                        raise RendezvousError(
-                            Message.ResponseStatus.E_INTERNAL_ERROR,
-                            "Connection closed while reading response length",
-                        )
-                    length_bytes += b
-                    if b[0] & 0x80 == 0:
-                        break
-
-                response_length = varint.decode_bytes(length_bytes)
-
-                # Read response data
-                response_bytes = b""
-                remaining = response_length
-                while remaining > 0:
-                    chunk = await stream.read(remaining)
-                    if not chunk:
-                        raise RendezvousError(
-                            Message.ResponseStatus.E_INTERNAL_ERROR,
-                            "Connection closed while reading response data",
-                        )
-                    response_bytes += chunk
-                    remaining -= len(chunk)
+                try:
+                    response_bytes = await read_varint_prefixed_bytes_limited(
+                        stream, MAX_MESSAGE_SIZE
+                    )
+                except MessageTooLarge as e:
+                    raise RendezvousError(
+                        Message.ResponseStatus.E_INTERNAL_ERROR,
+                        f"Response message too large: {e}",
+                    ) from e
+                except IncompleteReadError as e:
+                    raise RendezvousError(
+                        Message.ResponseStatus.E_INTERNAL_ERROR,
+                        "Connection closed while reading response",
+                    ) from e
 
             if cancel_scope.cancelled_caught:
                 raise RendezvousError(

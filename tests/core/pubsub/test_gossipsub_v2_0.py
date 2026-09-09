@@ -14,7 +14,6 @@ import time
 from unittest.mock import Mock
 
 import pytest
-import trio
 
 from libp2p.pubsub.gossipsub import PROTOCOL_ID_V20, GossipSub
 from libp2p.pubsub.pb import rpc_pb2
@@ -517,7 +516,8 @@ class TestMeshMaintenance:
         # Check that a peer was pruned (the exact peer depends on scoring)
         assert len(to_prune) == 1
 
-    def test_peer_replacement_consideration(self):
+    @pytest.mark.trio
+    async def test_peer_replacement_consideration(self):
         """Test consideration of peer replacement in mesh."""
         gossipsub = GossipSub(
             protocols=[PROTOCOL_ID_V20],
@@ -552,8 +552,15 @@ class TestMeshMaintenance:
         gossipsub.supports_scoring = Mock(return_value=True)
         gossipsub._check_back_off = Mock(return_value=False)
 
+        # Mock async methods so replacement can complete
+        async def noop(*args, **kwargs):
+            pass
+
+        gossipsub.emit_prune = Mock(return_value=noop())
+        gossipsub.emit_graft = Mock(return_value=noop())
+
         # Should consider replacement (logged but not actually performed in test)
-        gossipsub._consider_peer_replacement(topic)
+        await gossipsub._consider_peer_replacement(topic)
 
         # Verify scoring was called for mesh peers
         assert score_mock.called
@@ -591,15 +598,29 @@ class TestGossipsubV20Integration:
             # Connect hosts
             from libp2p.tools.utils import connect
 
+            peer0_id = hosts[0].get_id()
+            peer1_id = hosts[1].get_id()
+            peer2_id = hosts[2].get_id()
+
             await connect(hosts[0], hosts[1])
             await connect(hosts[1], hosts[2])
-            await trio.sleep(0.5)
+            await pubsubs[0].wait_for_peer(peer1_id, timeout=10)
+            await pubsubs[1].wait_for_peer(peer0_id, timeout=10)
+            await pubsubs[1].wait_for_peer(peer2_id, timeout=10)
+            await pubsubs[2].wait_for_peer(peer1_id, timeout=10)
 
             # Subscribe to topic
             topic = "gossipsub_v20_test"
             for pubsub in pubsubs:
                 await pubsub.subscribe(topic)
-            await trio.sleep(1.0)
+            await pubsubs[0].wait_for_subscription(peer1_id, topic, timeout=10)
+            await pubsubs[1].wait_for_subscription(peer0_id, topic, timeout=10)
+            await pubsubs[1].wait_for_subscription(peer2_id, topic, timeout=10)
+            await pubsubs[2].wait_for_subscription(peer1_id, topic, timeout=10)
+            await pubsubs[0].wait_for_mesh(peer1_id, topic, timeout=10)
+            await pubsubs[1].wait_for_mesh(peer0_id, topic, timeout=10)
+            await pubsubs[1].wait_for_mesh(peer2_id, topic, timeout=10)
+            await pubsubs[2].wait_for_mesh(peer1_id, topic, timeout=10)
 
             # Verify mesh formation with v2.0 features
             for gsub in gsubs:
@@ -612,7 +633,6 @@ class TestGossipsubV20Integration:
             # Test message publishing with v2.0 security checks
             test_message = b"gossipsub v2.0 test message"
             await pubsubs[0].publish(topic, test_message)
-            await trio.sleep(1.0)
 
     @pytest.mark.trio
     async def test_v20_with_mixed_protocol_versions(self):
@@ -627,6 +647,7 @@ class TestGossipsubV20Integration:
         ) as pubsubs:
             hosts = [ps.host for ps in pubsubs]
             gsubs = [ps.router for ps in pubsubs]
+            peer_ids = [host.get_id() for host in hosts]
 
             # Connect all hosts
             from libp2p.tools.utils import connect
@@ -634,13 +655,25 @@ class TestGossipsubV20Integration:
             for i in range(len(hosts)):
                 for j in range(i + 1, len(hosts)):
                     await connect(hosts[i], hosts[j])
-            await trio.sleep(0.5)
+            for i in range(len(pubsubs)):
+                for j in range(len(pubsubs)):
+                    if i != j:
+                        await pubsubs[i].wait_for_peer(peer_ids[j], timeout=10)
 
             # All subscribe to same topic
             topic = "mixed_version_test"
             for pubsub in pubsubs:
                 await pubsub.subscribe(topic)
-            await trio.sleep(1.0)
+            for i in range(len(pubsubs)):
+                for j in range(len(pubsubs)):
+                    if i != j:
+                        await pubsubs[i].wait_for_subscription(
+                            peer_ids[j], topic, timeout=10
+                        )
+            for i in range(len(pubsubs)):
+                for j in range(len(pubsubs)):
+                    if i != j:
+                        await pubsubs[i].wait_for_mesh(peer_ids[j], topic, timeout=10)
 
             # Verify mesh formation works across versions
             for gsub in gsubs:
@@ -650,4 +683,3 @@ class TestGossipsubV20Integration:
             # Test message propagation across versions
             test_message = b"cross-version message"
             await pubsubs[0].publish(topic, test_message)
-            await trio.sleep(1.0)

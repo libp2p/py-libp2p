@@ -1,5 +1,10 @@
 import io
 
+import multiaddr
+
+from libp2p.connection_types import (
+    ConnectionType,
+)
 from libp2p.crypto.keys import (
     PrivateKey,
     PublicKey,
@@ -45,6 +50,18 @@ class SecureSession(BaseSession):
         """Delegate to the underlying connection's get_remote_address method."""
         return self.conn.get_remote_address()
 
+    def get_transport_addresses(self) -> list[multiaddr.Multiaddr]:
+        """
+        Get transport addresses by delegating to underlying connection.
+        """
+        return self.conn.get_transport_addresses()
+
+    def get_connection_type(self) -> ConnectionType:
+        """
+        Get connection type by delegating to underlying connection.
+        """
+        return self.conn.get_connection_type()
+
     def _reset_internal_buffer(self) -> None:
         self.buf = io.BytesIO()
         self.low_watermark = 0
@@ -77,24 +94,47 @@ class SecureSession(BaseSession):
             return b""
 
         data_from_buffer = self._drain(n)
-        if len(data_from_buffer) > 0:
+        if n is None and len(data_from_buffer) > 0:
             return data_from_buffer
 
-        msg = await self.conn.read_msg()
-
-        # If underlying connection returned empty bytes, treat as closed
-        # and raise to signal that reads after close are invalid.
-        if msg == b"":
-            raise Exception("Connection closed")
-
         if n is None:
+            msg = await self.conn.read_msg()
+
+            # If underlying connection returned empty bytes, treat as closed
+            # and raise to signal that reads after close are invalid.
+            if msg == b"":
+                raise Exception("Connection closed")
+
             return msg
 
-        if n < len(msg):
-            self._fill(msg)
-            return self._drain(n)
-        else:
-            return msg
+        if len(data_from_buffer) == n:
+            return data_from_buffer
+
+        result = bytearray(data_from_buffer)
+        while len(result) < n:
+            needed = n - len(result)
+            drained = self._drain(needed)
+            if drained:
+                result.extend(drained)
+                continue
+
+            msg = await self.conn.read_msg()
+
+            # If the connection closes after a partial read, return the bytes
+            # we already assembled. This preserves the stream-read behavior
+            # expected by higher layers.
+            if msg == b"":
+                if result:
+                    return bytes(result)
+                raise Exception("Connection closed")
+
+            if len(msg) <= needed:
+                result.extend(msg)
+            else:
+                result.extend(msg[:needed])
+                self._fill(msg[needed:])
+
+        return bytes(result)
 
     async def write(self, data: bytes) -> None:
         await self.conn.write_msg(data)

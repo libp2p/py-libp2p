@@ -1,0 +1,1 @@
+Fixed silent swallowing of ``ConnectionResetError`` in TCP connections. When a remote peer resets the connection, ``TrioTCPStream`` now raises ``ConnectionClosedError`` (for ``trio.BrokenResourceError``) instead of silently returning empty bytes. Locally-initiated closures (``trio.ClosedResourceError``) remain silently handled for backward compatibility.

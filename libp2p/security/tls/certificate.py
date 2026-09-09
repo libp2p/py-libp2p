@@ -17,6 +17,7 @@ from cryptography.x509.oid import NameOID, ObjectIdentifier
 
 from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.crypto.serialization import deserialize_public_key
+from libp2p.security.tls.exceptions import MissingLibp2pExtensionError
 
 # ALPN protocol for libp2p TLS
 ALPN_PROTOCOL = "libp2p"
@@ -179,9 +180,15 @@ def create_cert_template() -> x509.CertificateBuilder:
         .issuer_name(issuer_name)
     )
 
+    # Both extensions are set to critical=False for cross-implementation compatibility.
+    # Rust libp2p-tls doesn't understand these extensions, so they must be non-critical
+    # per spec: "Implementations MUST ignore non-critical extensions with unknown OIDs.
+    # Endpoints MUST abort the connection attempt if the certificate contains critical
+    # extensions that the endpoint does not understand."
+
     # Add Basic Constraints extension - not a CA
     builder = builder.add_extension(
-        x509.BasicConstraints(ca=False, path_length=None), critical=True
+        x509.BasicConstraints(ca=False, path_length=None), critical=False
     )
 
     # Add Key Usage - digital signature only
@@ -197,7 +204,7 @@ def create_cert_template() -> x509.CertificateBuilder:
             encipher_only=False,
             decipher_only=False,
         ),
-        critical=True,
+        critical=False,
     )
     return builder
 
@@ -308,7 +315,9 @@ def verify_certificate_chain(cert_chain: list[x509.Certificate]) -> PublicKey:
             )
             break
     if ext_value is None:
-        raise ValueError("expected certificate to contain the key extension")
+        raise MissingLibp2pExtensionError(
+            "expected certificate to contain the key extension"
+        )
 
     # 3) Verify self-signature of the certificate
     pub = cert.public_key()

@@ -1,0 +1,1 @@
+Kademlia DHT and Rendezvous now reject varint-prefixed messages larger than 4 MiB to prevent remote memory exhaustion.

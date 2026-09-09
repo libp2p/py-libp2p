@@ -10,12 +10,20 @@ from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-import trio
 
 from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.pb import rpc_pb2
 from libp2p.tools.utils import connect
 from tests.utils.factories import PubsubFactory
+
+
+async def _wait_pair_ready(pubsubs, topic: str) -> None:
+    await pubsubs[0].wait_for_peer(pubsubs[1].my_id)
+    await pubsubs[1].wait_for_peer(pubsubs[0].my_id)
+    await pubsubs[0].wait_for_subscription(pubsubs[1].my_id, topic)
+    await pubsubs[1].wait_for_subscription(pubsubs[0].my_id, topic)
+    await pubsubs[0].wait_for_mesh(pubsubs[1].my_id, topic)
+    await pubsubs[1].wait_for_mesh(pubsubs[0].my_id, topic)
 
 
 @pytest.mark.trio
@@ -29,17 +37,17 @@ async def test_ihave_triggers_iwant_for_missing_messages():
 
         # Connect hosts
         await connect(host0, host1)
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(pubsubs[1].my_id)
+        await pubsubs[1].wait_for_peer(pubsubs[0].my_id)
 
         # Both subscribe to the same topic
         topic = "test_ihave_iwant"
         await pubsubs[0].subscribe(topic)
         await pubsubs[1].subscribe(topic)
-        await trio.sleep(1.0)  # Allow time for mesh formation
+        await _wait_pair_ready(pubsubs, topic)
 
-        # Create a message ID that gsub0 doesn't have
-        # Message IDs in GossipSub are string representations of (seqno, from_id) tuples
-        missing_msg_id = str((b"seqno123", b"peer456"))
+        # Create a message ID that gsub0 doesn't have (opaque bytes)
+        missing_msg_id = b"peer456" + b"seqno123"
 
         # Mock emit_iwant to capture IWANT requests
         emit_iwant_mock = AsyncMock()
@@ -71,20 +79,19 @@ async def test_iwant_retrieves_missing_messages():
 
         # Connect hosts
         await connect(host0, host1)
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(pubsubs[1].my_id)
+        await pubsubs[1].wait_for_peer(pubsubs[0].my_id)
 
         # Both subscribe to the same topic
         topic = "test_iwant_retrieval"
         await pubsubs[0].subscribe(topic)
         await pubsubs[1].subscribe(topic)
-        await trio.sleep(1.0)  # Allow time for mesh formation
+        await _wait_pair_ready(pubsubs, topic)
 
         # Create a message that gsub1 has but gsub0 doesn't
-        # Message IDs in GossipSub are string representations of (seqno, from_id) tuples
         seqno = b"seqno123"
         from_id = b"peer456"
-        msg_id_tuple = (seqno, from_id)
-        msg_id_str = str(msg_id_tuple)
+        msg_id_bytes = from_id + seqno
 
         msg_data = b"test message data"
 
@@ -99,31 +106,24 @@ async def test_iwant_retrieves_missing_messages():
         # Mock gsub1's message cache to return our test message
         gsub1.mcache.get = MagicMock(return_value=msg)
 
-        # Mock gsub1's write_msg to capture sent messages
-        # Create a mock for pubsub if it doesn't exist
-        if not hasattr(gsub1, "pubsub") or gsub1.pubsub is None:
-            gsub1.pubsub = MagicMock()
-
-        write_msg_mock = AsyncMock()
-        gsub1.pubsub.write_msg = write_msg_mock
+        # Mock gsub1's send_rpc to capture sent messages
+        send_rpc_mock = MagicMock()
+        gsub1.send_rpc = send_rpc_mock
 
         # Create IWANT control message
-        iwant_msg = rpc_pb2.ControlIWant(messageIDs=[msg_id_str])
+        iwant_msg = rpc_pb2.ControlIWant(messageIDs=[msg_id_bytes])
 
         # Simulate gsub0 sending IWANT to gsub1
         await gsub1.handle_iwant(iwant_msg, host0.get_id())
 
-        # Wait for async operations
-        await trio.sleep(0.5)
-
         # Verify that gsub1's message cache was queried
         gsub1.mcache.get.assert_called_once()
 
-        # Verify that write_msg was called to send the message
-        write_msg_mock.assert_called_once()
+        # Verify that send_rpc was called to send the message
+        send_rpc_mock.assert_called_once()
 
         # Verify that the sent message contains our test message
-        call_args = write_msg_mock.call_args[0]
+        call_args = send_rpc_mock.call_args[0]
         rpc_msg = call_args[1]
         assert len(rpc_msg.publish) == 1
         assert rpc_msg.publish[0].data == msg_data
@@ -140,18 +140,17 @@ async def test_ihave_rate_limiting():
 
         # Connect hosts
         await connect(host0, host1)
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(pubsubs[1].my_id)
+        await pubsubs[1].wait_for_peer(pubsubs[0].my_id)
 
         # Both subscribe to the same topic
         topic = "test_ihave_rate_limiting"
         await pubsubs[0].subscribe(topic)
         await pubsubs[1].subscribe(topic)
-        await trio.sleep(1.0)  # Allow time for mesh formation
+        await _wait_pair_ready(pubsubs, topic)
 
         # Create multiple message IDs
-        msg_ids = [
-            str((f"seqno_{i}".encode(), f"peer_{i}".encode())) for i in range(100)
-        ]
+        msg_ids = [f"peer_{i}".encode() + f"seqno_{i}".encode() for i in range(100)]
 
         # Create IHAVE control message with many message IDs
         ihave_msg = rpc_pb2.ControlIHave(messageIDs=msg_ids, topicID=topic)
@@ -187,26 +186,30 @@ async def test_no_infinite_gossip_loops():
         await connect(host0, host1)
         await connect(host1, host2)
         await connect(host0, host2)
-        await trio.sleep(0.5)
+        for i, j in ((0, 1), (1, 2), (0, 2)):
+            await pubsubs[i].wait_for_peer(pubsubs[j].my_id)
+            await pubsubs[j].wait_for_peer(pubsubs[i].my_id)
 
         # All subscribe to the same topic
         topic = "test_gossip_loops"
         for pubsub in pubsubs:
             await pubsub.subscribe(topic)
-        await trio.sleep(1.0)  # Allow time for mesh formation
+        for i, j in ((0, 1), (1, 2), (0, 2)):
+            await pubsubs[i].wait_for_subscription(pubsubs[j].my_id, topic)
+            await pubsubs[j].wait_for_subscription(pubsubs[i].my_id, topic)
+            await pubsubs[i].wait_for_mesh(pubsubs[j].my_id, topic)
+            await pubsubs[j].wait_for_mesh(pubsubs[i].my_id, topic)
 
         # Create a message ID that would be in the seen cache
         seqno = b"seqno123"
         from_id = host1.get_id().to_bytes()
-        msg_id_tuple = (seqno, from_id)
-        msg_id_str = str(msg_id_tuple)
+        msg_id_bytes = from_id + seqno
 
         # Create a mock for pubsub
         mock_pubsub = MagicMock()
         mock_seen_messages = MagicMock()
-        mock_cache = {}
-        mock_cache[msg_id_tuple] = True
-        mock_seen_messages.cache = mock_cache
+        # Mock seen_messages.has to return True for our message ID
+        mock_seen_messages.has = MagicMock(side_effect=lambda key: key == msg_id_bytes)
         mock_pubsub.seen_messages = mock_seen_messages
 
         # Set the mock on gsub0
@@ -217,7 +220,7 @@ async def test_no_infinite_gossip_loops():
         gsub0.emit_iwant = emit_iwant_mock
 
         # Create IHAVE message for the same message from host2
-        ihave_msg = rpc_pb2.ControlIHave(messageIDs=[msg_id_str], topicID=topic)
+        ihave_msg = rpc_pb2.ControlIHave(messageIDs=[msg_id_bytes], topicID=topic)
 
         # Simulate receiving IHAVE from host2 for a message already seen from host1
         await gsub0.handle_ihave(ihave_msg, host2.get_id())
@@ -239,26 +242,35 @@ async def test_dropping_gossip_triggers_iwant():
         # This means host0 and host2 are not directly connected
         await connect(host0, host1)
         await connect(host1, host2)
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(pubsubs[1].my_id)
+        await pubsubs[1].wait_for_peer(pubsubs[0].my_id)
+        await pubsubs[1].wait_for_peer(pubsubs[2].my_id)
+        await pubsubs[2].wait_for_peer(pubsubs[1].my_id)
 
         # All subscribe to the same topic
         topic = "test_dropping_gossip"
         for pubsub in pubsubs:
             await pubsub.subscribe(topic)
-        await trio.sleep(1.0)  # Allow time for mesh formation
+        await pubsubs[0].wait_for_subscription(pubsubs[1].my_id, topic)
+        await pubsubs[1].wait_for_subscription(pubsubs[0].my_id, topic)
+        await pubsubs[1].wait_for_subscription(pubsubs[2].my_id, topic)
+        await pubsubs[2].wait_for_subscription(pubsubs[1].my_id, topic)
+        await pubsubs[0].wait_for_mesh(pubsubs[1].my_id, topic)
+        await pubsubs[1].wait_for_mesh(pubsubs[0].my_id, topic)
+        await pubsubs[1].wait_for_mesh(pubsubs[2].my_id, topic)
+        await pubsubs[2].wait_for_mesh(pubsubs[1].my_id, topic)
 
         # Create a message ID that gsub0 doesn't have
         seqno = b"seqno123"
         from_id = host2.get_id().to_bytes()
-        msg_id_tuple = (seqno, from_id)
-        msg_id_str = str(msg_id_tuple)
+        msg_id_bytes = from_id + seqno
 
         # Mock emit_iwant to capture IWANT requests
         emit_iwant_mock = AsyncMock()
         gsub0.emit_iwant = emit_iwant_mock
 
         # Create IHAVE control message from host2 (not directly connected)
-        ihave_msg = rpc_pb2.ControlIHave(messageIDs=[msg_id_str], topicID=topic)
+        ihave_msg = rpc_pb2.ControlIHave(messageIDs=[msg_id_bytes], topicID=topic)
 
         # Simulate host1 forwarding IHAVE from host2 to host0
         await gsub0.handle_ihave(ihave_msg, host1.get_id())

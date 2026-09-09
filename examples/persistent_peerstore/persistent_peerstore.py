@@ -29,8 +29,8 @@ async def demonstrate_peerstore_operations(
     print(f"\n=== {name} PeerStore Demo ===")
 
     # Create some test peer IDs
-    peer_id_1 = ID.from_base58("QmPeer1")
-    peer_id_2 = ID.from_base58("QmPeer2")
+    peer_id_1 = ID.from_string("QmPeer1")
+    peer_id_2 = ID.from_string("QmPeer2")
 
     # Add addresses for peers
     addr1 = Multiaddr("/ip4/127.0.0.1/tcp/4001")
@@ -121,7 +121,7 @@ async def demonstrate_persistence():
         print("First session: Adding peer data...")
         peerstore1 = create_async_sqlite_peerstore(str(db_path))
 
-        peer_id = ID.from_base58("QmPersistentPeer")
+        peer_id = ID.from_string("QmPersistentPeer")
         addr = Multiaddr("/ip4/10.0.0.1/tcp/4001")
 
         await peerstore1.add_addrs_async(peer_id, [addr], 3600)
@@ -216,7 +216,7 @@ async def demonstrate_async_operations():
             nursery.start_soon(peerstore.start_cleanup_task, 1)  # 1 second interval
 
             # Add some peers
-            peer_id = ID.from_base58("QmAsyncPeer")
+            peer_id = ID.from_string("QmAsyncPeer")
             addr = Multiaddr("/ip4/127.0.0.1/tcp/4001")
             await peerstore.add_addrs_async(peer_id, [addr], 1)  # 1 second TTL
 

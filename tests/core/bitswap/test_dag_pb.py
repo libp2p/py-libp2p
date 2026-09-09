@@ -2,7 +2,7 @@
 
 import pytest
 
-from libp2p.bitswap.cid import CODEC_RAW, compute_cid_v1
+from libp2p.bitswap.cid import CODEC_RAW, cid_to_text, compute_cid_v1, parse_cid
 from libp2p.bitswap.dag_pb import (
     Link,
     UnixFSData,
@@ -21,7 +21,7 @@ class TestLink:
 
     def test_link_creation(self):
         """Test creating a Link."""
-        cid = b"\x01\x23\x45\x67" * 8
+        cid = compute_cid_v1(b"test_link_data", codec=CODEC_RAW)
         link = Link(cid=cid, name="file.txt", size=1024)
 
         assert link.cid == cid
@@ -30,12 +30,24 @@ class TestLink:
 
     def test_link_optional_fields(self):
         """Test Link with optional fields."""
-        cid = b"\x01\x23\x45\x67" * 8
+        cid = compute_cid_v1(b"test_link_data", codec=CODEC_RAW)
         link = Link(cid=cid)
 
         assert link.cid == cid
         assert link.name == ""
         assert link.size == 0
+
+    def test_link_accepts_text_hex_and_object_cid_inputs(self):
+        """Test Link normalizes CID text/hex/object to bytes."""
+        cid_bytes = compute_cid_v1(b"link-cid-normalization", codec=CODEC_RAW)
+
+        link_from_text = Link(cid=cid_to_text(cid_bytes))
+        link_from_hex = Link(cid=cid_bytes.hex())
+        link_from_obj = Link(cid=parse_cid(cid_bytes))
+
+        assert link_from_text.cid == cid_bytes
+        assert link_from_hex.cid == cid_bytes
+        assert link_from_obj.cid == cid_bytes
 
 
 class TestUnixFSData:
@@ -155,6 +167,20 @@ class TestEncodeDecode:
         with pytest.raises(Exception):
             decode_dag_pb(b"invalid protobuf data")
 
+    def test_encode_canonical_field_ordering(self):
+        """Test canonical wire field ordering (0x12 link tags before 0x0a data tags)."""
+        chunk = b"test"
+        cid = compute_cid_v1(chunk, codec=CODEC_RAW)
+        links = [Link(cid=cid, name="test_link", size=len(chunk))]
+        unixfs_data = UnixFSData(type="file", data=b"data")
+
+        encoded = encode_dag_pb(links=links, unixfs_data=unixfs_data)
+
+        # Link tag (field 2, wire type 2) is 0x12.
+        assert encoded[0] == 0x12, (
+            f"Expected first byte to be 0x12 (link tag), got 0x{encoded[0]:02x}"
+        )
+
 
 class TestFileNode:
     """Test file node helpers."""
@@ -189,6 +215,22 @@ class TestFileNode:
         total_size = sum(len(chunk) for chunk in chunks)
         assert unixfs_data.filesize == total_size
         assert sum(unixfs_data.blocksizes) == total_size
+
+    def test_create_file_node_accepts_mixed_cid_inputs(self):
+        """Test create_file_node accepts canonical and hex CID strings."""
+        chunk1 = b"chunk-a" * 100
+        chunk2 = b"chunk-b" * 100
+        cid1 = compute_cid_v1(chunk1, codec=CODEC_RAW)
+        cid2 = compute_cid_v1(chunk2, codec=CODEC_RAW)
+
+        node_data = create_file_node(
+            [(cid_to_text(cid1), len(chunk1)), (cid2.hex(), len(chunk2))]
+        )
+        links, _ = decode_dag_pb(node_data)
+
+        assert len(links) == 2
+        assert links[0].cid == cid1
+        assert links[1].cid == cid2
 
     def test_is_file_node(self):
         """Test file node detection."""
@@ -252,6 +294,25 @@ class TestDirectoryNode:
         assert links[1].cid == cid2
         assert unixfs_data is not None
         assert unixfs_data.type == "directory"
+
+    def test_create_directory_node_accepts_mixed_cid_inputs(self):
+        """Test create_directory_node accepts canonical and hex CID strings."""
+        data1 = b"dir-entry-1"
+        data2 = b"dir-entry-2"
+        cid1 = compute_cid_v1(data1, codec=CODEC_RAW)
+        cid2 = compute_cid_v1(data2, codec=CODEC_RAW)
+
+        node_data = create_directory_node(
+            [
+                ("a.txt", cid_to_text(cid1), len(data1)),
+                ("b.txt", cid2.hex(), len(data2)),
+            ]
+        )
+        links, _ = decode_dag_pb(node_data)
+
+        assert len(links) == 2
+        assert links[0].cid == cid1
+        assert links[1].cid == cid2
 
     def test_is_directory_node(self):
         """Test directory node detection."""

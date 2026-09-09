@@ -3,6 +3,154 @@ Release Notes
 
 .. towncrier release notes start
 
+py-libp2p v0.6.0 (2026-02-16)
+-----------------------------
+
+Breaking Changes
+~~~~~~~~~~~~~~~~
+
+- Bitswap CIDv1 now uses proper varint encoding for codec values per the multicodec specification. This is a breaking change for CIDs using codecs with value ≥ 128.
+
+  **Summary**
+
+  CIDv1 now uses proper **varint encoding** for codec values, as specified in the
+  `multicodec specification <https://github.com/multiformats/multicodec>`_. This
+  changes the binary format for CIDs using codecs with values :math:`\ge 128`.
+
+  **Impact**
+
+  - **95% of CIDs unaffected**: Common codecs (``raw``, ``dag-pb``, ``dag-cbor``)
+    use values ``< 128``, which encode identically in both the legacy
+    single-byte and the new varint formats.
+  - **5% of CIDs affected**: Codecs such as ``dag-jose`` (``0x85``),
+    ``dag-json`` (``0x129``), and other experimental codecs with values
+    :math:`\ge 128` now use multi-byte varint encoding. Their CIDv1 byte layout
+    changes and thus their CID *identities* change.
+
+  **Migration Required**
+
+  If you use ``dag-jose``, ``dag-json``, or custom codecs :math:`\ge 128`:
+
+  1. **Identify affected CIDs** using ``detect_cid_encoding_format()`` (in ``libp2p.bitswap.cid``).
+  2. **Recompute CIDs** from original data using ``recompute_cid_from_data()`` (in ``libp2p.bitswap.cid``).
+  3. **Update storage** (databases, caches, indexes) with the new CIDs.
+
+  **Code Examples**
+
+  *Check if your CIDs are affected*
+
+  .. code-block:: python
+
+     from libp2p.bitswap.cid import detect_cid_encoding_format
+
+     info = detect_cid_encoding_format(your_cid)
+
+     if info["is_breaking"]:
+         print(f"CID uses {info['codec_name']} and needs migration")
+
+  *Recompute affected CIDs*
+
+  .. code-block:: python
+
+     from libp2p.bitswap.cid import recompute_cid_from_data
+
+     # old_cid: the existing CID
+     # original_data: the original data that was hashed
+     new_cid = recompute_cid_from_data(old_cid, original_data)
+
+  *Backward Compatibility*
+
+  Code continues to accept integer codec values for API compatibility:
+
+  .. code-block:: python
+
+     from libp2p.bitswap.cid import CODEC_RAW, compute_cid_v1
+
+     data = b"example"
+
+     # All of these work:
+     cid1 = compute_cid_v1(data, codec=0x55)      # int
+     cid2 = compute_cid_v1(data, codec="raw")     # str
+     cid3 = compute_cid_v1(data, codec=CODEC_RAW) # Code object
+
+(`#1193 <https://github.com/libp2p/py-libp2p/issues/1193>`__)
+
+
+Bugfixes
+~~~~~~~~
+
+- Fixed swarm listener crash on inbound peer negotiation failures by handling security and muxer upgrade exceptions gracefully, allowing the listener to continue accepting new connections. (`#417 <https://github.com/libp2p/py-libp2p/issues/417>`__)
+- Fixed peer ID validation by checking the authenticated peer ID immediately after security handshake, failing fast on mismatches instead of later during mux negotiation with misleading errors. (`#429 <https://github.com/libp2p/py-libp2p/issues/429>`__)
+- Fixed interoperability issue where generated Ed25519 keys were not always valid curve points, complying with strict ZIP-215 validation. (`#921 <https://github.com/libp2p/py-libp2p/issues/921>`__)
+- Fixed yamux listener incorrectly logging errors when peers close connections gracefully after completing protocol exchanges. Clean connection closures (0 bytes received) are now logged at INFO level instead of ERROR level. (`#1084 <https://github.com/libp2p/py-libp2p/issues/1084>`__)
+- Fixed MessageCache KeyError crash when async topic validators process the same message concurrently by adding duplicate detection in put() and defensive pop with default None in shift(). (`#1118 <https://github.com/libp2p/py-libp2p/issues/1118>`__)
+- Fixed pubsub service crashes when peers disconnect abruptly by properly handling StreamReset exceptions during message writes. (`#1120 <https://github.com/libp2p/py-libp2p/issues/1120>`__)
+- Fixed Pubsub._get_in_topic_gossipsub_peers_from_minus to use self.peer_protocol.get(peer_id) instead of direct dictionary access via self.peer_protocol[peer_id]. This safely ignores peers that are partially disconnected during the heartbeat cycle. (`#1124 <https://github.com/libp2p/py-libp2p/issues/1124>`__)
+- Fixed TLS certificate interoperability with Rust libp2p by setting BasicConstraints and KeyUsage X.509 extensions to non-critical, allowing cross-implementation compatibility per libp2p TLS spec. (`#1159 <https://github.com/libp2p/py-libp2p/issues/1159>`__)
+- Fixed intermittent Windows CI failure in pubsub dummyaccount ring-topology tests by replacing fixed sleep timers with a state-based `wait_for_convergence` helper. Tests now wait until all nodes satisfy the expected condition (or timeout with a clear assertion) instead of relying on platform-sensitive delays, resolving nested ExceptionGroup flakiness on Windows. (`#1164 <https://github.com/libp2p/py-libp2p/issues/1164>`__)
+- Fixed WebSocket transport to immediately raise ``IOException`` on connection closure instead of returning empty bytes, preventing retry loops in ``read_exactly()``. Also added graceful error handling in yamux ``send_window_update()`` for connections closed by peers during window updates. (`#1212 <https://github.com/libp2p/py-libp2p/issues/1212>`__)
+- Fixed WebSocket transport crashing on IPv6 multiaddrs due to unhandled ``ProtocolLookupError`` in host extraction, and corrected IPv6 dial URL construction to use RFC 3986 bracket notation. (`#1215 <https://github.com/libp2p/py-libp2p/issues/1215>`__)
+
+
+Features
+~~~~~~~~
+
+- Implemented initial network attack simulation framework to support testing against common P2P attacks (e.g. Eclipse attacks). (`#57 <https://github.com/libp2p/py-libp2p/issues/57>`__)
+- Enhanced Circuit Relay v2 security by implementing multi-hop prevention, elegantly blocking relay chaining attempts while preserving legitimate client connections. (`#697 <https://github.com/libp2p/py-libp2p/issues/697>`__)
+- Added a comprehensive NAT traversal example demonstrating Circuit Relay v2, DCUtR (Direct Connection Upgrade through Relay), and AutoNAT protocols.
+
+  The example includes three scripts in ``examples/nat/``:
+  - ``relay.py``: A publicly reachable relay node that facilitates connections between NATed peers
+  - ``listener.py``: A NATed peer that advertises via relay and accepts incoming connections
+  - ``dialer.py``: A NATed peer that connects through relay and attempts DCUtR hole punching to establish direct connections
+
+  This example demonstrates how two NATed peers can establish communication through a relay and automatically upgrade to a direct connection when possible, while using AutoNAT to detect and report network reachability status. (`#870 <https://github.com/libp2p/py-libp2p/issues/870>`__)
+- Added Gossipsub 2.0 support with enhanced peer scoring, adaptive gossip dissemination, and security features.
+
+  This implementation brings py-libp2p to parity with Go and JS libp2p implementations by adding:
+
+  - **Enhanced Peer Scoring**: Comprehensive scoring system with P6 (application-specific) and P7 (IP colocation penalty) parameters, decay mechanisms, and behavioral penalties
+  - **Advanced Message Validation**: Topic-specific validation hooks with caching, timeout mechanisms, and async validator support
+  - **Adaptive Gossip Dissemination**: Dynamic network parameter adjustment based on network health and peer scores
+  - **Security Enhancements**: Protection against spam, Sybil, and Eclipse attacks through rate limiting, IP diversity enforcement, and equivocation detection
+  - **Protocol Negotiation**: Support for ``/meshsub/2.0.0`` protocol with backward compatibility to Gossipsub 1.1/1.2
+  - **Interoperability**: Full compatibility with existing Go and JS libp2p Gossipsub 2.0 implementations
+
+  The new protocol version enables Python-based libp2p applications to participate in modern, secure pubsub networks with improved resilience against adversarial conditions. (`#920 <https://github.com/libp2p/py-libp2p/issues/920>`__)
+- Added an Eclipse attack simulation module with dual-layer architecture (simulation + real integration) and metrics collection framework. (`#950 <https://github.com/libp2p/py-libp2p/issues/950>`__)
+- Implemented round-robin load balancing for CircuitV2 relay selection, prioritizing relays with active reservations for more reliable and evenly distributed relay usage. (`#972 <https://github.com/libp2p/py-libp2p/issues/972>`__)
+- Added MVP AutoTLS support in TLS stream security. (`#1072 <https://github.com/libp2p/py-libp2p/issues/1072>`__)
+- Improved RSA key compatibility with other libp2p implementations, added public key extraction from peer IDs for Ed25519/Secp256k1 keys, and enhanced pubsub connection management to prevent premature peer removal and service crashes. (`#1106 <https://github.com/libp2p/py-libp2p/issues/1106>`__)
+- Added IPv6 support for default bind address configuration.
+
+  - IPv6 bind address is configurable via the ``LIBP2P_BIND_V6`` environment variable (default ``::1``). Use ``::`` to listen on all IPv6 interfaces (e.g. for tests).
+  - Invalid ``LIBP2P_BIND_V6`` values fall back to the secure default ``::1``.
+  - Thin-waist address utilities and examples support both IPv4 and IPv6. (`#1111 <https://github.com/libp2p/py-libp2p/issues/1111>`__)
+- Added TLS-enabled bidirectional chat example demonstrating secure peer-to-peer communication with full-duplex messaging capabilities.
+
+  The new example includes:
+
+  - **TLS Server** (``examples/tls/example_tls_server.py``): A TLS-enabled py-libp2p host that acts as a bidirectional chat server, listening for incoming TLS connections and engaging in full-duplex chat sessions where both server and client can send messages simultaneously.
+
+  - **TLS Client** (``examples/tls/example_tls_client.py``): A TLS-enabled client with three operation modes:
+    - Echo mode: Simple request-response pattern for testing TLS connections
+    - Chat mode: Interactive bidirectional chat for real-time communication
+    - Ping mode: Latency testing with round-trip time measurement
+
+  Both examples showcase TLS 1.3 encryption, automatic peer identity verification during TLS handshake, concurrent send/receive operations using async/await patterns, and graceful connection lifecycle management. This provides a practical reference implementation for developers building TLS-enabled py-libp2p applications. (`#1144 <https://github.com/libp2p/py-libp2p/issues/1144>`__)
+- Added new test-plan transport test specifications for py-libp2p v0.x to support interoperability testing and validation of transport implementations. (`#1148 <https://github.com/libp2p/py-libp2p/issues/1148>`__)
+- Integrate py-multihash v3 API in Bitswap CID module and records validation. Replaces manual multihash construction and exception-based validation with efficient library methods. Improves code maintainability while maintaining 100% backward compatibility. (`#1180 <https://github.com/libp2p/py-libp2p/issues/1180>`__)
+- Multicodec integration for Bitswap CIDs: CIDv1 uses varint-encoded codec prefixes (via ``add_prefix()``). New helpers: ``detect_cid_encoding_format()``, ``recompute_cid_from_data()``, and ``analyze_cid_collection()``. See the breaking fragment and codec documentation for impact and migration. (`#1193 <https://github.com/libp2p/py-libp2p/issues/1193>`__)
+- Added py-multibase support for peer IDs, DHT keys, and pubsub message IDs with ``ID.to_multibase()``, ``ID.from_multibase()``, ``ID.from_string()``, and a configurable default encoding via ``libp2p.encoding_config``. Backward-compatible with existing base58 peer IDs. (`#1209 <https://github.com/libp2p/py-libp2p/issues/1209>`__)
+
+
+Internal Changes - for py-libp2p Contributors
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- Standardized logger names across core modules to use ``__name__`` pattern, enabling fine-grained logging control via ``LIBP2P_DEBUG`` environment variable. (`#906 <https://github.com/libp2p/py-libp2p/issues/906>`__)
+- Moved dev dependencies from ``[project.optional-dependencies]`` to ``[dependency-groups]`` and reorganized them to remove duplication. (`#1115 <https://github.com/libp2p/py-libp2p/issues/1115>`__)
+
+
 py-libp2p v0.5.0 (2025-12-21)
 -----------------------------
 
@@ -391,7 +539,7 @@ Internal Changes - for py-libp2p Contributors
   - Implement ``get_available_interfaces()``, ``get_optimal_binding_address()``, and ``expand_wildcard_address()``
   - Update echo example to use dynamic address discovery instead of hardcoded wildcard
   - Add safe fallbacks for environments lacking Thin Waist support
-  - Temporarily disable IPv6 support due to libp2p handshake issues (TODO: re-enable when resolved) (`#811 <https://github.com/libp2p/py-libp2p/issues/811>`__)
+  - Temporarily disable IPv6 support due to libp2p handshake issues (re-enabled later; use ``LIBP2P_BIND_V6`` to configure IPv6 bind address) (`#811 <https://github.com/libp2p/py-libp2p/issues/811>`__)
 - The TODO IK patterns in Noise has been deprecated in specs: https://github.com/libp2p/specs/tree/master/noise#handshake-pattern (`#816 <https://github.com/libp2p/py-libp2p/issues/816>`__)
 - Remove the already completed TODO tasks in Peerstore:
   TODO: Set up an async task for periodic peer-store cleanup for expired addresses and records.

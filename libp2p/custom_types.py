@@ -28,6 +28,7 @@ from libp2p.pubsub.pb import (
 )
 
 TProtocol = NewType("TProtocol", str)
+MetadataValue = str | int | float | bool | None
 StreamHandlerFn = Callable[[INetStream], Awaitable[None]]
 THandler = Callable[[ReadWriteCloser], Awaitable[None]]
 TSecurityOptions = Mapping[TProtocol, ISecureTransport]
@@ -39,4 +40,4 @@ ValidatorFn = Union[SyncValidatorFn, AsyncValidatorFn]
 UnsubscribeFn = Callable[[], Awaitable[None]]
 TQUICStreamHandlerFn = Callable[[QUICStream], Awaitable[None]]
 TQUICConnHandlerFn = Callable[[QUICConnection], Awaitable[None]]
-MessageID = NewType("MessageID", str)
+MessageID = NewType("MessageID", bytes)

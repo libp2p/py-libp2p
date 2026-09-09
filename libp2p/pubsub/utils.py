@@ -1,10 +1,6 @@
-import ast
 import logging
 
 from libp2p.abc import IHost
-from libp2p.custom_types import (
-    MessageID,
-)
 from libp2p.peer.envelope import consume_envelope
 from libp2p.peer.id import ID
 from libp2p.pubsub.pb.rpc_pb2 import RPC
@@ -54,27 +50,38 @@ def maybe_consume_signed_record(msg: RPC, host: IHost, peer_id: ID) -> bool:
     return True
 
 
-def parse_message_id_safe(msg_id_str: str) -> MessageID:
-    """Safely handle message ID as string."""
-    return MessageID(msg_id_str)
-
-
-def safe_parse_message_id(msg_id_str: str) -> tuple[bytes, bytes]:
+def safe_bytes_from_hex(value: str | bytes | bytearray) -> bytes | None:
     """
-    Safely parse message ID using ast.literal_eval with validation.
-    :param msg_id_str: String representation of message ID
-    :return: Tuple of (seqno, from_id) as bytes
-    :raises ValueError: If parsing fails
+    Decode a wire message ID to bytes, returning None on failure.
+
+    Used for defensively parsing wire message IDs in IHAVE/IWANT handlers
+    so that malformed hex from peers does not crash the gossip handler task.
+
+    Accepts:
+    - hex text ``str`` (legacy)
+    - ASCII-hex ``bytes`` (legacy py-libp2p peers that hex-encoded onto the wire)
+    - opaque non-hex ``bytes`` (GossipSub schema / go / js peers)
     """
     try:
-        parsed = ast.literal_eval(msg_id_str)
-        if not isinstance(parsed, tuple) or len(parsed) != 2:
-            raise ValueError("Invalid message ID format")
+        if isinstance(value, str):
+            return bytes.fromhex(value)
 
-        seqno, from_id = parsed
-        if not isinstance(seqno, bytes) or not isinstance(from_id, bytes):
-            raise ValueError("Message ID components must be bytes")
+        if isinstance(value, (bytes, bytearray)):
+            raw = bytes(value)
+            try:
+                text = raw.decode("ascii")
+            except UnicodeDecodeError:
+                return raw
+            try:
+                return bytes.fromhex(text)
+            except ValueError:
+                # ASCII that isn't valid hex: only-hex-digit payloads (e.g.
+                # odd length) are treated as malformed hex text; anything else
+                # is an opaque binary message ID.
+                if text and all(c in "0123456789abcdefABCDEF" for c in text):
+                    return None
+                return raw
 
-        return (seqno, from_id)
-    except (ValueError, SyntaxError) as e:
-        raise ValueError(f"Invalid message ID format: {e}")
+        return None
+    except ValueError:
+        return None

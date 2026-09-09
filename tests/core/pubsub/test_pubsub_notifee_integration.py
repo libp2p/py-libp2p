@@ -13,9 +13,7 @@ async def test_connected_enqueues_and_adds_peer():
         await connect(p0.host, p1.host)
         await p0.wait_until_ready()
         # Wait until peer is added via queue processing
-        with trio.fail_after(1.0):
-            while p1.my_id not in p0.peers:
-                await trio.sleep(0.01)
+        await p0.wait_for_peer(p1.my_id)
         assert p1.my_id in p0.peers
 
 
@@ -25,11 +23,10 @@ async def test_disconnected_enqueues_and_removes_peer():
         await connect(p0.host, p1.host)
         await p0.wait_until_ready()
         # Ensure present first
-        with trio.fail_after(1.0):
-            while p1.my_id not in p0.peers:
-                await trio.sleep(0.01)
+        await p0.wait_for_peer(p1.my_id)
         # Now disconnect and expect removal via dead peer queue
         await p0.host.get_network().close_peer(p1.host.get_id())
+        # Wait for peer to be removed
         with trio.fail_after(1.0):
             while p1.my_id in p0.peers:
                 await trio.sleep(0.01)
@@ -69,9 +66,7 @@ async def test_duplicate_connection_does_not_duplicate_peer_state():
     async with PubsubFactory.create_batch_with_gossipsub(2) as (p0, p1):
         await connect(p0.host, p1.host)
         await p0.wait_until_ready()
-        with trio.fail_after(1.0):
-            while p1.my_id not in p0.peers:
-                await trio.sleep(0.01)
+        await p0.wait_for_peer(p1.my_id)
         # Connect again should not add duplicates
         await connect(p0.host, p1.host)
         await trio.sleep(0.1)

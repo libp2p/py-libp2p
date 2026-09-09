@@ -1,34 +1,17 @@
 """
 ``msgio`` is an implementation of `https://github.com/libp2p/go-msgio`.
 
-from that repo: "a simple package to r/w length-delimited slices."
-
-NOTE: currently missing the capability to indicate lengths by "varint" method.
+From that repo: "a simple package to r/w length-delimited slices."
 """
 
-from abc import (
-    abstractmethod,
-)
-from typing import (
-    Literal,
-)
+from abc import abstractmethod
+from typing import Literal
 
-from libp2p.io.abc import (
-    MsgReadWriteCloser,
-    Reader,
-    ReadWriteCloser,
-)
-from libp2p.io.utils import (
-    read_exactly,
-)
-from libp2p.utils import (
-    decode_uvarint_from_stream,
-    encode_varint_prefixed,
-)
+from libp2p.io.abc import MsgReadWriteCloser, Reader, ReadWriteCloser
+from libp2p.io.utils import read_exactly
+from libp2p.utils import decode_uvarint_from_stream, encode_varint_prefixed
 
-from .exceptions import (
-    MessageTooLarge,
-)
+from .exceptions import MessageTooLarge
 
 BYTE_ORDER: Literal["big", "little"] = "big"
 
@@ -86,6 +69,22 @@ class FixedSizeLenMsgReadWriter(BaseMsgReadWriter):
 
 class VarIntLengthMsgReadWriter(BaseMsgReadWriter):
     max_msg_size: int
+
+    def __init__(
+        self,
+        read_write_closer: ReadWriteCloser,
+        max_msg_size: int | None = None,
+    ) -> None:
+        super().__init__(read_write_closer)
+        if max_msg_size is None:
+            if not hasattr(self, "max_msg_size"):
+                raise TypeError("max_msg_size is required")
+            effective_max_msg_size = self.max_msg_size
+        else:
+            effective_max_msg_size = max_msg_size
+        if effective_max_msg_size <= 0:
+            raise ValueError("max_msg_size must be greater than 0")
+        self.max_msg_size = effective_max_msg_size
 
     async def next_msg_len(self) -> int:
         msg_len = await decode_uvarint_from_stream(self.read_write_closer)

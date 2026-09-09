@@ -1,0 +1,6 @@
+py-libp2p>=0.2.1
+msgpack>=1.0.7
+redis[asyncio]>=5.0.4
+multiaddr>=0.0.9
+pytest>=8.2.0
+pytest-asyncio>=0.23.6

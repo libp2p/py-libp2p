@@ -1,0 +1,1 @@
+Simplified upgrader by consolidating duplicated multistream-select negotiation logic from SecurityMultistream and MuxerMultistream into a reusable GenericMultistreamSelector class. Fixed attribute naming bug (multistream_client → multiselect_client) in MuxerMultistream.

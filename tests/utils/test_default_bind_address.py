@@ -29,7 +29,7 @@ class TestAddressParadigm:
         # Should return wildcard address when explicitly requested
         assert "0.0.0.0" in str(addr)
         addr_str = str(addr)
-        assert "/ip4/" in addr_str
+        assert "/ip4/" in addr_str or "/ip6/" in addr_str
         assert f"/tcp/{port}" in addr_str
 
     def test_optimal_binding_address_selection(self):
@@ -39,7 +39,7 @@ class TestAddressParadigm:
 
         # Should return a valid IP address (could be loopback or local network)
         addr_str = str(addr)
-        assert "/ip4/" in addr_str
+        assert "/ip4/" in addr_str or "/ip6/" in addr_str
         assert f"/tcp/{port}" in addr_str
 
         # Should be from available interfaces
@@ -83,7 +83,7 @@ class TestAddressParadigm:
 
         # get_optimal_binding_address should return a valid address
         optimal_addr = get_optimal_binding_address(port)
-        assert "/ip4/" in str(optimal_addr)
+        assert "/ip4/" in str(optimal_addr) or "/ip6/" in str(optimal_addr)
         assert f"/tcp/{port}" in str(optimal_addr)
 
         # get_wildcard_address should return wildcard when explicitly needed

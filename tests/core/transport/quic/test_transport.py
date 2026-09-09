@@ -1,5 +1,6 @@
 from unittest.mock import (
     Mock,
+    patch,
 )
 
 import pytest
@@ -44,6 +45,27 @@ class TestQUICTransport:
         assert transport._peer_id is not None
         assert not transport._closed
         assert len(transport._quic_configs) >= 1
+
+    def test_quic_transport_forwards_enable_autotls_to_security_factory(
+        self, private_key
+    ):
+        """Test that QUICTransport forwards enable_autotls to security factory."""
+        with (
+            patch(
+                "libp2p.transport.quic.transport.create_quic_security_transport"
+            ) as mock_factory,
+            patch.object(
+                QUICTransport, "_setup_quic_configurations", return_value=None
+            ),
+        ):
+            mock_factory.return_value = Mock()
+
+            transport = QUICTransport(private_key, enable_autotls=True)
+
+            assert transport._enable_autotls is True
+            mock_factory.assert_called_once_with(
+                transport._private_key, transport._peer_id, True
+            )
 
     def test_supported_protocols(self, transport):
         """Test supported protocol identifiers."""

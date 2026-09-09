@@ -38,10 +38,17 @@ def test_rcmgr_basic_functionality():
 
 def test_rcmgr_direction_enum():
     """Test Direction enum functionality."""
+    assert Direction.UNKNOWN == -1
     assert Direction.INBOUND == 0
     assert Direction.OUTBOUND == 1
-    assert str(Direction.INBOUND) == "0"
-    assert str(Direction.OUTBOUND) == "1"
+    # Direction now uses human-readable string representation
+    assert str(Direction.UNKNOWN) == "unknown"
+    assert str(Direction.INBOUND) == "inbound"
+    assert str(Direction.OUTBOUND) == "outbound"
+    # Test from_string method
+    assert Direction.from_string("inbound") == Direction.INBOUND
+    assert Direction.from_string("outbound") == Direction.OUTBOUND
+    assert Direction.from_string("unknown") == Direction.UNKNOWN
 
 
 def test_rcmgr_python_version_compatibility():

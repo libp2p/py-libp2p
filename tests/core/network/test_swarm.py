@@ -26,7 +26,10 @@ from libp2p.network.exceptions import (
 from libp2p.network.swarm import (
     Swarm,
 )
-from libp2p.tools.async_service import (
+from libp2p.peer.id import (
+    ID,
+)
+from libp2p.tools.anyio_service import (
     background_trio_service,
 )
 from libp2p.tools.utils import (
@@ -38,6 +41,38 @@ from libp2p.transport.tcp.tcp import (
 from tests.utils.factories import (
     SwarmFactory,
 )
+
+
+class _FakeQUICTransport:
+    def __init__(self, private_key, config=None, enable_autotls=False):
+        self.private_key = private_key
+        self.config = config
+        self.enable_autotls = enable_autotls
+
+
+def test_swarm_legacy_keyword_raises_typeerror():
+    from unittest.mock import Mock
+
+    with pytest.raises(TypeError, match="no longer accepts 'transport='"):
+        Swarm(Mock(), Mock(), Mock(), transport=Mock())
+
+
+def test_swarm_positional_backward_compatibility():
+    from unittest.mock import Mock
+
+    peer_id = Mock()
+    peerstore = Mock()
+    upgrader = Mock()
+
+    # Passing a single transport positionally should be wrapped in a list internally
+    # and added to the transport manager.
+    transport = Mock()
+    swarm1 = Swarm(peer_id, peerstore, upgrader, transport)
+    assert len(swarm1.transport_manager.get_transports()) == 1
+
+    # Passing a list of transports positionally
+    swarm2 = Swarm(peer_id, peerstore, upgrader, [transport])
+    assert len(swarm2.transport_manager.get_transports()) == 1
 
 
 @pytest.mark.trio
@@ -117,6 +152,18 @@ async def test_swarm_close_peer(security_protocol):
         await trio.sleep(0.01)
         # 0  1  2
         assert len(swarms[1].connections) == 0 and len(swarms[2].connections) == 0
+
+
+@pytest.mark.trio
+async def test_swarm_close_is_idempotent(security_protocol):
+    async with SwarmFactory.create_and_listen(
+        security_protocol=security_protocol
+    ) as swarm:
+        await swarm.close()
+        assert swarm._closing is True
+        # Second close must be a no-op (HostFactory + SwarmFactory double-close path).
+        await swarm.close()
+        assert swarm._closing is True
 
 
 @pytest.mark.trio
@@ -200,6 +247,8 @@ async def test_swarm_multiaddr(security_protocol):
 
         def clear():
             swarms[0].peerstore.clear_addrs(swarms[1].get_peer_id())
+            if hasattr(swarms[0], "_negative_peer_cache"):
+                swarms[0]._negative_peer_cache.evict(str(swarms[1].get_peer_id()))
 
         clear()
         # No addresses
@@ -226,6 +275,7 @@ async def test_swarm_multiaddr(security_protocol):
         with pytest.raises(SwarmException):
             await swarms[0].dial_peer(swarms[1].get_peer_id())
 
+        clear()
         # Test one address
         addrs = tuple(
             addr
@@ -250,14 +300,14 @@ async def test_swarm_multiaddr(security_protocol):
 def test_new_swarm_defaults_to_tcp():
     swarm = new_swarm()
     assert isinstance(swarm, Swarm)
-    assert isinstance(swarm.transport, TCP)
+    assert isinstance(swarm.transport_manager.get_transports()[0], TCP)
 
 
 def test_new_swarm_tcp_multiaddr_supported():
     addr = Multiaddr("/ip4/127.0.0.1/tcp/9999")
     swarm = new_swarm(listen_addrs=[addr])
     assert isinstance(swarm, Swarm)
-    assert isinstance(swarm.transport, TCP)
+    assert isinstance(swarm.transport_manager.get_transports()[0], TCP)
 
 
 def test_new_swarm_quic_multiaddr_supported():
@@ -266,7 +316,48 @@ def test_new_swarm_quic_multiaddr_supported():
     addr = Multiaddr("/ip4/127.0.0.1/udp/9999/quic")
     swarm = new_swarm(listen_addrs=[addr])
     assert isinstance(swarm, Swarm)
-    assert isinstance(swarm.transport, QUICTransport)
+    assert isinstance(swarm.transport_manager.get_transports()[0], QUICTransport)
+
+
+def test_new_swarm_quic_paths_propagate_enable_autotls(monkeypatch):
+    import libp2p as libp2p_module
+
+    key_pair = generate_new_ed25519_identity()
+
+    # Path 1: direct QUIC creation when listen_addrs is None and enable_quic=True.
+    monkeypatch.setattr(libp2p_module, "QUICTransport", _FakeQUICTransport)
+    swarm_direct = new_swarm(
+        key_pair=key_pair,
+        enable_quic=True,
+        enable_autotls=True,
+    )
+    assert isinstance(swarm_direct, Swarm)
+    transport1 = swarm_direct.transport_manager.get_transports()[0]
+    assert isinstance(transport1, _FakeQUICTransport)
+    assert transport1.enable_autotls is True
+
+    # Path 2: list_addrs based creation should receive enable_autotls in kwargs.
+    swarm_registry = new_swarm(
+        key_pair=key_pair,
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/udp/9999/quic")],
+        enable_autotls=True,
+    )
+    assert isinstance(swarm_registry, Swarm)
+    transport2 = swarm_registry.transport_manager.get_transports()[0]
+    assert isinstance(transport2, _FakeQUICTransport)
+    assert transport2.enable_autotls is True
+
+    # Path 3: forced-QUIC fallback when enable_quic=True but no QUIC addr provided.
+    swarm_forced = new_swarm(
+        key_pair=key_pair,
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/9999")],
+        enable_quic=True,
+        enable_autotls=True,
+    )
+    assert isinstance(swarm_forced, Swarm)
+    transport3 = swarm_forced.transport_manager.get_transports()[0]
+    assert isinstance(transport3, _FakeQUICTransport)
+    assert transport3.enable_autotls is True
 
 
 def test_new_swarm_defaults_to_ed25519():
@@ -308,6 +399,9 @@ def test_new_swarm_defaults_to_ed25519():
 async def test_swarm_listen_multiple_addresses(security_protocol):
     """Test that swarm can listen on multiple addresses simultaneously."""
     from libp2p.utils.address_validation import get_available_interfaces
+    from libp2p.utils.multiaddr_utils import (
+        extract_ip_from_multiaddr,
+    )
 
     # Get multiple addresses to listen on
     listen_addrs = get_available_interfaces(0)  # Let OS choose ports
@@ -319,11 +413,11 @@ async def test_swarm_listen_multiple_addresses(security_protocol):
         success = await swarm.listen(*listen_addrs)
         assert success, "Should successfully listen on at least one address"
 
-        # Check that we have listeners for the addresses
+        # Check that we have listeners for addresses
         actual_listeners = list(swarm.listeners.keys())
         assert len(actual_listeners) > 0, "Should have at least one listener"
 
-        # Verify that all successful listeners are in the listeners dict
+        # Verify that all successful listeners are in listeners dict
         successful_count = 0
         for addr in listen_addrs:
             addr_str = str(addr)
@@ -336,15 +430,16 @@ async def test_swarm_listen_multiple_addresses(security_protocol):
                     f"Listener for {addr} should have addresses"
                 )
 
-                # Check that the listener address matches the expected address
+                # Check that listener address matches the expected address
                 # (port might be different if we used port 0)
-                expected_ip = addr.value_for_protocol("ip4")
+                expected_ip = extract_ip_from_multiaddr(addr)
                 expected_protocol = addr.value_for_protocol("tcp")
                 if expected_ip and expected_protocol:
                     found_matching = False
                     for listener_addr in listener_addrs:
+                        listener_ip = extract_ip_from_multiaddr(listener_addr)
                         if (
-                            listener_addr.value_for_protocol("ip4") == expected_ip
+                            listener_ip == expected_ip
                             and listener_addr.value_for_protocol("tcp") is not None
                         ):
                             found_matching = True
@@ -411,7 +506,170 @@ async def test_swarm_listen_multiple_addresses_connectivity(security_protocol):
                             f"Connection from {full_addr} should be established"
                         )
 
+                        # Clean up connection for next interface test
+                        await swarm2.close_peer(peer_info.peer_id)
+                        await trio.sleep(0.05)
+
                     except Exception as e:
                         pytest.fail(
                             f"Failed to establish libp2p connection to {full_addr}: {e}"
                         )
+
+
+@pytest.mark.trio
+async def test_swarm_listener_resilience_on_upgrade_failure(security_protocol):
+    """Test that the swarm listener continues to accept connections even when individual peer negotiations fail."""  # noqa: E501
+    from unittest.mock import patch
+
+    from libp2p.transport.exceptions import SecurityUpgradeFailure
+
+    async with SwarmFactory.create_batch_and_listen(
+        2, security_protocol=security_protocol
+    ) as swarms:
+        listener_swarm = swarms[0]
+        client_swarm = swarms[1]
+
+        # Get listener address
+        listener_addr = tuple(
+            addr
+            for transport in listener_swarm.listeners.values()
+            for addr in transport.get_addrs()
+        )[0]
+
+        # Add the listener's address to client's peerstore
+        client_swarm.peerstore.add_addrs(
+            listener_swarm.get_peer_id(), [listener_addr], 10000
+        )
+
+        # First, establish a successful connection to verify setup
+        await client_swarm.dial_peer(listener_swarm.get_peer_id())
+        assert listener_swarm.get_peer_id() in client_swarm.connections
+
+        # Close the first connection
+        await client_swarm.close_peer(listener_swarm.get_peer_id())
+        await trio.sleep(0.1)
+
+        # Now simulate a failure during upgrade by patching upgrade_security
+        # We'll make one call fail, then let subsequent calls succeed
+        original_upgrade_security = listener_swarm.upgrader.upgrade_security
+        call_count = [0]
+
+        async def failing_upgrade_security(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                # First call after patch fails
+                raise SecurityUpgradeFailure("Simulated security upgrade failure")
+            # Subsequent calls succeed
+            return await original_upgrade_security(*args, **kwargs)
+
+        with patch.object(
+            listener_swarm.upgrader,
+            "upgrade_security",
+            side_effect=failing_upgrade_security,
+        ):
+            # This connection attempt should fail on the listener side
+            # The client will see a connection error, but the listener should NOT crash
+            try:
+                await client_swarm.dial_peer(listener_swarm.get_peer_id())
+            except Exception:
+                # Connection failure expected - client can't complete the dial
+                pass
+
+            # Give time for any potential listener crash to occur
+            await trio.sleep(0.2)
+
+            # Verify listener is still active by checking it has listeners
+            assert len(listener_swarm.listeners) > 0, (
+                "Listener crashed after upgrade failure!"
+            )
+
+        # Now verify the listener can still accept new connections
+        # (upgrade_security is no longer patched, so this should succeed)
+        await trio.sleep(0.1)
+        await client_swarm.dial_peer(listener_swarm.get_peer_id())
+
+        # Verify connection was established successfully
+        assert listener_swarm.get_peer_id() in client_swarm.connections
+        assert client_swarm.get_peer_id() in listener_swarm.connections
+
+
+@pytest.mark.trio
+async def test_swarm_peer_id_validation(security_protocol):
+    """Test that the swarm correctly validates peer IDs during connection."""
+    async with SwarmFactory.create_batch_and_listen(
+        2, security_protocol=security_protocol
+    ) as swarms:
+        # Get the correct address and peer ID of swarm[1]
+        addrs = tuple(
+            addr
+            for transport in swarms[1].listeners.values()
+            for addr in transport.get_addrs()
+        )
+        correct_peer_id = swarms[1].get_peer_id()
+
+        # Create a fake peer ID (using swarm[0]'s ID which is definitely wrong)
+        wrong_peer_id = swarms[0].get_peer_id()
+
+        # Add the address with the WRONG peer ID to the peerstore
+        swarms[0].peerstore.add_addrs(wrong_peer_id, addrs, 10000)
+
+        # Attempt to dial with the wrong peer ID should fail with peer ID mismatch
+        with pytest.raises(SwarmException):
+            await swarms[0].dial_peer(wrong_peer_id)
+
+        # Ensure no connection was established
+        assert wrong_peer_id not in swarms[0].connections
+
+        # Now test with the correct peer ID - this should succeed
+        swarms[0].peerstore.add_addrs(correct_peer_id, addrs, 10000)
+        connections = await swarms[0].dial_peer(correct_peer_id)
+        assert len(connections) > 0, "Connection with correct peer ID should succeed"
+
+        # Verify connections are established
+        assert correct_peer_id in swarms[0].connections
+        assert swarms[0].get_peer_id() in swarms[1].connections
+
+
+@pytest.mark.trio
+async def test_swarm_skips_unsupported_multiaddrs():
+    """
+    Regression for #391: peerstore UDP/QUIC-only addresses must not dial via
+    TCP. TransportManager filters them and dial_peer raises SwarmException.
+    """
+    swarm = new_swarm()
+    peer_id = ID.from_pubkey(generate_new_ed25519_identity().public_key)
+    unsupported = [
+        Multiaddr("/ip4/127.0.0.1/udp/9090"),
+        Multiaddr("/ip4/127.0.0.1/udp/9090/quic"),
+    ]
+    swarm.peerstore.add_addrs(peer_id, unsupported, ttl=3600)
+
+    with pytest.raises(SwarmException, match="No supported transport"):
+        await swarm.dial_peer(peer_id)
+
+
+@pytest.mark.trio
+async def test_swarm_filters_unsupported_and_dials_tcp():
+    """
+    Mixed peerstore: unsupported addrs are skipped; a reachable TCP addr is used.
+    """
+    async with SwarmFactory.create_batch_and_listen(2) as swarms:
+        dialer, listener = swarms[0], swarms[1]
+        peer_id = listener.get_peer_id()
+        tcp_addrs = tuple(
+            addr
+            for transport in listener.listeners.values()
+            for addr in transport.get_addrs()
+        )
+        assert tcp_addrs
+
+        mixed = [
+            Multiaddr("/ip4/127.0.0.1/udp/9090"),
+            Multiaddr("/ip4/127.0.0.1/udp/9090/quic-v1"),
+            *tcp_addrs,
+        ]
+        dialer.peerstore.add_addrs(peer_id, mixed, ttl=3600)
+
+        connections = await dialer.dial_peer(peer_id)
+        assert len(connections) > 0
+        assert peer_id in dialer.connections

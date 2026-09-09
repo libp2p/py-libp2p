@@ -10,11 +10,14 @@ from libp2p.abc import (
 )
 from libp2p.host.ping import (
     ID as PingID,
-    handle_ping,
 )
 from libp2p.identity.identify.identify import (
     ID as IdentifyID,
     identify_handler_for,
+)
+from libp2p.identity.identify_push.identify_push import (
+    ID_PUSH as IdentifyPushID,
+    identify_push_handler_for,
 )
 
 if TYPE_CHECKING:
@@ -25,9 +28,13 @@ if TYPE_CHECKING:
 
 
 def get_default_protocols(host: IHost) -> "OrderedDict[TProtocol, StreamHandlerFn]":
+    from libp2p.host.ping import PingService
+
+    ping_service = PingService(host)
     return OrderedDict(
         (
             (IdentifyID, identify_handler_for(host, use_varint_format=True)),
-            (PingID, handle_ping),
+            (IdentifyPushID, identify_push_handler_for(host, use_varint_format=True)),
+            (PingID, ping_service.handle_ping),
         )
     )
