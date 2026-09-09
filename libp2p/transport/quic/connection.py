@@ -24,6 +24,7 @@ from libp2p.peer.id import ID
 from libp2p.rcmgr import Direction
 from libp2p.stream_muxer.exceptions import MuxedConnUnavailable
 
+from . import aioquic_compat
 from .exceptions import (
     QUICConnectionClosedError,
     QUICConnectionError,
@@ -42,6 +43,10 @@ if TYPE_CHECKING:
     from .transport import QUICTransport
 
 logger = logging.getLogger(__name__)
+
+# Every QUICConnection wraps an aioquic QuicConnection; make sure the aioquic
+# fixes are in place before any stream data is sent.
+aioquic_compat.apply()
 
 # Event-loop cadence for QUIC connections.  The sans-IO aioquic core needs
 # periodic pumping for timers and queued events, but the old fixed 1-10ms
