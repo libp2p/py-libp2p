@@ -167,6 +167,27 @@ class QUICTransportConfig(ConnectionConfig):
     STREAM_RECEIVE_BUFFER_HIGH_WATERMARK: int = 512 * 1024  # 512KB
     """High watermark for stream receive buffer."""
 
+    # Send-side backpressure
+    STREAM_SEND_BUFFER_HIGH_WATERMARK: int = 1024 * 1024  # 1MB
+    """Un-ACKed bytes per stream above which ``QUICStream.write()`` blocks.
+
+    aioquic buffers written data without limit; this bounds how far a writer
+    may run ahead of the peer. It should not be smaller than the peer's
+    per-stream flow-control window (``STREAM_FLOW_CONTROL_WINDOW`` for a
+    py-libp2p peer), otherwise the local buffer, not QUIC flow control,
+    becomes the throughput limit.
+    """
+
+    STREAM_SEND_BUFFER_LOW_WATERMARK: int = 256 * 1024  # 256KB
+    """Un-ACKed bytes per stream below which blocked writers are resumed."""
+
+    STREAM_WRITE_CHUNK_SIZE: int = 64 * 1024  # 64KB
+    """Maximum bytes handed to aioquic per ``write()`` step.
+
+    Large writes are split into chunks of this size so the send watermark is
+    checked between chunks and a single big write cannot overshoot it.
+    """
+
     # Stream lifecycle configuration
     ENABLE_STREAM_RESET_ON_ERROR: bool = True
     """Whether to automatically reset streams on errors."""
@@ -274,6 +295,22 @@ class QUICTransportConfig(ConnectionConfig):
             raise ValueError(
                 "STREAM_RECEIVE_BUFFER_LOW_WATERMARK must be < HIGH_WATERMARK"
             )
+
+        # Validate send backpressure watermarks
+        if self.STREAM_SEND_BUFFER_LOW_WATERMARK <= 0:
+            raise ValueError("STREAM_SEND_BUFFER_LOW_WATERMARK must be positive")
+
+        if (
+            self.STREAM_SEND_BUFFER_LOW_WATERMARK
+            >= self.STREAM_SEND_BUFFER_HIGH_WATERMARK
+        ):
+            raise ValueError(
+                "STREAM_SEND_BUFFER_LOW_WATERMARK must be < "
+                "STREAM_SEND_BUFFER_HIGH_WATERMARK"
+            )
+
+        if self.STREAM_WRITE_CHUNK_SIZE <= 0:
+            raise ValueError("STREAM_WRITE_CHUNK_SIZE must be positive")
 
         # Validate memory limits
         if self.STREAM_MEMORY_LIMIT_PER_STREAM <= 0:
