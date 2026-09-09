@@ -34,6 +34,9 @@ class DummyRoutingTable:
         self._size += 1
         return True
 
+    def get_target_keys_for_refresh(self) -> list[bytes]:
+        return []
+
 
 @pytest.fixture
 def mock_host():
@@ -272,7 +275,9 @@ async def test_do_refresh_force_refresh(mock_host, local_peer_id, dummy_query_fu
 
         # Verify random walk was called
         mock_random_walk.assert_called_once_with(
-            count=RANDOM_WALK_CONCURRENCY, current_routing_table_size=10
+            count=RANDOM_WALK_CONCURRENCY,
+            current_routing_table_size=10,
+            target_keys=[],
         )
 
         # Verify peers were added to routing table
@@ -403,3 +408,54 @@ async def test_periodic_refresh_task(mock_host, local_peer_id, dummy_query_funct
 
         # Verify _do_refresh was called at least once
         assert mock_do_refresh.call_count >= 1
+
+
+@pytest.mark.trio
+async def test_trigger_refresh_on_demand(
+    mock_host, local_peer_id, dummy_query_function
+):
+    """Test trigger_refresh executes on-demand refresh."""
+    rt = DummyRoutingTable(size=5)
+    manager = RTRefreshManager(
+        host=mock_host,
+        routing_table=rt,
+        local_peer_id=local_peer_id,
+        query_function=dummy_query_function,
+        enable_auto_refresh=True,
+    )
+    manager._running = True
+
+    with patch.object(manager, "_do_refresh", new_callable=AsyncMock) as mock_refresh:
+        await manager.trigger_refresh()
+        assert mock_refresh.call_count == 1
+
+
+@pytest.mark.trio
+async def test_refresh_with_targeted_routing_table_keys(
+    mock_host, local_peer_id, dummy_query_function
+):
+    """Test that _do_refresh queries targeted keys from the routing table."""
+    rt = DummyRoutingTable(size=5)
+    target_keys = [b"\x01" * 32, b"\x02" * 32]
+    rt.get_target_keys_for_refresh = Mock(return_value=target_keys)
+
+    manager = RTRefreshManager(
+        host=mock_host,
+        routing_table=rt,
+        local_peer_id=local_peer_id,
+        query_function=dummy_query_function,
+        enable_auto_refresh=True,
+    )
+
+    with patch.object(
+        manager.random_walk,
+        "run_concurrent_random_walks",
+        new_callable=AsyncMock,
+        return_value=[],
+    ) as mock_walk:
+        await manager._do_refresh(force=True)
+        mock_walk.assert_called_once_with(
+            count=RANDOM_WALK_CONCURRENCY,
+            current_routing_table_size=5,
+            target_keys=target_keys,
+        )

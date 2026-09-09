@@ -68,6 +68,22 @@ async def test_tcp_listener_raises_on_missing_port(nursery):
 
 
 @pytest.mark.trio
+async def test_tcp_dial_raises_open_connection_error_for_non_tcp_addr():
+    """dial() must not leak ProtocolLookupError for non-TCP multiaddrs (#391)."""
+    transport = TCP()
+    with pytest.raises(OpenConnectionError, match="no TCP component"):
+        await transport.dial(Multiaddr("/ip4/127.0.0.1/udp/9090"))
+
+
+def test_tcp_can_dial_rejects_udp_and_quic():
+    transport = TCP()
+    assert transport.can_dial(Multiaddr("/ip4/127.0.0.1/tcp/9000")) is True
+    assert transport.can_dial(Multiaddr("/ip4/127.0.0.1/udp/9090")) is False
+    assert transport.can_dial(Multiaddr("/ip4/127.0.0.1/udp/9090/quic")) is False
+    assert transport.can_dial(Multiaddr("/ip4/127.0.0.1/udp/9090/quic-v1")) is False
+
+
+@pytest.mark.trio
 async def test_tcp_listener_raises_on_bind_failure(nursery):
     """listen() raises OpenConnectionError (not a raw OSError) when port is in use."""
 

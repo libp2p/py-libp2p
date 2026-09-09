@@ -16,7 +16,12 @@ import trio
 from trio import MemoryReceiveChannel, MemorySendChannel
 
 from libp2p.abc_async import IAsyncPeerStore
+from libp2p.crypto.exceptions import CryptographyError
 from libp2p.crypto.keys import KeyPair, PrivateKey, PublicKey
+from libp2p.crypto.serialization import (
+    deserialize_private_key,
+    deserialize_public_key,
+)
 from libp2p.custom_types import MetadataValue
 from libp2p.peer.envelope import Envelope
 from libp2p.peer.id import ID
@@ -151,16 +156,15 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
                     key_key = self._get_key_key(peer_id)
                     key_data = await self.datastore.get(key_key)
                     if key_data:
-                        # For now, store keys as metadata until keypair serialization
-                        # keys_metadata = deserialize_metadata(key_data)
-                        # TODO: Implement proper keypair deserialization
-                        # peer_data.pubkey = deserialize_public_key(
-                        #     keys_metadata.get(b"pubkey", b"")
-                        # )
-                        # peer_data.privkey = deserialize_private_key(
-                        #     keys_metadata.get(b"privkey", b"")
-                        # )
-                        pass
+                        keys_metadata = deserialize_metadata(key_data)
+                        if keys_metadata.get("pubkey"):
+                            peer_data.pubkey = deserialize_public_key(
+                                keys_metadata["pubkey"]
+                            )
+                        if keys_metadata.get("privkey"):
+                            peer_data.privkey = deserialize_private_key(
+                                keys_metadata["privkey"]
+                            )
 
                     # Load metadata
                     metadata_key = self._get_metadata_key(peer_id)
@@ -187,7 +191,13 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
                         # Convert nanoseconds back to seconds for latmap
                         peer_data.latmap = latency_ns / 1_000_000_000
 
-                except (SerializationError, KeyError, ValueError, TypeError) as e:
+                except (
+                    SerializationError,
+                    CryptographyError,
+                    KeyError,
+                    ValueError,
+                    TypeError,
+                ) as e:
                     logger.error(f"Failed to load peer data for {peer_id}: {e}")
                     # Continue with empty peer data
                 except Exception:
@@ -216,7 +226,7 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
                 addr_data = serialize_addresses(peer_data.addrs)
                 await self.datastore.put(addr_key, addr_data)
 
-            # Save keys (temporarily as metadata until proper keypair serialization)
+            # Save keys as serialized metadata (pubkey/privkey protobuf bytes)
             if peer_data.pubkey or peer_data.privkey:
                 key_key = self._get_key_key(peer_id)
                 keys_metadata = {}

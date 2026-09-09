@@ -80,6 +80,12 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Setup Go for interop testing
+        if: matrix.toxenv == 'interop'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
       - run: |
           uv venv venv
           source venv/bin/activate

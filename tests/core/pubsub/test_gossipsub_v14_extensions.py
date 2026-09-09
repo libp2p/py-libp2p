@@ -76,7 +76,8 @@ async def test_extension_message_handling():
 
         # Connect peers
         await connect(pubsubs[0].host, pubsubs[1].host)
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(pubsubs[1].my_id)
+        await pubsubs[1].wait_for_peer(pubsubs[0].my_id)
 
         # Get peer IDs
         peer1_id = pubsubs[1].host.get_id()
@@ -86,8 +87,8 @@ async def test_extension_message_handling():
         test_data = b"test extension data"
         await router0.emit_extension("test-ext", test_data, peer1_id)
 
-        # Wait for message processing
-        await trio.sleep(0.5)
+        # No observable delivery side-effect (emit is a no-op); brief settle
+        await trio.sleep(0.1)
 
         # No extension data is delivered over the wire (only hello carries
         # control.extensions), so the handler is never called.
@@ -107,7 +108,8 @@ async def test_extension_message_to_unsupported_peer():
 
         # Connect peers (one v1.4, one v1.1)
         await connect(pubsubs[0].host, pubsubs[1].host)
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(pubsubs[1].my_id)
+        await pubsubs[1].wait_for_peer(pubsubs[0].my_id)
 
         # Try to send extension to v1.1 peer (should be ignored)
         peer1_id = pubsubs[1].host.get_id()
@@ -144,14 +146,15 @@ async def test_extension_handler_error_handling():
 
         # Connect peers
         await connect(pubsubs[0].host, pubsubs[1].host)
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(pubsubs[1].my_id)
+        await pubsubs[1].wait_for_peer(pubsubs[0].my_id)
 
         # emit_extension is a no-op; should complete without raising
         peer1_id = pubsubs[1].host.get_id()
         await router0.emit_extension("failing-ext", b"data", peer1_id)
 
-        # Wait for processing
-        await trio.sleep(0.5)
+        # No observable side-effect; brief settle before negative assert
+        await trio.sleep(0.1)
 
         # Handler is never called (no extension data is sent over the wire)
         assert error_count[0] == 0
@@ -170,14 +173,16 @@ async def test_unregistered_extension_handling():
 
         # Connect peers
         await connect(pubsubs[0].host, pubsubs[1].host)
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(pubsubs[1].my_id)
+        await pubsubs[1].wait_for_peer(pubsubs[0].my_id)
 
         # Send extension message for unregistered extension
         peer1_id = pubsubs[1].host.get_id()
 
         # This should not raise an error, just log a debug message
         await router0.emit_extension("unregistered-ext", b"data", peer1_id)
-        await trio.sleep(0.5)
+        # emit_extension is a no-op; brief settle with no observable flag
+        await trio.sleep(0.1)
 
 
 @pytest.mark.trio
@@ -195,8 +200,11 @@ async def test_extension_message_from_unsupported_peer():
             v14_router = v14_pubsubs[0].router
             assert isinstance(v14_router, GossipSub)
 
+            # Distinct protocol sets may not negotiate a pubsub stream, so
+            # wait_for_peer can hang; network connect + brief settle is enough
+            # because this test injects peer_protocol and calls handle_rpc.
             await connect(v14_pubsubs[0].host, v11_pubsubs[0].host)
-            await trio.sleep(0.5)
+            await trio.sleep(0.1)
 
             # Simulate v1.1 peer: router thinks this peer speaks v1.1 only
             v11_peer_id = v11_pubsubs[0].host.get_id()
@@ -250,15 +258,16 @@ async def test_multiple_extension_handlers():
 
         # Connect peers
         await connect(pubsubs[0].host, pubsubs[1].host)
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(pubsubs[1].my_id)
+        await pubsubs[1].wait_for_peer(pubsubs[0].my_id)
 
         # emit_extension is a no-op for both; should complete without raising
         peer1_id = pubsubs[1].host.get_id()
         await router0.emit_extension("ext1", b"data1", peer1_id)
         await router0.emit_extension("ext2", b"data2", peer1_id)
 
-        # Wait for processing
-        await trio.sleep(0.5)
+        # No observable delivery; brief settle before negative assert
+        await trio.sleep(0.1)
 
         # No extension data is delivered, so neither handler is called
         assert len(received_messages) == 0
@@ -291,15 +300,16 @@ async def test_extension_v13_compatibility():
 
         # Connect peers
         await connect(pubsubs[0].host, pubsubs[1].host)
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(pubsubs[1].my_id)
+        await pubsubs[1].wait_for_peer(pubsubs[0].my_id)
 
         # emit_extension is a no-op; should complete without raising
         peer1_id = pubsubs[1].host.get_id()
         test_data = b"v1.3 extension data"
         await router0.emit_extension("v13-ext", test_data, peer1_id)
 
-        # Wait for processing
-        await trio.sleep(0.5)
+        # No observable delivery; brief settle before negative assert
+        await trio.sleep(0.1)
 
         # No extension data is delivered over the wire
         assert len(received_extensions) == 0

@@ -49,6 +49,10 @@ class BitswapPeerManager:
         if cid in stats._pending_requests:
             del stats._pending_requests[cid]
 
+    def remove_peer(self, peer_id: PeerID) -> None:
+        """Drop all stats recorded for a peer (e.g. on disconnect)."""
+        self.peers.pop(peer_id, None)
+
     def get_best_peers(self, candidates: set[PeerID], count: int) -> list[PeerID]:
         """Rank peers based on latency and success rate."""
 

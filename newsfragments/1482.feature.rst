@@ -1,0 +1,1 @@
+Filecoin connect, ping/identify, and pubsub demos can report negotiated transport, security, and muxer metadata in their JSON probe output.

@@ -25,7 +25,10 @@ import varint
 from libp2p.crypto.secp256k1 import (
     create_new_key_pair,
 )
-from libp2p.kad_dht.common import MAX_DHT_MESSAGE_SIZE
+from libp2p.kad_dht.common import (
+    MAX_DHT_MESSAGE_SIZE,
+    QUERY_TIMEOUT,
+)
 from libp2p.kad_dht.pb.kademlia_pb2 import (
     Message,
 )
@@ -457,6 +460,35 @@ class TestPeerRouting:
         mock_stream.close.assert_called_once()
 
     @pytest.mark.trio
+    async def test_query_peer_for_closest_times_out_on_silent_peer(
+        self, peer_routing, mock_host, sample_peer_info, autojump_clock
+    ):
+        """
+        A peer that opens the stream but never replies must not hang the query.
+
+        ``_query_peer_for_closest`` is the I/O choke point: it bounds the
+        stream open/write/read with ``move_on_after(QUERY_TIMEOUT)`` and returns
+        no peers on timeout. This pins that behaviour (regression for #1434).
+        """
+        target_key = b"target_key"
+
+        async def _never_returns(*args, **kwargs):
+            await trio.sleep_forever()
+
+        mock_stream = AsyncMock()
+        mock_stream.read.side_effect = _never_returns
+        mock_host.new_stream.return_value = mock_stream
+        mock_host.get_peerstore().addrs.return_value = [sample_peer_info.addrs[0]]
+
+        # Outer guard well above QUERY_TIMEOUT; with autojump_clock this resolves
+        # in virtual time. If the query were unbounded, this fail_after trips.
+        with trio.fail_after(QUERY_TIMEOUT + 30):
+            result = await peer_routing._query_peer_for_closest(
+                sample_peer_info.peer_id, target_key
+            )
+
+        assert result == []
+
     async def test_query_peer_for_closest_rejects_oversized_response(
         self, peer_routing, mock_host, sample_peer_info
     ):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from pathlib import Path
 import ssl
@@ -55,6 +56,7 @@ from libp2p.custom_types import (
     TSecurityOptions,
 )
 from libp2p.host.basic_host import (
+    AddrsFactory,
     BasicHost,
 )
 from libp2p.host.routed_host import (
@@ -287,6 +289,7 @@ def _build_transports_for_swarm(
     transports: Sequence[ITransport] | None,
     enable_quic: bool,
     enable_webrtc: bool,
+    enable_webtransport: bool,
     enable_tcp: bool,
     enable_websocket: bool,
     enable_autotls: bool,
@@ -312,6 +315,7 @@ def _build_transports_for_swarm(
     :param transports: Explicit transport list, or ``None`` to auto-build.
     :param enable_quic: Whether to create a QUIC transport when auto-building.
     :param enable_webrtc: Whether to create a WebRTC transport when auto-building.
+    :param enable_webtransport: Whether to create a WebTransport transport.
     :param enable_tcp: Whether to include a TCP transport when auto-building.
     :param enable_websocket: Whether to include a WebSocket transport.
     :param enable_autotls: Whether to enable AutoTLS in QUIC/WebSocket transports.
@@ -338,6 +342,15 @@ def _build_transports_for_swarm(
 
             if "tcp" in protocols and "ws" not in protocols and "wss" not in protocols:
                 transport_obj = TCP()
+            elif "webtransport" in protocols:
+                from libp2p.transport.webtransport import WebTransportTransport
+
+                if key_pair is None:
+                    logger.warning(
+                        "WebTransport transport requires key_pair (private_key)"
+                    )
+                    continue
+                transport_obj = WebTransportTransport(private_key=key_pair.private_key)
             elif "quic" in protocols or "quic-v1" in protocols:
                 if key_pair is None:
                     logger.warning("QUIC transport requires key_pair (private_key)")
@@ -417,6 +430,17 @@ def _build_transports_for_swarm(
                 logger.warning("WebRTC transport requires key_pair (private_key)")
             else:
                 result.append(WebRTCDirectTransport(private_key=key_pair.private_key))
+        if enable_webtransport:
+            from libp2p.transport.webtransport import WebTransportTransport
+
+            if key_pair is None:
+                logger.warning(
+                    "WebTransport transport requires key_pair (private_key)"
+                )
+            else:
+                result.append(
+                    WebTransportTransport(private_key=key_pair.private_key)
+                )
         if enable_tcp or not result:
             result.append(TCP())
 
@@ -435,6 +459,7 @@ def new_swarm(
     # Backward-compat flags
     enable_quic: bool = False,
     enable_webrtc: bool = False,
+    enable_webtransport: bool = False,
     enable_autotls: bool = False,
     # NEW: convenience flags for auto-building transports
     enable_tcp: bool = True,
@@ -574,6 +599,7 @@ def new_swarm(
         transports=transports,
         enable_quic=enable_quic,
         enable_webrtc=enable_webrtc,
+        enable_webtransport=enable_webtransport,
         enable_tcp=enable_tcp,
         enable_websocket=enable_websocket,
         enable_autotls=enable_autotls,
@@ -683,6 +709,7 @@ def new_host(
     negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     enable_quic: bool = False,
     enable_webrtc: bool = False,
+    enable_webtransport: bool = False,
     quic_transport_opt: QUICTransportConfig | None = None,
     tls_client_config: ssl.SSLContext | None = None,
     tls_server_config: ssl.SSLContext | None = None,
@@ -693,6 +720,8 @@ def new_host(
     bootstrap_dns_max_retries: int = 3,
     connection_config: ConnectionConfig | None = None,
     announce_addrs: Sequence[multiaddr.Multiaddr] | None = None,
+    addrs_factory: AddrsFactory | None = None,
+    disable_identify_address_discovery: bool = False,
     # NEW: explicit transport list — highest priority
     transports: Sequence[ITransport] | None = None,
     # NEW: convenience flags
@@ -734,7 +763,17 @@ def new_host(
     :param bootstrap_dns_timeout: DNS resolution timeout in seconds per attempt
     :param bootstrap_dns_max_retries: max DNS resolution retries with backoff
     :param connection_config: optional connection configuration for connection manager
+        and health monitoring. When both connection_config and quic_transport_opt
+        are provided, all ConnectionConfig attributes are merged into the QUIC config.
     :param announce_addrs: if set, these replace listen addrs in get_addrs()
+        (mutually exclusive with ``addrs_factory``)
+    :param addrs_factory: optional callable matching go-libp2p ``AddrsFactory``;
+        receives the live candidate address list and returns addresses to
+        advertise (mutually exclusive with ``announce_addrs``)
+    :param disable_identify_address_discovery: if True, do not record Identify
+        observed addresses for local discovery (go
+        ``DisableIdentifyAddressDiscovery``). Identify itself still runs for
+        peer metadata; only observed-address discovery is skipped.
     :param transports: explicit list of transport instances to register.  When
         provided, all ``enable_*`` flags and ``listen_addrs``-based detection
         are bypassed.
@@ -767,12 +806,27 @@ def new_host(
     effective_config: ConnectionConfig | QUICTransportConfig | None
     if enable_quic and quic_transport_opt is not None:
         effective_config = quic_transport_opt
+        # When both connection_config and quic_transport_opt are provided,
+        # merge all ConnectionConfig attributes (including health fields such as
+        # critical_health_threshold) so new ConnectionConfig fields are never missed.
+        if connection_config is not None:
+            connection_config_attrs = [
+                f.name for f in dataclasses.fields(ConnectionConfig)  # type: ignore[arg-type]
+            ]
+            for attr in connection_config_attrs:
+                if hasattr(connection_config, attr):
+                    setattr(quic_transport_opt, attr, getattr(connection_config, attr))
+            logger.debug(
+                "Merged all ConnectionConfig attributes from "
+                "connection_config into QUIC config"
+            )
     else:
         effective_config = connection_config
 
     swarm = new_swarm(
         enable_quic=enable_quic,
         enable_webrtc=enable_webrtc,
+        enable_webtransport=enable_webtransport,
         key_pair=key_pair,
         muxer_opt=muxer_opt,
         sec_opt=sec_opt,
@@ -804,6 +858,8 @@ def new_host(
             bootstrap_dns_timeout=bootstrap_dns_timeout,
             bootstrap_dns_max_retries=bootstrap_dns_max_retries,
             announce_addrs=announce_addrs,
+            addrs_factory=addrs_factory,
+            disable_identify_address_discovery=disable_identify_address_discovery,
         )
     return BasicHost(
         network=swarm,
@@ -817,6 +873,8 @@ def new_host(
         bootstrap_dns_timeout=bootstrap_dns_timeout,
         bootstrap_dns_max_retries=bootstrap_dns_max_retries,
         announce_addrs=announce_addrs,
+        addrs_factory=addrs_factory,
+        disable_identify_address_discovery=disable_identify_address_discovery,
     )
 
 __version__ = __version("libp2p")

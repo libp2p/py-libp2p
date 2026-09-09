@@ -9,10 +9,13 @@ PROM_PATH = Path(__file__).parent / "prometheus.yml"
 
 def set_exporter_port(port: int) -> None:
     content = PROM_PATH.read_text()
-    pattern = r"host\\.docker\\.internal:\\d+"
-    replacement = f"host.docker.internal:{port}"
-    new = re.sub(pattern, replacement, content)
-    PROM_PATH.write_text(new)
+    # Update py-libp2p target port (host.docker.internal or legacy 172.17.0.1)
+    for pattern, replacement in [
+        (r"host\.docker\.internal:\d+", f"host.docker.internal:{port}"),
+        (r"172\.17\.0\.1:\d+", f"172.17.0.1:{port}"),
+    ]:
+        content = re.sub(pattern, replacement, content)
+    PROM_PATH.write_text(content)
     print(f"Updated Prometheus target to host.docker.internal:{port}")
 
 

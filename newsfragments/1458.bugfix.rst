@@ -1,0 +1,1 @@
+Reject 10-byte uvarint encodings whose terminating byte overflows 64 bits, and align ``decode_uvarint`` over-long failures to ``ParseError``.

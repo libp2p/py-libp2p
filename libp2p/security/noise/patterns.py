@@ -90,14 +90,20 @@ class IPattern(ABC):
 
     @abstractmethod
     async def handshake_outbound(
-        self, conn: IRawConnection, remote_peer: ID
+        self, conn: IRawConnection, remote_peer: ID | None
     ) -> ISecureConn:
         """
         Perform outbound handshake as initiator.
 
+        ``remote_peer=None`` is for initiators that do not know the
+        responder's identity up front (e.g. a WebRTC-Direct listener, which
+        is the Noise initiator per spec): the remote is still authenticated by
+        its signed handshake payload; only the peer-ID equality check is
+        skipped.
+
         Args:
             conn: Raw connection to perform handshake on
-            remote_peer: Expected remote peer ID for verification
+            remote_peer: Expected remote peer ID for verification, or ``None``
 
         Returns:
             ISecureConn: Established secure connection
@@ -279,7 +285,7 @@ class PatternXX(BasePattern):
         )
 
     async def handshake_outbound(
-        self, conn: IRawConnection, remote_peer: ID
+        self, conn: IRawConnection, remote_peer: ID | None
     ) -> ISecureConn:
         logger.debug(f"Noise XX handshake_outbound started to peer {remote_peer}")
         noise_state = self.create_noise_state(prologue=self.prologue)
@@ -339,7 +345,7 @@ class PatternXX(BasePattern):
             f"{remote_peer}"
         )
         remote_peer_id_from_pubkey = ID.from_pubkey(peer_handshake_payload.id_pubkey)
-        if remote_peer_id_from_pubkey != remote_peer:
+        if remote_peer is not None and remote_peer_id_from_pubkey != remote_peer:
             raise PeerIDMismatchesPubkey(
                 "peer id does not correspond to the received pubkey: "
                 f"remote_peer={remote_peer}, "
