@@ -1635,6 +1635,26 @@ class QUICConnection(IRawConnection, IMuxedConn):
         except Exception as e:
             logger.error(f"Transmission error: {e}")
             await self._handle_connection_error(e)
+            return
+
+        # Every receive path (client receiver, listener routing, event loop)
+        # ends here after aioquic has consumed incoming ACKs, so this is the
+        # single place to wake writers blocked on send backpressure.
+        self._refresh_send_backpressure()
+
+    # Send-side backpressure support
+
+    def stream_send_buffer_size(self, stream_id: int) -> int:
+        """Bytes written to ``stream_id`` that the peer has not acknowledged yet."""
+        return aioquic_compat.stream_send_buffer_size(self._quic, stream_id)
+
+    def _refresh_send_backpressure(self) -> None:
+        """Release streams whose un-ACKed send buffer dropped below the watermark."""
+        for stream in list(self._streams.values()):
+            # Writers re-arm backpressure themselves after each write step;
+            # here we only need to look at streams that are currently blocked.
+            if not stream._backpressure_event.is_set():
+                stream._update_send_backpressure()
 
     # Additional methods for stream data processing
     async def _process_quic_event(self, event: events.QuicEvent) -> None:

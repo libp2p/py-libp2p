@@ -1,0 +1,1 @@
+QUIC stream writes now apply send-side backpressure so writers wait when the transport send buffer is full, making upload throughput measurements honest.

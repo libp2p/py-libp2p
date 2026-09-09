@@ -172,6 +172,13 @@ class QUICStream(IMuxedStream):
         self.MAX_RECEIVE_BUFFER_SIZE = (
             connection._transport._config.MAX_STREAM_RECEIVE_BUFFER
         )
+        self.SEND_BUFFER_HIGH_WATERMARK = (
+            connection._transport._config.STREAM_SEND_BUFFER_HIGH_WATERMARK
+        )
+        self.SEND_BUFFER_LOW_WATERMARK = (
+            connection._transport._config.STREAM_SEND_BUFFER_LOW_WATERMARK
+        )
+        self.WRITE_CHUNK_SIZE = connection._transport._config.STREAM_WRITE_CHUNK_SIZE
 
         if self._resource_scope:
             self._reserve_memory(self.FLOW_CONTROL_WINDOW_SIZE)
@@ -303,15 +310,25 @@ class QUICStream(IMuxedStream):
 
     async def write(self, data: bytes) -> None:
         """
-        Write data to the stream with QUIC flow control.
+        Write data to the stream with send-side backpressure.
+
+        aioquic buffers written data without limit and only paces the actual
+        transmission by congestion control and the peer's flow-control window.
+        To keep a fast writer honest (and bounded in memory), the data is handed
+        to aioquic in ``WRITE_CHUNK_SIZE`` pieces and, whenever the stream's
+        un-ACKed send buffer reaches ``SEND_BUFFER_HIGH_WATERMARK``, this call
+        blocks until acknowledgements bring it back down to
+        ``SEND_BUFFER_LOW_WATERMARK``. Returning therefore means the peer has
+        acknowledged all but at most ``SEND_BUFFER_HIGH_WATERMARK`` bytes.
 
         Args:
             data: Data to write
 
         Raises:
             QUICStreamClosedError: Stream is closed for writing
+            QUICStreamResetError: Stream was reset while waiting to write
+            QUICStreamTimeoutError: No send capacity within ``WRITE_TIMEOUT``
             QUICStreamBackpressureError: Flow control window exhausted
-            QUICStreamResetError: Stream was reset
 
         """
         if not data:
@@ -327,17 +344,38 @@ class QUICStream(IMuxedStream):
                 )
 
         try:
-            # Handle flow control backpressure
-            await self._backpressure_event.wait()
+            view = memoryview(data)
+            total = len(view)
+            offset = 0
+            while offset < total:
+                # Block while the peer has not acknowledged enough of what we
+                # already handed to aioquic.
+                await self._wait_for_send_capacity()
 
-            # Send data through QUIC connection
-            self._connection._quic.send_stream_data(self._stream_id, data)
-            self._connection._signal_activity()
-            await self._connection._transmit()
+                end = min(offset + self.WRITE_CHUNK_SIZE, total)
+                if offset == 0 and end == total:
+                    chunk = data  # fits in one chunk: avoid a copy
+                else:
+                    chunk = bytes(view[offset:end])
+                offset = end
+
+                # Send data through QUIC connection
+                self._connection._quic.send_stream_data(self._stream_id, chunk)
+                self._connection._signal_activity()
+                await self._connection._transmit()
+                self._update_send_backpressure()
 
             self._timeline.record_first_data()
-            logger.debug(f"Wrote {len(data)} bytes to stream {self.stream_id}")
+            logger.debug(f"Wrote {total} bytes to stream {self.stream_id}")
 
+        except (
+            QUICStreamClosedError,
+            QUICStreamResetError,
+            QUICStreamTimeoutError,
+        ):
+            # Raised by _wait_for_send_capacity(): the stream state already
+            # reflects what happened, do not additionally reset the stream.
+            raise
         except ValueError as e:
             if "unknown peer-initiated stream" in str(e):
                 raise QUICStreamClosedError(
@@ -688,15 +726,92 @@ class QUICStream(IMuxedStream):
 
         """
         if available_window > 0:
-            self._backpressure_event.set()
+            # Re-evaluate against the actual send buffer: writers resume only
+            # if we are also below the send watermark.
+            self._update_send_backpressure()
             logger.debug(
-                f"Stream {self.stream_id} flow control".__add__(
-                    f"window updated: {available_window}"
-                )
+                f"Stream {self.stream_id} flow control "
+                f"window updated: {available_window}"
             )
         else:
-            self._backpressure_event = trio.Event()  # Reset to blocking state
+            self._block_writers()
             logger.debug(f"Stream {self.stream_id} flow control window exhausted")
+
+    # Send-side backpressure
+
+    def send_buffer_size(self) -> int:
+        """Bytes handed to aioquic for this stream that the peer has not ACKed."""
+        return self._connection.stream_send_buffer_size(self._stream_id)
+
+    def _block_writers(self) -> None:
+        """Make subsequent write() calls wait until capacity is available."""
+        if self._backpressure_event.is_set():
+            # Only ever replace a *set* event: nobody can be waiting on it, so
+            # waiters on the previous (unset) event are never orphaned.
+            self._backpressure_event = trio.Event()
+
+    def _update_send_backpressure(self) -> None:
+        """
+        Re-evaluate send backpressure from the un-ACKed send buffer.
+
+        Called after each write step and by the connection after datagrams are
+        processed (ACKs are handled inside aioquic's ``receive_datagram`` and
+        do not surface as events). Cheap enough to run frequently: it reads
+        two integers.
+        """
+        if self._write_closed or self._state in (
+            StreamState.CLOSED,
+            StreamState.RESET,
+        ):
+            # Nothing more will be written; never leave a writer stuck.
+            self._backpressure_event.set()
+            return
+
+        buffered = self.send_buffer_size()
+        if buffered >= self.SEND_BUFFER_HIGH_WATERMARK:
+            if self._backpressure_event.is_set():
+                logger.debug(
+                    f"Stream {self.stream_id} send buffer {buffered} bytes >= "
+                    f"{self.SEND_BUFFER_HIGH_WATERMARK}: applying backpressure"
+                )
+            self._block_writers()
+        elif buffered <= self.SEND_BUFFER_LOW_WATERMARK:
+            if not self._backpressure_event.is_set():
+                logger.debug(
+                    f"Stream {self.stream_id} send buffer {buffered} bytes <= "
+                    f"{self.SEND_BUFFER_LOW_WATERMARK}: releasing backpressure"
+                )
+                self._backpressure_event.set()
+
+    async def _wait_for_send_capacity(self) -> None:
+        """
+        Wait until the send buffer is below the low watermark.
+
+        Raises:
+            QUICStreamResetError: The stream was reset while waiting
+            QUICStreamClosedError: The write side was closed while waiting
+            QUICStreamTimeoutError: No capacity within ``WRITE_TIMEOUT``
+
+        """
+        if not self._backpressure_event.is_set():
+            with trio.move_on_after(self.WRITE_TIMEOUT) as scope:
+                await self._backpressure_event.wait()
+            if scope.cancelled_caught:
+                raise QUICStreamTimeoutError(
+                    f"Stream {self.stream_id} write timed out after "
+                    f"{self.WRITE_TIMEOUT}s waiting for the peer to acknowledge "
+                    f"{self.send_buffer_size()} buffered bytes"
+                )
+
+        # The wait may have ended because the stream went away, not because
+        # capacity was freed.
+        if self._state == StreamState.RESET:
+            raise QUICStreamResetError(
+                f"Stream {self.stream_id} was reset",
+                error_code=self._reset_error_code,
+            )
+        if self._write_closed or self._state == StreamState.CLOSED:
+            raise QUICStreamClosedError(f"Stream {self.stream_id} write side is closed")
 
     def _extract_data_from_buffer(self, n: int) -> bytes:
         """Extract data from receive buffer with specified limit."""
