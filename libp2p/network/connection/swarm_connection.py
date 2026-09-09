@@ -230,14 +230,36 @@ class SwarmConn(INetConn):
             while not self.event_closed.is_set():
                 try:
                     stream = await self.muxed_conn.accept_stream()
-                except MuxedConnUnavailable:
+                except MuxedConnUnavailable as e:
+                    from libp2p.utils.connection_shutdown import (
+                        log_expected_connection_shutdown,
+                    )
+
+                    log_expected_connection_shutdown(
+                        component="SwarmConn.accept_stream",
+                        peer_id=self.muxed_conn.peer_id,
+                        direction="remote",
+                        exc=e,
+                    )
                     await self.close()
                     break
                 except Exception as e:
-                    # Catch QUICConnectionClosedError and other unexpected disconnects
-                    logging.debug(
-                        f"Connection closed for peer {self.muxed_conn.peer_id}: {e}"
+                    from libp2p.utils.connection_shutdown import (
+                        is_expected_connection_shutdown,
+                        log_expected_connection_shutdown,
                     )
+
+                    if is_expected_connection_shutdown(e):
+                        log_expected_connection_shutdown(
+                            component="SwarmConn.accept_stream",
+                            peer_id=self.muxed_conn.peer_id,
+                            direction="remote",
+                            exc=e,
+                        )
+                    else:
+                        logging.debug(
+                            f"Connection closed for peer {self.muxed_conn.peer_id}: {e}"
+                        )
                     await self.close()
                     break
                 # The connection may have been closed while we were waiting
