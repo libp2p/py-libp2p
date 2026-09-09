@@ -62,10 +62,28 @@ MAX_TTL = 2**64 - 1
 
 # RFC3339 timestamp pattern for validation
 RFC3339_PATTERN = re.compile(
-    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}"
-    r"(\.\d+)?"
-    r"(Z|[+-]\d{2}:\d{2})$"
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}" r"(\.\d+)?" r"(Z|[+-]\d{2}:\d{2})$"
 )
+
+
+def _decode_name_to_multihash(name_hash: str) -> bytes | None:
+    """
+    Decode an IPNS name to the raw multihash bytes.
+
+    Accepts both the hex-encoded multihash form used internally by py-libp2p
+    and the base58btc PeerID form used by go-ipfs / py-ipfs-lite routing keys
+    (``/ipns/<base58-peer-id>``). Returns ``None`` when the name is neither.
+    """
+    try:
+        return bytes.fromhex(name_hash)
+    except ValueError:
+        pass
+    try:
+        from libp2p.peer.id import ID
+
+        return ID.from_base58(name_hash).to_bytes()
+    except Exception:
+        return None
 
 
 class ValidityType(IntEnum):
@@ -204,7 +222,9 @@ class IPNSValidator(Validator):
             raise InvalidRecordType(f"Invalid validity timestamp: {e}")
 
         # Check if public key was inlined in the IPNS name
-        name_bytes = bytes.fromhex(name_hash)
+        name_bytes = _decode_name_to_multihash(name_hash)
+        if name_bytes is None:
+            raise InvalidRecordType(f"Invalid IPNS name: {name_hash}")
         mh = multihash.decode(name_bytes)
         public_key_inlined = mh.func == IDENTITY_MULTIHASH_CODE
 
@@ -300,7 +320,8 @@ class IPNSValidator(Validator):
             try:
                 pubkey = unmarshal_public_key(entry.pubKey)
                 derived_id = ID.from_pubkey(pubkey)
-                if derived_id.to_bytes().hex() != name_hash:
+                name_bytes = _decode_name_to_multihash(name_hash)
+                if name_bytes is None or name_bytes != derived_id.to_bytes():
                     raise InvalidRecordType("Public key does not match IPNS name")
                 return pubkey
             except InvalidRecordType:
@@ -310,7 +331,9 @@ class IPNSValidator(Validator):
 
         # Try extracting from identity multihash (inlined Ed25519)
         try:
-            name_bytes = bytes.fromhex(name_hash)
+            name_bytes = _decode_name_to_multihash(name_hash)
+            if name_bytes is None:
+                raise InvalidRecordType("Public key not inlined in name")
             mh = multihash.decode(name_bytes)
 
             if mh.func == IDENTITY_MULTIHASH_CODE:

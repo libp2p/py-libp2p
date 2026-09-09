@@ -16,7 +16,7 @@ version = "0.0.1"
 requires-python = ">=3.10,<4.0"
 dependencies = [
   "requests>=2.30.0",
-  "zeroconf (>=0.147.0,<0.148.0)",
+  "zeroconf>=0.149.16,<0.151.0",
 ]
 
 [project.optional-dependencies]

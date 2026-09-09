@@ -132,11 +132,11 @@ def create_custom_identify_push_handler(host, host_name: str):
                     print(f"        - {protocol}")
 
             # Update the peerstore with the new information
-            from libp2p.identity.identify_push.identify_push import (
-                _update_peerstore_from_identify,
+            from libp2p.identity.update import (
+                update_peerstore_from_identify,
             )
 
-            await _update_peerstore_from_identify(
+            await update_peerstore_from_identify(
                 host.get_peerstore(), peer_id, identify_msg
             )
 

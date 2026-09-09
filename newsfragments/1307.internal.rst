@@ -1,0 +1,5 @@
+Replace the fixed ``trio.sleep(settle_time)`` in the ``subscribed_mesh`` pubsub
+test fixture with deterministic predicate-based polling using ``wait_for()``.
+The fixture now accepts ``ready_timeout`` / ``poll_interval`` and waits until
+every router's mesh for the topic has at least ``min(n - 1, router.degree_low)``
+peers before yielding.

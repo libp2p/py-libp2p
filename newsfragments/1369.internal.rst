@@ -1,0 +1,1 @@
+Widened the ``zeroconf`` dependency range to ``>=0.149.16,<0.151.0`` to allow security and bugfix releases while keeping mDNS discovery on a tested 0.149–0.150 line.

@@ -1,7 +1,6 @@
 import logging
 
 import pytest
-import trio
 
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
@@ -14,6 +13,9 @@ from libp2p.tools.utils import (
 )
 from tests.utils.factories import (
     PubsubFactory,
+)
+from tests.utils.pubsub.wait import (
+    wait_for,
 )
 
 logger = logging.getLogger(__name__)
@@ -33,8 +35,8 @@ async def test_attach_peer_records():
         ) as pubsubs_gsub_1:
             host_1 = pubsubs_gsub_1[0].host
 
-            # Wait for heartbeat to allow mesh to connect
-            await trio.sleep(2)
+            # Wait for direct-connect heartbeat to establish the pubsub peer
+            await pubsubs_gsub_1[0].wait_for_peer(host_0.get_id(), timeout=10)
 
             try:
                 # Verify that peer records exist in peer store
@@ -79,8 +81,9 @@ async def test_reject_graft():
                 # Connect the hosts
                 await connect(host_0, host_1)
 
-                # Wait 2 seconds for heartbeat to allow mesh to connect
-                await trio.sleep(1)
+                # Wait for pubsub streams to be established
+                await pubsubs_gsub_0[0].wait_for_peer(host_1.get_id(), timeout=10)
+                await pubsubs_gsub_1[0].wait_for_peer(host_0.get_id(), timeout=10)
 
                 topic = "test_reject_graft"
 
@@ -102,12 +105,23 @@ async def test_reject_graft():
                     "gossipsub 0 in mesh topic for gossipsub 1"
                 )
 
-                # Gossipsub 1 emits a graft request to Gossipsub 0
+                # Gossipsub 0 emits a graft request to Gossipsub 1 (direct peer of 1)
                 router_obj = pubsubs_gsub_0[0].router
                 assert isinstance(router_obj, GossipSub)
                 await router_obj.emit_graft(topic, host_1.get_id())
 
-                await trio.sleep(1)
+                # Wait until PRUNE from the direct-peer reject is handled (backoff set)
+                def _prune_backoff_recorded() -> bool:
+                    assert isinstance(router_obj, GossipSub)
+                    return host_1.get_id() in router_obj.back_off.get(topic, {})
+
+                await wait_for(
+                    _prune_backoff_recorded,
+                    timeout=10,
+                    fail_msg=(
+                        "PRUNE backoff not recorded after direct-peer GRAFT reject"
+                    ),
+                )
 
                 # Post-Graft assertions
                 assert host_1.get_id() not in pubsubs_gsub_0[0].router.mesh[topic], (
@@ -144,30 +158,30 @@ async def test_heartbeat_reconnect():
             await connect(host_0, host_1)
 
             try:
-                # Wait for initial connection and mesh setup
-                await trio.sleep(1)
+                # Wait for initial pubsub peer streams
+                await pubsubs_gsub_0[0].wait_for_peer(host_1.get_id(), timeout=10)
+                await pubsubs_gsub_1[0].wait_for_peer(host_0.get_id(), timeout=10)
 
                 # Verify initial connection
                 assert host_1.get_id() in pubsubs_gsub_0[0].peers, (
                     "Initial connection not established for gossipsub 0"
                 )
                 assert host_0.get_id() in pubsubs_gsub_1[0].peers, (
-                    "Initial connection not established for gossipsub 0"
+                    "Initial connection not established for gossipsub 1"
                 )
 
                 # Simulate disconnection
                 await host_0.disconnect(host_1.get_id())
 
-                # Wait for heartbeat to detect disconnection
-                await trio.sleep(1)
-
-                # Verify that peers are removed after disconnection
-                assert host_0.get_id() not in pubsubs_gsub_1[0].peers, (
-                    "Peer 0 still in gossipsub 1 after disconnection"
+                # Wait for disconnect to remove the peer from pubsub
+                await wait_for(
+                    lambda: host_0.get_id() not in pubsubs_gsub_1[0].peers,
+                    timeout=10,
+                    fail_msg="Peer 0 still in gossipsub 1 after disconnection",
                 )
 
-                # Wait for heartbeat to reestablish connection
-                await trio.sleep(2)
+                # Wait for direct-connect heartbeat to reestablish connection
+                await pubsubs_gsub_1[0].wait_for_peer(host_0.get_id(), timeout=15)
 
                 # Verify connection reestablishment
                 assert host_0.get_id() in pubsubs_gsub_1[0].peers, (

@@ -1,0 +1,1 @@
+Removed the duplicate ``libp2p/transport/webrtc/_varint.py`` and migrated WebRTC stream and signaling framing onto the shared ``libp2p.utils.varint`` utilities.

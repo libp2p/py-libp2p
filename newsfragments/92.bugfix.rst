@@ -1,0 +1,3 @@
+``BasicHost.close()`` now stops background services (mDNS, UPnP, bootstrap) and
+cancels identify tasks before closing the network. Test ``HostFactory`` tears
+hosts down via ``close()``, eliminating pending-task warnings (issue #92).
