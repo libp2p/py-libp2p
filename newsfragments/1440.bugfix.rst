@@ -1,0 +1,1 @@
+Harden the varint decoders in ``libp2p.utils.varint`` against malformed input. ``decode_uvarint`` now raises ``ParseError`` on a truncated varint (one whose final byte still has the continuation bit set) instead of silently returning a partial value, and ``decode_uvarint_from_stream`` rejects an over-long (11-byte) varint that would encode a value larger than 64 bits.

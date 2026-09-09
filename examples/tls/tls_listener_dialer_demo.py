@@ -112,9 +112,8 @@ async def run_full_test():
 
     listener_tls = TLSTransport(listener_key_pair)
     dialer_tls = TLSTransport(dialer_key_pair)
-
-    listener_tls.trust_peer_cert_pem(dialer_tls.get_certificate_pem())
-    dialer_tls.trust_peer_cert_pem(listener_tls.get_certificate_pem())
+    # PKIX trust-store preloading is optional for demos; production interop uses
+    # libp2p extension verification after the handshake.
 
     listener_sec_opt = {PROTOCOL_ID: listener_tls}
     dialer_sec_opt = {PROTOCOL_ID: dialer_tls}

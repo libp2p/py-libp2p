@@ -650,9 +650,10 @@ async def test_relay_discovery_multiple_relays_with_mixed_reservations():
 
             # get_relay() should prioritize relays with reservations
             selected = client_discovery.get_relay()
-            assert selected in [relay_host1.get_id(), relay_host3.get_id()], (
-                "Should select relay with reservation"
-            )
+            assert selected in [
+                relay_host1.get_id(),
+                relay_host3.get_id(),
+            ], "Should select relay with reservation"
 
             logger.info("Mixed reservations test passed")
 

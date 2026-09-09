@@ -1,0 +1,1 @@
+Fixed persistent peerstore restore so public and private keys survive process restarts when using durable backends such as SQLite.

@@ -2,13 +2,14 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies (includes libsrtp2-dev for aiortc/WebRTC)
 RUN apt-get update && apt-get install -y \
     redis-tools \
     build-essential \
     cmake \
     pkg-config \
     libgmp-dev \
+    libsrtp2-dev \
     git \
     curl \
     && rm -rf /var/lib/apt/lists/*

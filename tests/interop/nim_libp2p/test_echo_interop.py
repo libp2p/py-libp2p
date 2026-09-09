@@ -26,9 +26,14 @@ logger = logging.getLogger(__name__)
 class NimEchoServer:
     """Simple nim echo server manager."""
 
+    binary_path: Path
+    process: None | subprocess.Popen
+    peer_id: str | None
+    listen_addr: str | None
+
     def __init__(self, binary_path: Path):
         self.binary_path = binary_path
-        self.process: None | subprocess.Popen = None
+        self.process = None
         self.peer_id = None
         self.listen_addr = None
 
@@ -36,8 +41,10 @@ class NimEchoServer:
         """Start nim echo server and get connection info."""
         logger.info(f"Starting nim echo server: {self.binary_path}")
 
+        # Work around pyrefly missing-attribute on self.binary_path (@_ base).
+        binary_path = self.binary_path  # type: ignore[missing-attribute]
         self.process = subprocess.Popen(
-            [str(self.binary_path)],
+            [str(binary_path)],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             universal_newlines=True,
@@ -57,16 +64,16 @@ class NimEchoServer:
                 if not line:
                     continue
 
-            logger.info(f"Server: {line}")
+                logger.info(f"Server: {line}")
 
-            if line.startswith("Peer ID:"):
-                self.peer_id = line.split(":", 1)[1].strip()
+                if line.startswith("Peer ID:"):
+                    self.peer_id = line.split(":", 1)[1].strip()
 
-            elif "/quic-v1/p2p/" in line and self.peer_id:
-                if line.strip().startswith("/"):
-                    self.listen_addr = line.strip()
-                    logger.info(f"Server ready: {self.listen_addr}")
-                    return self.peer_id, self.listen_addr
+                elif "/quic-v1/p2p/" in line and self.peer_id:
+                    if line.strip().startswith("/"):
+                        self.listen_addr = line.strip()
+                        logger.info(f"Server ready: {self.listen_addr}")
+                        return self.peer_id, self.listen_addr
 
         await self.stop()
         raise TimeoutError(f"Server failed to start within {SERVER_START_TIMEOUT}s")
@@ -140,7 +147,7 @@ async def run_echo_test(server_addr: str, messages: list[str]):
 
 
 @pytest.mark.trio
-@pytest.mark.timeout(TEST_TIMEOUT)
+@pytest.mark.timeout(TEST_TIMEOUT)  # type: ignore[attr-defined]
 async def test_basic_echo_interop(nim_server):
     """Test basic echo functionality between py-libp2p and nim-libp2p."""
     server, peer_id, listen_addr = nim_server
@@ -167,12 +174,12 @@ async def test_basic_echo_interop(nim_server):
 
 
 @pytest.mark.trio
-@pytest.mark.timeout(TEST_TIMEOUT)
+@pytest.mark.timeout(TEST_TIMEOUT)  # type: ignore[attr-defined]
 async def test_large_message_echo(nim_server):
     """Test echo with larger messages."""
     server, peer_id, listen_addr = nim_server
 
-    large_messages = [
+    large_messages: list[str] = [
         "x" * 1024,
         "y" * 5000,
     ]

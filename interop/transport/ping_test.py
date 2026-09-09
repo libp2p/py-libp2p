@@ -28,12 +28,6 @@ import multiaddr
 import redis
 import trio
 
-# ExceptionGroup is built-in in Python 3.11+, import for older versions
-try:
-    ExceptionGroup  # noqa: B018
-except NameError:
-    from exceptiongroup import ExceptionGroup  # type: ignore[no-redef]
-
 from libp2p import create_mplex_muxer_option, create_yamux_muxer_option, new_host
 from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.crypto.x25519 import create_new_key_pair as create_new_x25519_key_pair
@@ -60,6 +54,7 @@ from libp2p.security.tls.transport import (
     TLSTransport,
 )
 from libp2p.utils.address_validation import get_available_interfaces
+from libp2p.utils.multiaddr_utils import extract_ip_from_multiaddr
 
 _orig_mk_identify_protobuf = _identify_mod._mk_identify_protobuf
 
@@ -172,7 +167,7 @@ class PingTest:
         if not self.transport:
             raise ValueError("TRANSPORT environment variable is required")
 
-        standalone_transports = ["quic-v1"]
+        standalone_transports = ["quic-v1", "webrtc-direct"]
 
         self.muxer: str | None = None
         self.security: str | None = None
@@ -242,11 +237,11 @@ class PingTest:
 
     def validate_configuration(self) -> None:
         """Validate configuration parameters."""
-        valid_transports = ["tcp", "ws", "wss", "quic-v1"]
+        valid_transports = ["tcp", "ws", "wss", "quic-v1", "webrtc-direct"]
         valid_security = ["noise", "plaintext", "tls"]
         valid_muxers = ["mplex", "yamux"]
-        # Standalone transports don't use separate security/muxer
-        standalone_transports = ["quic-v1"]
+        # Standalone transports have security + muxing built-in
+        standalone_transports = ["quic-v1", "webrtc-direct"]
 
         if self.transport not in valid_transports:
             raise ValueError(
@@ -271,7 +266,7 @@ class PingTest:
         """Create security options based on configuration."""
         # Standalone transports (like quic-v1) have security built-in,
         # no separate security needed
-        standalone_transports = ["quic-v1"]
+        standalone_transports = ["quic-v1", "webrtc-direct"]
         if self.transport in standalone_transports:
             # For standalone transports, return empty security options
             # The security is handled by the transport itself
@@ -310,7 +305,7 @@ class PingTest:
         """Create muxer options based on configuration."""
         # Standalone transports (like quic-v1) have muxing built-in,
         # no separate muxer needed
-        standalone_transports = ["quic-v1"]
+        standalone_transports = ["quic-v1", "webrtc-direct"]
         if self.transport in standalone_transports:
             # For standalone transports, return None (no separate muxer)
             # The muxing is handled by the transport itself
@@ -436,7 +431,7 @@ class PingTest:
 
     def _get_ip_value(self, addr: multiaddr.Multiaddr) -> str | None:
         """Extract IP value from multiaddr (IPv4 or IPv6)."""
-        return addr.value_for_protocol("ip4") or addr.value_for_protocol("ip6")
+        return extract_ip_from_multiaddr(addr)
 
     def _get_protocol_names(self, addr: multiaddr.Multiaddr) -> list[str]:
         """Get protocol names from multiaddr."""
@@ -478,6 +473,17 @@ class PingTest:
         if p2p_value:
             return addr.encapsulate(multiaddr.Multiaddr(f"/p2p/{p2p_value}"))
         return addr
+
+    def _build_webrtc_direct_addr(
+        self, ip_value: str, port: int
+    ) -> multiaddr.Multiaddr:
+        """Build WebRTC Direct address: /ip4|ip6/{ip}/udp/{port}/webrtc-direct."""
+        is_ipv6 = ":" in ip_value
+        if is_ipv6:
+            base = multiaddr.Multiaddr(f"/ip6/{ip_value}/udp/{port}")
+        else:
+            base = multiaddr.Multiaddr(f"/ip4/{ip_value}/udp/{port}")
+        return base.encapsulate(multiaddr.Multiaddr("/webrtc-direct"))
 
     def _build_quic_addr(self, ip_value: str, port: int) -> multiaddr.Multiaddr:
         """
@@ -527,6 +533,27 @@ class PingTest:
             if quic_addrs:
                 return quic_addrs
             return [self._build_quic_addr("0.0.0.0", port)]
+
+        elif self.transport == "webrtc-direct":
+            # WebRTC Direct uses UDP like QUIC
+            webrtc_addrs = []
+            for addr in base_addrs:
+                try:
+                    ip_value = self._get_ip_value(addr)
+                    tcp_port = addr.value_for_protocol("tcp") or port
+                    if ip_value:
+                        wrtc_addr = self._build_webrtc_direct_addr(ip_value, tcp_port)
+                        _, p2p_value = self._extract_and_preserve_p2p(addr)
+                        wrtc_addr = self._encapsulate_with_p2p(wrtc_addr, p2p_value)
+                        webrtc_addrs.append(wrtc_addr)
+                except Exception as e:
+                    print(
+                        f"Error building webrtc-direct addr from {addr}: {e}",
+                        file=sys.stderr,
+                    )
+            if webrtc_addrs:
+                return webrtc_addrs
+            return [self._build_webrtc_direct_addr("0.0.0.0", port)]
 
         elif self.transport == "ws":
             # Add /ws protocol to TCP addresses
@@ -621,44 +648,6 @@ class PingTest:
             except (AttributeError, Exception):
                 return "unknown"
 
-    def _is_connection_closed_error(self, exc: BaseException) -> bool:
-        """
-        Check if an exception is an expected 'Connection closed' error.
-
-        These errors occur during graceful shutdown when the muxer is still
-        trying to read from a connection that has been closed by the other side.
-        """
-        if exc is None:
-            return False
-
-        # Check direct exception message (shutdown races with many implementations)
-        exc_str = str(exc).lower()
-        if any(
-            phrase in exc_str
-            for phrase in (
-                "connection closed",
-                "stream reset",
-                "connection reset",
-                "broken pipe",
-                "stream eof",
-                "end of file",
-            )
-        ):
-            return True
-
-        # Check cause chain
-        if hasattr(exc, "__cause__") and exc.__cause__:
-            if self._is_connection_closed_error(exc.__cause__):
-                return True
-
-        # Check nested ExceptionGroups
-        if isinstance(exc, ExceptionGroup):
-            return all(
-                self._is_connection_closed_error(inner) for inner in exc.exceptions
-            )
-
-        return False
-
     def _listener_post_ping_grace_secs(self) -> float:
         if not self.test_plans:
             return 0.2
@@ -737,8 +726,10 @@ class PingTest:
                 filtered.append(addr)
             elif self.transport == "quic-v1" and "quic-v1" in protocols:
                 filtered.append(addr)
+            elif self.transport == "webrtc-direct" and "webrtc-direct" in protocols:
+                filtered.append(addr)
             elif self.transport == "tcp" and not any(
-                p in protocols for p in ["ws", "wss", "quic-v1"]
+                p in protocols for p in ["ws", "wss", "quic-v1", "webrtc-direct"]
             ):
                 filtered.append(addr)
         return filtered if filtered else addresses
@@ -859,108 +850,70 @@ class PingTest:
             muxer_opt=muxer_opt,
             listen_addrs=listen_addrs,
             enable_quic=(self.transport == "quic-v1"),
+            enable_webrtc=(self.transport == "webrtc-direct"),
             tls_client_config=tls_client_config,
             tls_server_config=tls_server_config,
         )
         self.host.set_stream_handler(PING_PROTOCOL_ID, self.handle_ping)
         self.log_protocols()
 
-        listener_success = False
-        try:
-            async with self.host.run(listen_addrs=listen_addrs):
-                all_addrs = self.host.get_addrs()
-                if not all_addrs:
-                    raise RuntimeError("No listen addresses available")
+        async with self.host.run(listen_addrs=listen_addrs):
+            all_addrs = self.host.get_addrs()
+            if not all_addrs:
+                raise RuntimeError("No listen addresses available")
 
-                actual_addr = self._get_publishable_address(all_addrs)
-                print(
-                    f"Publishing address for transport {self.transport}: {actual_addr}",
-                    file=sys.stderr,
-                )
-                # Redis Coordination Protocol:
-                # - Key: self.redis_listener_key (test-plans: listenerAddr;
-                #   unified: {TEST_KEY}_listener_multiaddr)
-                # - Operation: RPUSH; dialer uses BLPOP on the same key.
-                redis_key = self.redis_listener_key
+            actual_addr = self._get_publishable_address(all_addrs)
+            print(
+                f"Publishing address for transport {self.transport}: {actual_addr}",
+                file=sys.stderr,
+            )
+            # Redis Coordination Protocol:
+            # - Key: self.redis_listener_key (test-plans: listenerAddr;
+            #   unified: {TEST_KEY}_listener_multiaddr)
+            # - Operation: RPUSH; dialer uses BLPOP on the same key.
+            redis_key = self.redis_listener_key
 
-                # Clean up any existing key to ensure it's a list type
-                try:
-                    assert self.redis_client is not None
-                    self.redis_client.delete(redis_key)
-                except Exception:
-                    pass  # Ignore if key doesn't exist
-
-                # Dialers may race multistream after WS upgrade; brief settle helps.
-                if self.test_plans and self.transport in ("ws", "wss"):
-                    await trio.sleep(0.3)
-
-                # Publish listener address using RPUSH (list operation)
-                # Dialer will use BLPOP to block and read this value
+            # Clean up any existing key to ensure it's a list type
+            try:
                 assert self.redis_client is not None
-                self.redis_client.rpush(redis_key, actual_addr)
-                print(
-                    "Listener ready, waiting for dialer to connect...", file=sys.stderr
-                )
+                self.redis_client.delete(redis_key)
+            except Exception:
+                pass  # Ignore if key doesn't exist
 
-                wait_timeout = min(self.test_timeout_seconds, MAX_TEST_TIMEOUT)
-                check_interval = 0.5
-                elapsed: float = 0
+            # Dialers may race multistream after WS upgrade; brief settle helps.
+            if self.test_plans and self.transport in ("ws", "wss"):
+                await trio.sleep(0.3)
 
-                while elapsed < wait_timeout:
-                    if self.ping_received:
-                        print(
-                            "Ping received and responded, listener exiting",
-                            file=sys.stderr,
-                        )
-                        listener_success = True
-                        # Small muxer drain delay; in test-plans wait longer so the
-                        # dialer container can exit before we do (see module note).
-                        grace = self._listener_post_ping_grace_secs()
-                        await trio.sleep(grace)
-                        break
-                    await trio.sleep(check_interval)
-                    elapsed += check_interval
+            # Publish listener address using RPUSH (list operation)
+            # Dialer will use BLPOP to block and read this value
+            assert self.redis_client is not None
+            self.redis_client.rpush(redis_key, actual_addr)
+            print("Listener ready, waiting for dialer to connect...", file=sys.stderr)
 
-                if not self.ping_received:
+            wait_timeout = min(self.test_timeout_seconds, MAX_TEST_TIMEOUT)
+            check_interval = 0.5
+            elapsed: float = 0
+
+            while elapsed < wait_timeout:
+                if self.ping_received:
                     print(
-                        f"Timeout: No ping received within {wait_timeout} seconds",
+                        "Ping received and responded, listener exiting",
                         file=sys.stderr,
                     )
-                    sys.exit(1)
+                    # Small muxer drain delay; in test-plans wait longer so the
+                    # dialer container can exit before we do (see module note).
+                    grace = self._listener_post_ping_grace_secs()
+                    await trio.sleep(grace)
+                    break
+                await trio.sleep(check_interval)
+                elapsed += check_interval
 
-        except ExceptionGroup as eg:
-            # Handle expected "Connection closed" errors during shutdown
-            if listener_success:
-                # Check if all errors are connection closed errors
-                all_conn_closed = True
-                for exc in eg.exceptions:
-                    if isinstance(exc, ExceptionGroup):
-                        for inner in exc.exceptions:
-                            if not self._is_connection_closed_error(inner):
-                                all_conn_closed = False
-                                break
-                    elif not self._is_connection_closed_error(exc):
-                        all_conn_closed = False
-                        break
-
-                if all_conn_closed:
-                    print(
-                        "Listener completed (connection closed during cleanup)",
-                        file=sys.stderr,
-                    )
-                    return
-            # Re-raise if we didn't succeed or if there are real errors
-            raise
-
-        except Exception as e:
-            # Check if it's a connection closed error after success
-            if listener_success and self._is_connection_closed_error(e):
+            if not self.ping_received:
                 print(
-                    "Listener completed (connection closed during cleanup)",
+                    f"Timeout: No ping received within {wait_timeout} seconds",
                     file=sys.stderr,
                 )
-                return
-            raise
+                sys.exit(1)
 
     async def _connect_redis_with_retry(
         self, max_retries: int = 10, retry_delay: float = 1.0
@@ -1191,6 +1144,7 @@ class PingTest:
                 "sec_opt": sec_opt,
                 "muxer_opt": muxer_opt,
                 "enable_quic": (self.transport == "quic-v1"),
+                "enable_webrtc": (self.transport == "webrtc-direct"),
                 "tls_client_config": tls_client_config,
                 "tls_server_config": tls_server_config,
             }
@@ -1382,43 +1336,12 @@ class PingTest:
                 # Small delay to allow muxer to drain
                 await trio.sleep(0.1)
 
-        except ExceptionGroup as eg:
-            # Handle expected "Connection closed" errors during shutdown
-            # These occur when the muxer is still reading while we close
-            non_connection_errors = []
-            for exc in eg.exceptions:
-                if isinstance(exc, ExceptionGroup):
-                    for inner in exc.exceptions:
-                        if not self._is_connection_closed_error(inner):
-                            non_connection_errors.append(inner)
-                elif not self._is_connection_closed_error(exc):
-                    non_connection_errors.append(exc)
-
-            if non_connection_errors:
-                print(f"Dialer error: {eg}", file=sys.stderr)
-                import traceback
-
-                traceback.print_exc(file=sys.stderr)
-                sys.exit(1)
-            else:
-                print(
-                    "Dialer completed (connection closed during cleanup)",
-                    file=sys.stderr,
-                )
-
         except Exception as e:
-            # Check if it's a connection closed error (expected during shutdown)
-            if self._is_connection_closed_error(e):
-                print(
-                    "Dialer completed (connection closed during cleanup)",
-                    file=sys.stderr,
-                )
-            else:
-                print(f"Dialer error: {e}", file=sys.stderr)
-                import traceback
+            print(f"Dialer error: {e}", file=sys.stderr)
+            import traceback
 
-                traceback.print_exc(file=sys.stderr)
-                sys.exit(1)
+            traceback.print_exc(file=sys.stderr)
+            sys.exit(1)
 
     async def run(self) -> None:
         """Main run method."""
@@ -1431,35 +1354,12 @@ class PingTest:
             else:
                 await self.run_listener()
 
-        except ExceptionGroup as eg:
-            # Check if all exceptions are "connection closed" (expected during cleanup)
-            all_conn_closed = True
-            for exc in eg.exceptions:
-                if isinstance(exc, ExceptionGroup):
-                    for inner in exc.exceptions:
-                        if not self._is_connection_closed_error(inner):
-                            all_conn_closed = False
-                            break
-                elif not self._is_connection_closed_error(exc):
-                    all_conn_closed = False
-                    break
-
-            if not all_conn_closed:
-                print(f"Error: {eg}", file=sys.stderr)
-                import traceback
-
-                traceback.print_exc(file=sys.stderr)
-                sys.exit(1)
-            # If all are connection closed, that's expected - exit normally
-
         except Exception as e:
-            # Check if it's a connection closed error (expected during shutdown)
-            if not self._is_connection_closed_error(e):
-                print(f"Error: {e}", file=sys.stderr)
-                import traceback
+            print(f"Error: {e}", file=sys.stderr)
+            import traceback
 
-                traceback.print_exc(file=sys.stderr)
-                sys.exit(1)
+            traceback.print_exc(file=sys.stderr)
+            sys.exit(1)
 
         finally:
             if self.redis_client:

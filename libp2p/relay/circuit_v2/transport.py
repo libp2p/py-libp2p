@@ -200,6 +200,18 @@ class CircuitV2Transport(ITransport):
         if config.enable_dht_discovery:
             self.dht = KadDHT(host, DHTMode.CLIENT)
 
+    def can_dial(self, maddr: multiaddr.Multiaddr) -> bool:
+        """Return True if this transport can dial the given multiaddr."""
+        return any(p.code == P_P2P_CIRCUIT for p in maddr.protocols())
+
+    def can_listen(self, maddr: multiaddr.Multiaddr) -> bool:
+        """Return True if this transport can listen on the given multiaddr."""
+        return any(p.code == P_P2P_CIRCUIT for p in maddr.protocols())
+
+    def protocols(self) -> list[str]:
+        """Return the list of protocol names handled by this transport."""
+        return ["p2p-circuit"]
+
     async def dial(  # type: ignore[override]
         self,
         maddr: multiaddr.Multiaddr,
@@ -384,6 +396,15 @@ class CircuitV2Transport(ITransport):
                 if not success:
                     logger.warning(
                         "Failed to make reservation with relay %s", relay_peer_id
+                    )
+                # rust-libp2p (and similar) relays finish each HOP substream after one
+                # exchange. After RESERVE, open a new stream for CONNECT so the relay
+                # does not drop the substream before we read the STATUS response.
+                await relay_stream.close()
+                relay_stream = await self.host.new_stream(relay_peer_id, [PROTOCOL_ID])
+                if not relay_stream:
+                    raise ConnectionError(
+                        f"Could not open stream to relay {relay_peer_id} for CONNECT"
                     )
             # Create signed peer record to send with the HOP message
             envelope_bytes, _ = env_to_send_in_RPC(self.host)
@@ -1077,7 +1098,7 @@ class CircuitV2Listener(Service, IListener):
         finally:
             logger.debug("CircuitV2Listener stopped")
 
-    async def listen(self, maddr: multiaddr.Multiaddr, nursery: trio.Nursery) -> None:
+    async def listen(self, maddr: multiaddr.Multiaddr) -> None:
         """
         Start listening on the given multiaddr.
 
@@ -1085,8 +1106,6 @@ class CircuitV2Listener(Service, IListener):
         ----------
         maddr : multiaddr.Multiaddr
             The multiaddr to listen on
-        nursery : trio.Nursery
-            The nursery to run tasks in
 
         """
         # Convert string to Multiaddr if needed

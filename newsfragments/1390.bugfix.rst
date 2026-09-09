@@ -1,0 +1,1 @@
+quic: remove shared ``QuicLogger`` instance that caused ``QuicLoggerTrace does not belong to QuicLogger`` crashes when multiple concurrent inbound QUIC connections were active. Each connection now uses ``quic_logger=None``, preventing cross-connection trace ownership errors.

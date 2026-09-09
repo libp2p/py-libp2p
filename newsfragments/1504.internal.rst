@@ -1,0 +1,1 @@
+De-flaked ``test_fanout_maintenance`` with event-driven peer/subscription/mesh waits and aligned prune/unsubscribe backoff to avoid GRAFT-flood rejects after resubscribe.

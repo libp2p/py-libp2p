@@ -42,7 +42,7 @@ class MockMuxedStream(IMuxedStream):
 def mock_stream():
     """Create a mock stream for testing."""
     muxed_stream = MockMuxedStream()
-    return NetStream(muxed_stream, None)
+    return NetStream(muxed_stream, None, None)
 
 
 @pytest.mark.trio

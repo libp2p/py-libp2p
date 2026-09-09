@@ -5,7 +5,12 @@ from libp2p.crypto.keys import PublicKey
 from libp2p.peer.id import ID
 from libp2p.records.pubkey import PublicKeyValidator, unmarshal_public_key
 from libp2p.records.record import make_put_record
-from libp2p.records.utils import InvalidRecordType, split_key
+from libp2p.records.utils import (
+    InvalidRecordType,
+    sign_record,
+    split_key,
+    verify_record,
+)
 from libp2p.records.validator import NamespacedValidator, Validator
 
 bad_paths = [
@@ -243,3 +248,85 @@ class TestStrictValidation:
         # Non-namespaced key uses custom fallback that rejects
         with pytest.raises(ValueError, match="Rejected by fallback"):
             validators.validate("plain-key", b"value")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# verify_record — multi-key-type coverage
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestVerifyRecord:
+    """
+    verify_record must accept signatures from every key type that libp2p
+    serialises via crypto_pb2.PublicKey (Ed25519, Secp256k1, RSA).
+
+    Previously the implementation hard-coded Ed25519PublicKey.from_bytes,
+    causing it to silently return False for RSA and Secp256k1 peers and
+    breaking DHT interoperability with non-Ed25519 nodes.
+    """
+
+    def _round_trip(self, key_pair) -> None:  # noqa: ANN001
+        """Sign with *key_pair* and assert verify_record returns True."""
+        key = b"/test/mykey"
+        value = b"hello world"
+        sig, author = sign_record(key_pair.private_key, key, value)
+        assert verify_record(sig, author, key, value), (
+            f"verify_record returned False for key type "
+            f"{key_pair.private_key.get_type()}"
+        )
+
+    def _tampered_fails(self, key_pair) -> None:  # noqa: ANN001
+        """Tampered payload must make verify_record return False."""
+        key = b"/test/mykey"
+        value = b"hello world"
+        sig, author = sign_record(key_pair.private_key, key, value)
+        assert not verify_record(sig, author, key, b"tampered"), (
+            f"verify_record accepted tampered value for key type "
+            f"{key_pair.private_key.get_type()}"
+        )
+
+    def test_ed25519_valid_signature(self) -> None:
+        from libp2p.crypto.ed25519 import create_new_key_pair as ed_kp
+
+        self._round_trip(ed_kp())
+
+    def test_ed25519_tampered_value_rejected(self) -> None:
+        from libp2p.crypto.ed25519 import create_new_key_pair as ed_kp
+
+        self._tampered_fails(ed_kp())
+
+    def test_secp256k1_valid_signature(self) -> None:
+        from libp2p.crypto.secp256k1 import create_new_key_pair as secp_kp
+
+        self._round_trip(secp_kp())
+
+    def test_secp256k1_tampered_value_rejected(self) -> None:
+        from libp2p.crypto.secp256k1 import create_new_key_pair as secp_kp
+
+        self._tampered_fails(secp_kp())
+
+    def test_rsa_valid_signature(self) -> None:
+        from libp2p.crypto.rsa import create_new_key_pair as rsa_kp
+
+        self._round_trip(rsa_kp())
+
+    def test_rsa_tampered_value_rejected(self) -> None:
+        from libp2p.crypto.rsa import create_new_key_pair as rsa_kp
+
+        self._tampered_fails(rsa_kp())
+
+    def test_garbage_author_bytes_returns_false(self) -> None:
+        """Completely invalid author bytes must return False, not raise."""
+        assert not verify_record(b"sig", b"not-a-valid-protobuf", b"key", b"value")
+
+    def test_wrong_key_returns_false(self) -> None:
+        """Signature verified against a different key must return False."""
+        from libp2p.crypto.ed25519 import create_new_key_pair as ed_kp
+
+        kp1 = ed_kp()
+        kp2 = ed_kp()
+        key = b"/test/k"
+        value = b"v"
+        sig, _ = sign_record(kp1.private_key, key, value)
+        _, author2 = sign_record(kp2.private_key, key, value)
+        assert not verify_record(sig, author2, key, value)

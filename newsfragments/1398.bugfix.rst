@@ -1,0 +1,1 @@
+gossipsub: replay recent messages to a peer once its outbound pubsub stream is registered. When a peer's subscription was processed before that stream existed, the mcache catch-up in ``handle_subscription`` had nothing to write to, so a message published right after connecting was dropped for good.

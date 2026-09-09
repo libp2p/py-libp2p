@@ -4,6 +4,11 @@ message Record {
     bytes key = 1;
     bytes value = 2;
     string timeReceived = 5;
+    // author is the serialized public key of the record author (for unsigned records)
+    optional bytes author = 3;
+    // signature is the Ed25519/Secp256k1 signature over the record
+    // signing payload: "libp2p-record:" + key + value
+    optional bytes signature = 4;
 };
 
 message Message {
@@ -39,4 +44,3 @@ message Message {
 
     optional bytes senderRecord = 11;   // Envelope(PeerRecord) encoded
 }
-`

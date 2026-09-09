@@ -21,6 +21,7 @@ Subpackages
    libp2p.perf
    libp2p.protocol_muxer
    libp2p.pubsub
+   libp2p.request_response
    libp2p.rcmgr
    libp2p.records
    libp2p.relay
@@ -29,6 +30,7 @@ Subpackages
    libp2p.tools
    libp2p.transport
    libp2p.utils
+   libp2p.metrics
 
 Submodules
 ----------

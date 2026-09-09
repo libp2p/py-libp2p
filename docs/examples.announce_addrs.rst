@@ -1,6 +1,10 @@
 Announce Addresses
 ==================
 
+.. seealso::
+
+   Same topic, without the step-by-step example: :doc:`advertising_addresses`.
+
 This example demonstrates how to use announce addresses so that a node behind
 NAT or a reverse proxy (e.g., ngrok) advertises its publicly reachable address
 instead of its local listen address.
@@ -48,6 +52,82 @@ This pattern is useful when:
 
 By announcing the correct external addresses, peers will successfully dial your
 node regardless of their network position.
+
+Automatic discovery vs. explicit announce addresses
+---------------------------------------------------
+
+py-libp2p also ships with an :class:`~libp2p.host.observed_addr_manager.ObservedAddrManager`
+that automatically discovers the host's externally observed addresses through
+the Identify protocol. Once enough distinct peer groups confirm the same
+external address, it is appended to the output of
+:meth:`~libp2p.host.basic_host.BasicHost.get_addrs` -- no manual configuration
+is required for the common NAT / EC2 case (see issue #1250).
+
+``announce_addrs`` takes priority over observed addresses: when it is set it
+acts as a static ``AddrsFactory`` (matching go-libp2p's
+``applyAddrsFactory`` behaviour), so only the explicitly announced list is
+advertised. Observations are still recorded internally -- for example to feed
+:meth:`~libp2p.host.basic_host.BasicHost.get_nat_type` -- but they are not
+emitted by ``get_addrs`` when a static list has been provided.
+
+Use ``announce_addrs`` when you already know the exact public address(es) you
+want peers to dial (e.g. a reverse proxy hostname such as ngrok). Rely on
+automatic observed-address discovery otherwise.
+
+**CLI (static announce + optional Identify opt-out):**
+
+.. code-block:: console
+
+    $ python examples/announce_addrs/announce_addrs.py --listen-port 9001 \
+        --announce /ip4/1.2.3.4/tcp/4001 \
+        --disable-identify-address-discovery
+
+Callable ``addrs_factory``
+--------------------------
+
+When you need to **compose** addresses (for example keep listen + confirmed
+observed and add an extra hostname), pass ``addrs_factory`` instead of a
+static list. The factory receives the live candidate list and returns what
+to advertise::
+
+    from multiaddr import Multiaddr
+    from libp2p import new_host
+
+    def my_factory(candidates):
+        # candidates already include confirmed observed addrs when discovery
+        # is enabled
+        return list(candidates) + [Multiaddr("/dns4/example.com/tcp/4001")]
+
+    host = new_host(addrs_factory=my_factory)
+
+``announce_addrs`` and ``addrs_factory`` cannot be set together.
+
+**CLI (factory compose mode)** -- keep live candidates and append extras via
+``--factory-extra`` (mutually exclusive with ``--announce``):
+
+.. code-block:: console
+
+    $ python examples/announce_addrs/announce_addrs.py --listen-port 9001 \
+        --factory-extra /dns4/example.ngrok-free.app/tcp/9001
+
+Disabling Identify address discovery
+------------------------------------
+
+If public addresses are known ahead of time and you do not want Identify to
+drive **address** discovery (privacy or to avoid ``ObservedAddrManager``
+overhead), set ``disable_identify_address_discovery=True``. This matches
+go-libp2p's ``DisableIdentifyAddressDiscovery``::
+
+    host = new_host(
+        announce_addrs=[Multiaddr("/ip4/1.2.3.4/tcp/4001")],
+        disable_identify_address_discovery=True,
+    )
+
+In that mode observations are not recorded and
+:meth:`~libp2p.host.basic_host.BasicHost.get_nat_type` returns unknown.
+The Identify protocol itself still runs (peer metadata is still exchanged);
+only consumption of Identify ``observed_addr`` for local address discovery
+is skipped.
 
 The full source code for this example is below:
 

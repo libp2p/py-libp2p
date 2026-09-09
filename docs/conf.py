@@ -314,6 +314,11 @@ autodoc_mock_imports = [
     # Mocked ONLY for Sphinx/autodoc: this module does not exist in the codebase
     # but some doc tools may try to import it. No real code references this import.
     "libp2p.relay.circuit_v2.lib",
+    # aiortc is an optional dependency (install via libp2p[webrtc]).
+    # RTD doesn't have libsrtp2-dev so aiortc can't be installed there.
+    "aiortc",
+    "aiortc.rtcdtlstransport",
+    "aiortc.rtcconfiguration",
 ]
 
 # Documents to append as an appendix to all manuals.
