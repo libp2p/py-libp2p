@@ -202,3 +202,32 @@ async def test_mplex_on_close_callback_none():
 
     # Connection should be closed
     assert mplex_conn.is_closed, "Connection should be marked as closed"
+
+
+@pytest.mark.trio
+async def test_mplex_close_completes_when_read_loop_stalled():
+    """
+    close() must not hang if the read loop never reaches _cleanup.
+
+    Regression for tls+mplex teardown: SecureSession used to raise a bare
+    Exception on EOF that quiet-exit absorbed, so event_closed never set.
+    close() now calls _cleanup() itself when needed.
+    """
+
+    class StalledSecuredConn(DummySecuredConn):
+        async def read(self, n: int | None = -1) -> bytes:
+            await trio.sleep_forever()
+
+    secured_conn = StalledSecuredConn()
+    mplex_conn = Mplex(secured_conn, DUMMY_PEER_ID)
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(mplex_conn.start)
+        await trio.sleep(0.05)
+
+        with trio.fail_after(1.0):
+            await mplex_conn.close()
+
+        nursery.cancel_scope.cancel()
+
+    assert mplex_conn.is_closed
