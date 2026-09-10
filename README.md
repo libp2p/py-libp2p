@@ -134,6 +134,35 @@ ______________________________________________________________________
 
 ______________________________________________________________________
 
+### Identity Persistence
+
+For a stable Peer ID across restarts, use opt-in identity helpers (default
+`new_host()` behavior is unchanged and still generates a random Ed25519 key):
+
+- **File helpers:** `libp2p.identity_utils` — `save_identity` / `load_identity` /
+  `create_identity_from_seed` (libp2p protobuf private-key format; Unix mode `0600`).
+- **Key-pair provider:** `new_host(key_pair_provider=...)` accepts
+  `Callable[[], KeyPair]` as described in issue #312.
+- **Filesystem keystore:** `FileSystemKeyStore` stores named keys under a directory;
+  pass `new_host(keystore=..., identity_name="default")` to load or auto-persist.
+
+Prefer these APIs over the legacy PEM helpers `save_keypair` / `load_keypair`
+(Ed25519-only, fixed path).
+
+Example (keystore)::
+
+```
+from pathlib import Path
+from libp2p import new_host
+from libp2p.crypto.keystore import FileSystemKeyStore
+
+store = FileSystemKeyStore(Path.home() / ".config" / "py-libp2p" / "keystore")
+host = new_host(keystore=store, identity_name="default")
+# Subsequent runs with the same store/name reuse the same Peer ID.
+```
+
+______________________________________________________________________
+
 ## Explanation of Basic Two Node Communication
 
 ### Core Concepts
