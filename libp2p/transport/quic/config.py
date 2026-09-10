@@ -43,6 +43,8 @@ class QUICTransportKwargs(TypedDict, total=False):
     max_concurrent_streams: int
     connection_window: int
     stream_window: int
+    congestion_control_algorithm: str
+    initial_rtt: float
 
     # Logging and debugging
     enable_qlog: bool
@@ -66,7 +68,8 @@ class QUICTransportConfig(ConnectionConfig):
     # Matches go-libp2p default (10 minutes).
 
     max_datagram_size: int = (
-        1200  # Maximum size of UDP datagrams to avoid IP fragmentation.
+        1200  # UDP payload MTU. Wired to aioquic max_datagram_size (not DATAGRAM
+        # extension). Raise toward 1452 on paths with ≥1500 Ethernet MTU.
     )
     local_port: int | None = (
         None  # Local port to bind to. If None, a random port is chosen.
@@ -84,6 +87,14 @@ class QUICTransportConfig(ConnectionConfig):
     max_concurrent_streams: int = 100  # Maximum concurrent streams per connection
     connection_window: int = 1024 * 1024  # Connection flow control window
     stream_window: int = 64 * 1024  # Stream flow control window
+
+    # Congestion control (aioquic QuicConfiguration knobs)
+    congestion_control_algorithm: str = "reno"
+    """aioquic CC algorithm name (``reno`` or ``cubic``)."""
+
+    initial_rtt: float = 0.1
+    """Initial RTT estimate in seconds (aioquic default). Lower values (e.g. 0.001)
+    can improve startup on low-latency links; callers may opt in."""
 
     # Logging and debugging
     enable_qlog: bool = False  # Enable QUIC logging
@@ -166,6 +177,27 @@ class QUICTransportConfig(ConnectionConfig):
 
     STREAM_RECEIVE_BUFFER_HIGH_WATERMARK: int = 512 * 1024  # 512KB
     """High watermark for stream receive buffer."""
+
+    # Send-side backpressure
+    STREAM_SEND_BUFFER_HIGH_WATERMARK: int = 1024 * 1024  # 1MB
+    """Un-ACKed bytes per stream above which ``QUICStream.write()`` blocks.
+
+    aioquic buffers written data without limit; this bounds how far a writer
+    may run ahead of the peer. It should not be smaller than the peer's
+    per-stream flow-control window (``STREAM_FLOW_CONTROL_WINDOW`` for a
+    py-libp2p peer), otherwise the local buffer, not QUIC flow control,
+    becomes the throughput limit.
+    """
+
+    STREAM_SEND_BUFFER_LOW_WATERMARK: int = 256 * 1024  # 256KB
+    """Un-ACKed bytes per stream below which blocked writers are resumed."""
+
+    STREAM_WRITE_CHUNK_SIZE: int = 64 * 1024  # 64KB
+    """Maximum bytes handed to aioquic per ``write()`` step.
+
+    Large writes are split into chunks of this size so the send watermark is
+    checked between chunks and a single big write cannot overshoot it.
+    """
 
     # Stream lifecycle configuration
     ENABLE_STREAM_RESET_ON_ERROR: bool = True
@@ -274,6 +306,22 @@ class QUICTransportConfig(ConnectionConfig):
             raise ValueError(
                 "STREAM_RECEIVE_BUFFER_LOW_WATERMARK must be < HIGH_WATERMARK"
             )
+
+        # Validate send backpressure watermarks
+        if self.STREAM_SEND_BUFFER_LOW_WATERMARK <= 0:
+            raise ValueError("STREAM_SEND_BUFFER_LOW_WATERMARK must be positive")
+
+        if (
+            self.STREAM_SEND_BUFFER_LOW_WATERMARK
+            >= self.STREAM_SEND_BUFFER_HIGH_WATERMARK
+        ):
+            raise ValueError(
+                "STREAM_SEND_BUFFER_LOW_WATERMARK must be < "
+                "STREAM_SEND_BUFFER_HIGH_WATERMARK"
+            )
+
+        if self.STREAM_WRITE_CHUNK_SIZE <= 0:
+            raise ValueError("STREAM_WRITE_CHUNK_SIZE must be positive")
 
         # Validate memory limits
         if self.STREAM_MEMORY_LIMIT_PER_STREAM <= 0:
