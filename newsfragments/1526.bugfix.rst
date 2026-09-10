@@ -1,0 +1,1 @@
+Fix tls+mplex teardown hang: SecureSession raises ConnectionClosedError on EOF, and Mplex cleans up idempotently if the read loop exits without setting event_closed.
