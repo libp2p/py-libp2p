@@ -352,18 +352,27 @@ class QUICStream(IMuxedStream):
                 # already handed to aioquic.
                 await self._wait_for_send_capacity()
 
-                end = min(offset + self.WRITE_CHUNK_SIZE, total)
-                if offset == 0 and end == total:
-                    chunk = data  # fits in one chunk: avoid a copy
-                else:
-                    chunk = bytes(view[offset:end])
-                offset = end
+                # Queue as many chunks as the send watermark allows, then
+                # transmit once — cuts encrypt/schedule churn vs per-chunk tx.
+                queued_any = False
+                while offset < total:
+                    end = min(offset + self.WRITE_CHUNK_SIZE, total)
+                    if offset == 0 and end == total:
+                        chunk = data  # fits in one chunk: avoid a copy
+                    else:
+                        chunk = bytes(view[offset:end])
+                    offset = end
 
-                # Send data through QUIC connection
-                self._connection._quic.send_stream_data(self._stream_id, chunk)
-                self._connection._signal_activity()
-                await self._connection._transmit()
-                self._update_send_backpressure()
+                    self._connection._quic.send_stream_data(self._stream_id, chunk)
+                    queued_any = True
+                    self._update_send_backpressure()
+                    if not self._backpressure_event.is_set():
+                        break
+
+                if queued_any:
+                    self._connection._signal_activity()
+                    await self._connection._transmit()
+                    self._update_send_backpressure()
 
             self._timeline.record_first_data()
             logger.debug(f"Wrote {total} bytes to stream {self.stream_id}")

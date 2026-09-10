@@ -29,6 +29,9 @@ def test_create_server_and_client_configs_apply_flow_control() -> None:
     transport_cfg = QUICTransportConfig(
         STREAM_FLOW_CONTROL_WINDOW=128 * 1024,
         CONNECTION_FLOW_CONTROL_WINDOW=256 * 1024,
+        max_datagram_size=1452,
+        congestion_control_algorithm="cubic",
+        initial_rtt=0.001,
     )
     base = QuicConfiguration(is_client=False, alpn_protocols=["libp2p"])
     server = create_server_config_from_base(base, transport_config=transport_cfg)
@@ -40,6 +43,15 @@ def test_create_server_and_client_configs_apply_flow_control() -> None:
     assert server.max_data == 256 * 1024
     assert client.max_stream_data == 128 * 1024
     assert client.max_data == 256 * 1024
+    assert server.max_datagram_size == 1452
+    assert client.max_datagram_size == 1452
+    assert server.congestion_control_algorithm == "cubic"
+    assert client.congestion_control_algorithm == "cubic"
+    assert server.initial_rtt == 0.001
+    assert client.initial_rtt == 0.001
+    # Must not confuse UDP MTU with the DATAGRAM extension frame size.
+    assert server.max_datagram_frame_size is None
+    assert client.max_datagram_frame_size is None
 
 
 def test_quic_transport_setup_applies_flow_control_to_stored_configs() -> None:
@@ -47,8 +59,15 @@ def test_quic_transport_setup_applies_flow_control_to_stored_configs() -> None:
     transport_cfg = QUICTransportConfig(
         STREAM_FLOW_CONTROL_WINDOW=192 * 1024,
         CONNECTION_FLOW_CONTROL_WINDOW=384 * 1024,
+        max_datagram_size=1452,
+        congestion_control_algorithm="cubic",
+        initial_rtt=0.001,
     )
     transport = QUICTransport(private_key=key_pair.private_key, config=transport_cfg)
     for protocol, quic_cfg in transport._quic_configs.items():
         assert quic_cfg.max_stream_data == 192 * 1024, protocol
         assert quic_cfg.max_data == 384 * 1024, protocol
+        assert quic_cfg.max_datagram_size == 1452, protocol
+        assert quic_cfg.congestion_control_algorithm == "cubic", protocol
+        assert quic_cfg.initial_rtt == 0.001, protocol
+        assert quic_cfg.max_datagram_frame_size is None, protocol

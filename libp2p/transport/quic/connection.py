@@ -6,6 +6,7 @@ Manages bidirectional QUIC connections with integrated stream multiplexing.
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 import logging
+import os
 import socket
 import time
 from typing import TYPE_CHECKING, Any, Optional
@@ -52,13 +53,13 @@ aioquic_compat.apply()
 # periodic pumping for timers and queued events, but the old fixed 1-10ms
 # polling (and a zero-sleep yield while events were being processed) made
 # every connection — including fully idle ones and in-flight handshakes —
-# wake the trio event loop hundreds to thousands of times per second.
-# With hundreds of connections that saturates a core, starves established
-# connections, and causes mass disconnects.  Idle connections now sleep up
-# to _IDLE_POLL_INTERVAL (waking sooner when aioquic reports a pending
-# timer), and active connections pace themselves at _ACTIVE_POLL_INTERVAL.
+# Event-loop pacing: idle connections sleep up to _IDLE_POLL_INTERVAL (waking
+# sooner when aioquic reports a pending timer that includes pacing). Active
+# connections yield cooperatively; avoid a fixed 1ms sleep after every batch
+# (that inflated ACK→send RTT), but use a short _ACTIVE_POLL_INTERVAL when
+# spinning without a sooner timer so peer packet tasks are not starved.
 _IDLE_POLL_INTERVAL = 2.0  # seconds: max idle gap between event-loop polls
-_ACTIVE_POLL_INTERVAL = 0.001  # seconds: min gap between event-processing runs
+_ACTIVE_POLL_INTERVAL = 0.0001  # seconds: yield gap when actively draining
 
 
 class QUICConnection(IRawConnection, IMuxedConn):
@@ -200,6 +201,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self.on_close: Callable[[], Awaitable[None]] | None = None
         self.event_started = trio.Event()
         self._activity_event: trio.Event = trio.Event()
+        self._last_cc_stats_log: float = 0.0
 
         self._available_connection_ids: set[bytes] = set()
         self._current_connection_id: bytes | None = None
@@ -534,14 +536,16 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
                 # Transmit any pending data
                 await self._transmit()
+                self._maybe_log_congestion_stats()
 
                 if events_processed:
-                    # When active events were processed, pace at 1ms so other tasks
-                    # run and remaining in-flight events are drained without spinning.
-                    await trio.sleep(0.001)
+                    # Cooperative yield without a fixed 1ms RTT tax.
+                    await trio.sleep(_ACTIVE_POLL_INTERVAL)
                     continue
 
                 # Calculate next sleep duration based on pending aioquic timer
+                # (includes pacing delay). Idle connections sleep up to
+                # _IDLE_POLL_INTERVAL; wake earlier on datagram activity.
                 timer = self._quic.get_timer()
                 now = time.time()
                 if timer is not None:
@@ -555,8 +559,8 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     if self._activity_event.is_set():
                         self._activity_event = trio.Event()
                 else:
-                    # Timer already due; yield cooperatively to drain immediately
-                    await trio.sleep(0.001)
+                    # Timer already due; cooperative yield, then drain again.
+                    await trio.sleep(_ACTIVE_POLL_INTERVAL)
 
         except Exception as e:
             if not self._closed:
@@ -1943,6 +1947,43 @@ class QUICConnection(IRawConnection, IMuxedConn):
         """Update connection statistics."""
         # Add any periodic stats updates here
         pass
+
+    def get_congestion_stats(self) -> dict[str, float | int | None]:
+        """
+        Snapshot aioquic congestion-control state for throughput diagnosis.
+
+        Returns congestion_window, bytes_in_flight, and smoothed_rtt when the
+        underlying QuicConnection exposes ``_loss`` (aioquic private API).
+        """
+        loss = getattr(self._quic, "_loss", None)
+        if loss is None:
+            return {
+                "congestion_window": None,
+                "bytes_in_flight": None,
+                "smoothed_rtt": None,
+            }
+        return {
+            "congestion_window": int(getattr(loss, "congestion_window", 0) or 0),
+            "bytes_in_flight": int(getattr(loss, "bytes_in_flight", 0) or 0),
+            "smoothed_rtt": float(getattr(loss, "_rtt_smoothed", 0.0) or 0.0),
+        }
+
+    def _maybe_log_congestion_stats(self) -> None:
+        """Periodically log CWND/RTT when LIBP2P_QUIC_CC_STATS is set."""
+        if not os.environ.get("LIBP2P_QUIC_CC_STATS", "").strip():
+            return
+        now = time.monotonic()
+        if now - self._last_cc_stats_log < 0.05:
+            return
+        self._last_cc_stats_log = now
+        stats = self.get_congestion_stats()
+        logger.info(
+            "QUIC CC stats cwnd=%s bif=%s srtt=%.6f peer=%s",
+            stats["congestion_window"],
+            stats["bytes_in_flight"],
+            float(stats["smoothed_rtt"] or 0.0),
+            self._remote_peer_id,
+        )
 
     async def _cleanup_idle_streams(self) -> None:
         """Clean up idle streams that are no longer needed."""

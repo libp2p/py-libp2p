@@ -448,6 +448,10 @@ class PerfTest:
                 self.stream_negotiate_timeout_seconds
             ),
             NEGOTIATE_TIMEOUT=self.stream_negotiate_timeout_seconds,
+            # Opt in to faster QUIC startup on the low-latency Docker path.
+            max_datagram_size=1452,
+            congestion_control_algorithm="cubic",
+            initial_rtt=0.001,
         )
 
     def create_security_options(self) -> tuple[dict[TProtocol, Any], Any]:
