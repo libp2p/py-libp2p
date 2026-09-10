@@ -449,7 +449,8 @@ class PerfTest:
             ),
             NEGOTIATE_TIMEOUT=self.stream_negotiate_timeout_seconds,
             # Opt in to faster QUIC startup on the low-latency Docker path.
-            max_datagram_size=1452,
+            # Keep UDP MTU at the safe default (1200); callers with ≥1500 path
+            # MTU can raise max_datagram_size toward 1452 separately.
             congestion_control_algorithm="cubic",
             initial_rtt=0.001,
         )
