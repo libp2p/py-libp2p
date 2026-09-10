@@ -380,6 +380,13 @@ class WebRTCDirectListener(IListener):
         conn.remote_username = client_ufrag
         conn.remote_password = client_pwd
 
+        # Spec: the publicly-reachable server acts as an ICE-Lite agent —
+        # respond-only, never initiating its own connectivity checks. aioice has
+        # no lite mode, so make this muxed connection Lite explicitly (#1512).
+        from ._udp_mux import make_connection_ice_lite
+
+        make_connection_ice_lite(conn)
+
         self._in_flight += 1
         # Re-dispatch: the ufrag is registered now, so this reaches the aioice
         # protocol (which answers the check and queues it) and teaches the

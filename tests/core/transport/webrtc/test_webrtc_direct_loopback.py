@@ -229,6 +229,81 @@ async def test_dial_listen_open_stream_echo(harness, version):
 
 
 @pytest.mark.trio
+async def test_listener_is_ice_lite_respond_only(monkeypatch):
+    """
+    The listener is a true ICE-Lite agent (#1512): it answers the dialer's STUN
+    connectivity checks but never initiates its own. We tag the listener's muxed
+    connections (they alone go through ``make_connection_ice_lite``) and count
+    outbound STUN binding requests from them — during ICE establishment it must
+    be zero.
+
+    Consent freshness (``query_consent``) is intentionally kept in production but
+    also sends binding requests once ICE completes; we neutralise it here so the
+    count reflects *establishment* checks only and the assertion is deterministic
+    rather than resting on a wall-clock margin before the first consent probe.
+    """
+    import aioice.ice as _ice
+    from multiaddr import Multiaddr
+
+    from libp2p.peer.id import ID
+    import libp2p.transport.webrtc._udp_mux as _udp_mux
+
+    async def _no_consent(self):  # type: ignore[no-untyped-def]
+        return None
+
+    monkeypatch.setattr(_ice.Connection, "query_consent", _no_consent)
+
+    lite_conn_ids: set[int] = set()
+    real_make_lite = _udp_mux.make_connection_ice_lite
+
+    def _tracking_make_lite(conn):  # type: ignore[no-untyped-def]
+        lite_conn_ids.add(id(conn))
+        real_make_lite(conn)
+
+    monkeypatch.setattr(_udp_mux, "make_connection_ice_lite", _tracking_make_lite)
+
+    outbound = {"listener_checks": 0}
+    real_request = _ice.StunProtocol.request
+
+    async def _counting_request(self, *a, **k):  # type: ignore[no-untyped-def]
+        owner = getattr(self, "receiver", None)
+        if owner is not None and id(owner) in lite_conn_ids:
+            outbound["listener_checks"] += 1
+        return await real_request(self, *a, **k)
+
+    monkeypatch.setattr(_ice.StunProtocol, "request", _counting_request)
+
+    server, server_kp = _transport()
+    dialer, _ = _transport(webrtc_direct_dial_version=1)
+    server_id = ID.from_pubkey(server_kp.public_key)
+
+    handler_fired = trio.Event()
+
+    async def handler(conn) -> None:  # type: ignore[no-untyped-def]
+        handler_fired.set()
+        await trio.sleep_forever()
+
+    listener = server.create_listener(handler)
+    await listener.listen(Multiaddr(LISTEN_ADDR))
+    (maddr,) = listener.get_addrs()
+    try:
+        with trio.fail_after(30):
+            conn = await dialer.dial(maddr)
+            assert conn.peer_id == server_id
+            await handler_fired.wait()
+            assert lite_conn_ids, "listener never built a muxed ICE-Lite connection"
+            assert outbound["listener_checks"] == 0, (
+                f"ICE-Lite listener sent {outbound['listener_checks']} outbound "
+                "connectivity checks; a Lite agent must be respond-only"
+            )
+            await conn.close()
+    finally:
+        await listener.close()
+        await dialer.close()
+        await server.close()
+
+
+@pytest.mark.trio
 async def test_concurrent_dials_share_one_udp_port():
     """Two dialers hit the same advertised port; the mux demuxes by ufrag."""
     from multiaddr import Multiaddr
