@@ -293,6 +293,14 @@ async def test_dense():
                 msg = await wait_for_pubsub_payload(queue, msg_content)
                 assert msg.data == msg_content
 
+        # Drop peer connections before factory teardown so dense-mesh sockets
+        # are not left for GC (#1498).
+        for host in hosts:
+            network = host.get_network()
+            for peer_id in list(network.connections):
+                await network.close_peer(peer_id)
+        await trio.sleep(0.05)
+
 
 @pytest.mark.trio
 async def test_fanout():
@@ -360,6 +368,13 @@ async def test_fanout():
             for sub in subs:
                 msg = await wait_for_pubsub_payload(sub, msg_content)
                 assert msg.data == msg_content
+
+        # Drop peer connections before factory teardown (#1498).
+        for host in hosts:
+            network = host.get_network()
+            for peer_id in list(network.connections):
+                await network.close_peer(peer_id)
+        await trio.sleep(0.05)
 
 
 async def _wait_fanout_maintenance_ready(
