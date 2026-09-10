@@ -26,6 +26,7 @@ from libp2p.exceptions import (
 from libp2p.io.exceptions import (
     ConnectionClosedError,
     IncompleteReadError,
+    MessageTooLarge,
 )
 from libp2p.network.connection.exceptions import (
     RawConnError,
@@ -37,10 +38,14 @@ from libp2p.utils import (
     decode_uvarint_from_stream,
     encode_uvarint,
     encode_varint_prefixed,
-    read_varint_prefixed_bytes,
+    read_varint_prefixed_bytes_limited,
 )
 
 from .constants import (
+    BUFFER_SIZE,
+    MAX_MESSAGE_SIZE,
+    MPLEX_MESSAGE_CHANNEL_SIZE,
+    RECEIVE_TIMEOUT_SECS,
     HeaderTags,
 )
 from .datastructures import (
@@ -54,8 +59,13 @@ from .mplex_stream import (
 )
 
 MPLEX_PROTOCOL_ID = TProtocol("/mplex/6.7.0")
-# Ref: https://github.com/libp2p/go-mplex/blob/414db61813d9ad3e6f4a7db5c1b1612de343ace9/multiplex.go#L115  # noqa: E501
-MPLEX_MESSAGE_CHANNEL_SIZE = 8
+
+# Re-export for existing test imports.
+__all__ = (
+    "MPLEX_MESSAGE_CHANNEL_SIZE",
+    "MPLEX_PROTOCOL_ID",
+    "Mplex",
+)
 
 logger = logging.getLogger(__name__)
 
@@ -273,12 +283,15 @@ class Mplex(IMuxedConn):
                 f"{error}"
             )
         try:
-            message = await read_varint_prefixed_bytes(self.secured_conn)
+            message = await read_varint_prefixed_bytes_limited(
+                self.secured_conn, MAX_MESSAGE_SIZE
+            )
         except (
             ParseError,
             RawConnError,
             ConnectionClosedError,
             IncompleteReadError,
+            MessageTooLarge,
         ) as error:
             raise MplexUnavailable(
                 "failed to read the message body correctly from the underlying "
@@ -350,16 +363,29 @@ class Mplex(IMuxedConn):
                     len(message),
                 )
                 return
-        try:
-            send_channel.send_nowait(message)
-        except (trio.BrokenResourceError, trio.ClosedResourceError):
-            raise MplexUnavailable
-        except trio.WouldBlock:
-            # `send_channel` is full, reset this stream.
-            logger.warning(
-                "message channel of stream %s is full: stream is reset", stream_id
-            )
-            await stream.reset()
+        # Deliver body in BUFFER_SIZE slices with blocking backpressure and a
+        # receive timeout, matching go-mplex (channel depth 1 + ReceiveTimeout).
+        if message:
+            chunks = [
+                message[i : i + BUFFER_SIZE]
+                for i in range(0, len(message), BUFFER_SIZE)
+            ]
+        else:
+            chunks = [b""]
+        for chunk in chunks:
+            try:
+                with trio.fail_after(RECEIVE_TIMEOUT_SECS):
+                    await send_channel.send(chunk)
+            except trio.TooSlowError:
+                logger.warning(
+                    "message channel of stream %s timed out waiting for reader: "
+                    "stream is reset",
+                    stream_id,
+                )
+                await stream.reset()
+                return
+            except (trio.BrokenResourceError, trio.ClosedResourceError):
+                raise MplexUnavailable
 
     async def _handle_close(self, stream_id: StreamID) -> None:
         async with self.streams_lock:
