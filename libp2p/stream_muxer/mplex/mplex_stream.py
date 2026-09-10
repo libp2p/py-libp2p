@@ -18,6 +18,7 @@ from libp2p.stream_muxer.exceptions import (
 from libp2p.stream_muxer.rw_lock import ReadWriteLock
 
 from .constants import (
+    CHUNK_SIZE,
     HeaderTags,
 )
 from .datastructures import (
@@ -52,7 +53,7 @@ class MplexStream(IMuxedStream):
     rw_lock: ReadWriteLock
     close_lock: trio.Lock
 
-    # NOTE: `dataIn` is size of 8 in Go implementation.
+    # NOTE: Incoming channel depth matches go-mplex dataIn (size 1).
     incoming_data_channel: "trio.MemoryReceiveChannel[bytes]"
 
     event_local_closed: trio.Event
@@ -239,13 +240,23 @@ class MplexStream(IMuxedStream):
         """
         Internal write implementation that performs the actual write operation.
 
+        Large payloads are split into go-mplex ChunkSize frames so peers that
+        enforce MaxMessageSize can accept them (#1436).
+
         :param data: bytes to write
         """
         async with self.rw_lock.write_lock():
             if self.event_local_closed.is_set():
                 raise MplexStreamClosed(f"cannot write to closed stream: data={data!r}")
             flag = self._get_header_flag("message")
-            await self.muxed_conn.send_message(flag, data, self.stream_id)
+            if not data:
+                await self.muxed_conn.send_message(flag, data, self.stream_id)
+                return
+            offset = 0
+            while offset < len(data):
+                chunk = data[offset : offset + CHUNK_SIZE]
+                await self.muxed_conn.send_message(flag, chunk, self.stream_id)
+                offset += len(chunk)
 
     async def close(self) -> None:
         """
