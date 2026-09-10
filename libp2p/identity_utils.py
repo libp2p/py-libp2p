@@ -26,21 +26,32 @@ def _write_private_key_bytes(filepath: Path, data: bytes) -> None:
     Write private-key bytes to ``filepath`` with restrictive permissions.
 
     On Unix-like systems the file mode is forced to ``0600`` on both create and
-    overwrite via ``os.fchmod``. On Windows, mode bits are not applied.
+    overwrite via ``os.fchmod``. On Windows, mode bits are not applied; the
+    file is opened with ``O_BINARY`` so protobuf bytes are not corrupted by
+    newline translation.
 
     :param filepath: Destination path for the private key bytes.
     :param data: Serialized private key bytes to write.
     :raises OSError: If the file cannot be written.
     """
     filepath.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(filepath, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+    flags = os.O_CREAT | os.O_WRONLY | os.O_TRUNC
+    # Windows defaults to text mode without O_BINARY, which can corrupt
+    # protobuf payloads that contain 0x0A bytes.
+    o_binary = getattr(os, "O_BINARY", 0)
+    if o_binary:
+        flags |= o_binary
+    fd = os.open(filepath, flags, 0o600)
     try:
         if os.name != "nt":
             try:
                 os.fchmod(fd, 0o600)
             except OSError:
                 pass
-        os.write(fd, data)
+        # os.write may return a short count; loop until all bytes are written.
+        offset = 0
+        while offset < len(data):
+            offset += os.write(fd, data[offset:])
     finally:
         os.close(fd)
 

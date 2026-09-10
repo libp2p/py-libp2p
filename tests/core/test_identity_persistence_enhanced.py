@@ -142,6 +142,21 @@ def test_save_and_load_rsa_identity() -> None:
         assert loaded.public_key.to_bytes() == original.public_key.to_bytes()
 
 
+def test_write_preserves_binary_newlines() -> None:
+    r"""
+    Identity files must be written in binary mode.
+
+    On Windows, omitting ``O_BINARY`` can translate ``\n`` and corrupt protobuf.
+    """
+    from libp2p.identity_utils import _write_private_key_bytes
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        filepath = Path(tmpdir) / "binary.key"
+        payload = b"\x08\x01\x12\nhello\nworld\r\n\x00\xff"
+        _write_private_key_bytes(filepath, payload)
+        assert filepath.read_bytes() == payload
+
+
 def test_save_and_load_secp256k1_identity() -> None:
     """Secp256k1 identities round-trip through protobuf save/load."""
     with tempfile.TemporaryDirectory() as tmpdir:
