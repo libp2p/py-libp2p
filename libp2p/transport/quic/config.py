@@ -43,6 +43,8 @@ class QUICTransportKwargs(TypedDict, total=False):
     max_concurrent_streams: int
     connection_window: int
     stream_window: int
+    congestion_control_algorithm: str
+    initial_rtt: float
 
     # Logging and debugging
     enable_qlog: bool
@@ -66,7 +68,8 @@ class QUICTransportConfig(ConnectionConfig):
     # Matches go-libp2p default (10 minutes).
 
     max_datagram_size: int = (
-        1200  # Maximum size of UDP datagrams to avoid IP fragmentation.
+        1200  # UDP payload MTU. Wired to aioquic max_datagram_size (not DATAGRAM
+        # extension). Raise toward 1452 on paths with ≥1500 Ethernet MTU.
     )
     local_port: int | None = (
         None  # Local port to bind to. If None, a random port is chosen.
@@ -84,6 +87,14 @@ class QUICTransportConfig(ConnectionConfig):
     max_concurrent_streams: int = 100  # Maximum concurrent streams per connection
     connection_window: int = 1024 * 1024  # Connection flow control window
     stream_window: int = 64 * 1024  # Stream flow control window
+
+    # Congestion control (aioquic QuicConfiguration knobs)
+    congestion_control_algorithm: str = "reno"
+    """aioquic CC algorithm name (``reno`` or ``cubic``)."""
+
+    initial_rtt: float = 0.1
+    """Initial RTT estimate in seconds (aioquic default). Lower values (e.g. 0.001)
+    can improve startup on low-latency links; callers may opt in."""
 
     # Logging and debugging
     enable_qlog: bool = False  # Enable QUIC logging
