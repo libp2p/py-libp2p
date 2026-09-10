@@ -148,6 +148,11 @@ class Mplex(IMuxedConn):
             # Set the `event_shutting_down`, to allow graceful shutdown.
             self.event_shutting_down.set()
         await self.secured_conn.close()
+        # If the read loop never observed EOF (or exited without cleanup),
+        # finish teardown ourselves. Mirrors Yamux: do not hang forever on
+        # event_closed after we already closed the secured connection.
+        if not self.event_closed.is_set():
+            await self._cleanup()
         # Blocked until `close` is finally set.
         await self.event_closed.wait()
 
@@ -244,15 +249,17 @@ class Mplex(IMuxedConn):
         """
         self._established = True
         self.event_started.set()
-        while True:
-            try:
-                await self._handle_incoming_message()
-            except MplexUnavailable as e:
-                logger.debug("mplex unavailable while waiting for incoming: %s", e)
-                break
-        # If we enter here, it means this connection is shutting down.
-        # We should clean things up.
-        await self._cleanup()
+        try:
+            while True:
+                try:
+                    await self._handle_incoming_message()
+                except MplexUnavailable as e:
+                    logger.debug("mplex unavailable while waiting for incoming: %s", e)
+                    break
+        finally:
+            # Always clean up so close() waiters are not left hanging, even if
+            # an unexpected exception escapes the read loop.
+            await self._cleanup()
 
     async def read_message(self) -> tuple[int, int, bytes]:
         """
@@ -406,18 +413,24 @@ class Mplex(IMuxedConn):
             self.streams_msg_channels.pop(stream_id, None)
 
     async def _cleanup(self) -> None:
-        if not self.event_shutting_down.is_set():
-            self.event_shutting_down.set()
+        # Idempotent: close() and handle_incoming may both invoke cleanup.
+        # Guard under streams_lock so concurrent callers cannot double-close.
         async with self.streams_lock:
-            for stream_id, stream in self.streams.items():
+            if self.event_closed.is_set():
+                return
+            if not self.event_shutting_down.is_set():
+                self.event_shutting_down.set()
+            for stream_id, stream in list(self.streams.items()):
                 async with stream.close_lock:
                     if not stream.event_remote_closed.is_set():
                         stream.event_remote_closed.set()
                         stream.event_reset.set()
                         stream.event_local_closed.set()
-                send_channel = self.streams_msg_channels[stream_id]
-                await send_channel.aclose()
-        self.event_closed.set()
+                send_channel = self.streams_msg_channels.pop(stream_id, None)
+                if send_channel is not None:
+                    await send_channel.aclose()
+            self.streams.clear()
+            self.event_closed.set()
         await self.new_stream_send_channel.aclose()
         # Call on_close callback if provided
         if self.on_close:
