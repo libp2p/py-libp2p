@@ -26,9 +26,6 @@ from libp2p.custom_types import (
 from libp2p.peer.id import (
     ID,
 )
-from libp2p.peer.peerinfo import (
-    PeerInfo,
-)
 from libp2p.relay.circuit_v2.config import (
     DEFAULT_DCUTR_READ_TIMEOUT,
     DEFAULT_DCUTR_WRITE_TIMEOUT,
@@ -39,6 +36,12 @@ from libp2p.relay.circuit_v2.nat import (
 )
 from libp2p.relay.circuit_v2.pb.dcutr_pb2 import (
     HolePunch,
+)
+from libp2p.relay.circuit_v2.utils import (
+    write_delimited_msg,
+)
+from libp2p.utils.varint import (
+    read_varint_prefixed_bytes_limited,
 )
 from libp2p.tools.anyio_service import (
     Service,
@@ -53,14 +56,91 @@ PROTOCOL_ID = TProtocol("/libp2p/dcutr")
 MAX_MESSAGE_SIZE = 4 * 1024
 
 # DCUtR protocol constants
-# Maximum number of hole punch attempts per peer
-MAX_HOLE_PUNCH_ATTEMPTS = 5
+# Maximum number of hole punch attempts per peer.
+# Spec: inbound peers SHOULD retry twice (total 3 attempts) before giving up.
+MAX_HOLE_PUNCH_ATTEMPTS = 3
 
 # Delay between retry attempts
 HOLE_PUNCH_RETRY_DELAY = 30  # seconds
 
 # Maximum observed addresses to exchange
 MAX_OBSERVED_ADDRS = 20
+
+
+async def read_dcutr_msg(stream: Any, msg_cls: type[HolePunch]) -> HolePunch:
+    """
+    Read one DCUtR message, enforcing the 4 KiB spec limit.
+
+    Spec: implementations SHOULD refuse encoded RPC messages
+    (length prefix excluded) larger than 4 KiB.
+    """
+    data = await read_varint_prefixed_bytes_limited(stream, MAX_MESSAGE_SIZE)
+    msg = msg_cls()
+    msg.ParseFromString(data)
+    return msg
+
+
+def _tcp_ip_port(addr: Multiaddr) -> tuple[int, str, int] | None:
+    """Extract (family, ip, tcp_port) from a multiaddr, or None."""
+    try:
+        port_str = addr.value_for_protocol("tcp")
+    except Exception:
+        return None
+    if port_str is None:
+        return None
+    for family, proto in ((4, "ip4"), (6, "ip6")):
+        try:
+            ip = addr.value_for_protocol(proto)
+        except Exception:
+            continue
+        if ip is not None:
+            try:
+                return (family, ip, int(port_str))
+            except ValueError:
+                return None
+    return None
+
+
+def _local_tcp_listen_addrs(host: Any) -> list[tuple[int, str, int]]:
+    """Our non-relay TCP listen addresses as (family, ip, port)."""
+    result: list[tuple[int, str, int]] = []
+    try:
+        addrs = host.get_addrs()
+    except Exception:
+        return result
+    for addr in addrs:
+        if not isinstance(addr, Multiaddr):
+            try:
+                addr = Multiaddr(str(addr))
+            except Exception:
+                continue
+        if "/p2p-circuit" in str(addr):
+            continue
+        parsed = _tcp_ip_port(addr)
+        if parsed is not None:
+            result.append(parsed)
+    return result
+
+
+def _external_ips(addrs: Any) -> list[tuple[int, str]]:
+    """External IPs (family, ip) from observed addresses."""
+    result: list[tuple[int, str]] = []
+    seen: set[tuple[int, str]] = set()
+    for addr in addrs:
+        if not isinstance(addr, Multiaddr):
+            try:
+                addr = Multiaddr(str(addr))
+            except Exception:
+                continue
+        for family, proto in ((4, "ip4"), (6, "ip6")):
+            try:
+                ip = addr.value_for_protocol(proto)
+            except Exception:
+                continue
+            if ip is not None and (family, ip) not in seen:
+                seen.add((family, ip))
+                result.append((family, ip))
+    return result
 
 
 class DCUtRProtocol(Service):
@@ -102,8 +182,22 @@ class DCUtRProtocol(Service):
         self._hole_punch_attempts: dict[ID, int] = {}
         self._direct_connections: set[ID] = set()
         self._in_progress: set[ID] = set()
+        # Per-peer initiation locks: serialize concurrent hole-punch
+        # attempts to the same peer (auto-drive loop vs explicit calls).
+        # Strict implementations (e.g. nim-libp2p) reject concurrent
+        # inbound DCUtR sessions ("Already expecting an incoming
+        # connection"), so at most one outbound session may exist.
+        self._initiate_locks: dict[ID, trio.Lock] = {}
         self._reachability_checker = ReachabilityChecker(host)
         self._nursery: trio.Nursery | None = None
+
+    def _initiate_lock_for(self, peer_id: ID) -> trio.Lock:
+        """Return (creating if needed) the initiation lock for a peer."""
+        lock = self._initiate_locks.get(peer_id)
+        if lock is None:
+            lock = trio.Lock()
+            self._initiate_locks[peer_id] = lock
+        return lock
 
     async def run(self, *, task_status: Any = trio.TASK_STATUS_IGNORED) -> None:
         """Run the protocol service."""
@@ -121,6 +215,11 @@ class DCUtRProtocol(Service):
                 task_status.started()
                 logger.debug("DCUtR protocol service started")
 
+                # Proactively upgrade relayed connections: some peers only
+                # ever react (never initiate), so without driving we would
+                # deadlock waiting for each other.
+                nursery.start_soon(self._auto_drive_loop)
+
                 # Wait for service to be stopped
                 await self.manager.wait_finished()
         finally:
@@ -135,7 +234,56 @@ class DCUtRProtocol(Service):
             self._hole_punch_attempts.clear()
             self._direct_connections.clear()
             self._in_progress.clear()
+            self._initiate_locks.clear()
             self._nursery = None
+
+    async def _auto_drive_loop(self) -> None:
+        """
+        Initiate hole punches toward newly seen relayed peers.
+
+        Covers peers that never initiate themselves: without driving, two
+        reactive-only peers would wait for each other forever. Dedupe via
+        initiate_hole_punch (skips peers with sessions, direct connections
+        or exhausted attempt budgets).
+        """
+        while True:
+            await trio.sleep(2.0)
+            try:
+                network = self.host.get_network()
+                connections = getattr(network, "connections", {}) or {}
+                for peer_id in list(connections.keys()):
+                    if peer_id == self.host.get_id():
+                        continue
+                    if (
+                        peer_id in self._in_progress
+                        or peer_id in self._direct_connections
+                    ):
+                        continue
+                    attempts = self._hole_punch_attempts.get(peer_id, 0)
+                    if attempts >= MAX_HOLE_PUNCH_ATTEMPTS:
+                        continue
+                    conns = connections.get(peer_id)
+                    if not conns:
+                        continue
+                    if not isinstance(conns, list):
+                        conns = [conns]
+                    relayed = False
+                    for conn in conns:
+                        try:
+                            addrs = conn.get_transport_addresses()
+                        except Exception:
+                            continue
+                        if addrs and any("/p2p-circuit" in str(addr) for addr in addrs):
+                            relayed = True
+                            break
+                    if not relayed:
+                        continue
+                    logger.debug("Auto-driving hole punch to %s", peer_id)
+                    await self.initiate_hole_punch(peer_id)
+            except trio.Cancelled:
+                raise
+            except Exception as e:
+                logger.debug("Auto-drive loop error: %s", e)
 
     async def _handle_dcutr_stream(self, stream: INetStream) -> None:
         """
@@ -150,7 +298,6 @@ class DCUtRProtocol(Service):
         try:
             # Get the remote peer ID
             remote_peer_id = stream.muxed_conn.peer_id
-            logger.debug("Received DCUtR stream from peer %s", remote_peer_id)
 
             # Check if we already have a direct connection
             if await self._have_direct_connection(remote_peer_id):
@@ -161,24 +308,20 @@ class DCUtRProtocol(Service):
                 await stream.close()
                 return
 
-            # Check if there's already an active hole punch attempt
+            # Check if there's already an active hole punch attempt. Run
+            # concurrent sessions instead of closing: the peer may be
+            # driving its own session (as rust-libp2p does), and closing
+            # its stream aborts the handshake on their side.
             if remote_peer_id in self._in_progress:
-                logger.debug("Hole punch already in progress with %s", remote_peer_id)
-                # Let the existing attempt continue
-                await stream.close()
-                return
+                logger.debug("Concurrent hole punch session with %s", remote_peer_id)
 
             # Mark as in progress
             self._in_progress.add(remote_peer_id)
 
             try:
-                # Read the CONNECT message
+                # Read the CONNECT message (4 KiB limited per spec)
                 with trio.fail_after(self.read_timeout):
-                    msg_bytes = await stream.read(MAX_MESSAGE_SIZE)
-
-                # Parse the message
-                connect_msg = HolePunch()
-                connect_msg.ParseFromString(msg_bytes)
+                    connect_msg = await read_dcutr_msg(stream, HolePunch)
 
                 # Verify it's a CONNECT message
                 if connect_msg.type != HolePunch.CONNECT:
@@ -209,7 +352,7 @@ class DCUtRProtocol(Service):
                 response.ObsAddrs.extend(our_addrs)
 
                 with trio.fail_after(self.write_timeout):
-                    await stream.write(response.SerializeToString())
+                    await write_delimited_msg(stream, response)
 
                 logger.debug(
                     "Sent CONNECT response to %s with %d addresses",
@@ -217,13 +360,9 @@ class DCUtRProtocol(Service):
                     len(our_addrs),
                 )
 
-                # Wait for SYNC message
+                # Wait for SYNC message (4 KiB limited per spec)
                 with trio.fail_after(self.read_timeout):
-                    sync_bytes = await stream.read(MAX_MESSAGE_SIZE)
-
-                # Parse the SYNC message
-                sync_msg = HolePunch()
-                sync_msg.ParseFromString(sync_bytes)
+                    sync_msg = await read_dcutr_msg(stream, HolePunch)
 
                 # Verify it's a SYNC message
                 if sync_msg.type != HolePunch.SYNC:
@@ -233,7 +372,8 @@ class DCUtRProtocol(Service):
 
                 logger.debug("Received SYNC message from %s", remote_peer_id)
 
-                # Perform hole punch
+                # Perform hole punch as the dialer/client (spec: the peer
+                # that receives SYNC dials immediately and is the client).
                 success = await self._perform_hole_punch(remote_peer_id, peer_addrs)
 
                 if success:
@@ -281,6 +421,15 @@ class DCUtRProtocol(Service):
             logger.debug("Already have direct connection to %s", peer_id)
             return True
 
+        # Serialize concurrent initiations to the same peer behind one
+        # lock: the check-then-add below spans awaits, so without the lock
+        # the auto-drive loop and explicit callers could open duplicate
+        # simultaneous sessions (rejected by strict peers).
+        async with self._initiate_lock_for(peer_id):
+            return await self._initiate_hole_punch_locked(peer_id)
+
+    async def _initiate_hole_punch_locked(self, peer_id: ID) -> bool:
+        """Hole-punch initiation body; caller must hold the peer's lock."""
         # Check if there's already an active hole punch attempt
         if peer_id in self._in_progress:
             logger.debug("Hole punch already in progress with %s", peer_id)
@@ -305,15 +454,17 @@ class DCUtRProtocol(Service):
                 return False
 
             try:
-                # Send our CONNECT message with our observed addresses
+                # Send our CONNECT message with our observed addresses.
+                # Start RTT timer per spec: measure time between sending
+                # initial CONNECT and receiving the response.
                 our_addrs = await self._get_observed_addrs()
                 connect_msg = HolePunch()
                 connect_msg.type = HolePunch.CONNECT
                 connect_msg.ObsAddrs.extend(our_addrs)
 
-                start_time = time.time()
+                connect_sent_at = time.monotonic()
                 with trio.fail_after(self.write_timeout):
-                    await stream.write(connect_msg.SerializeToString())
+                    await write_delimited_msg(stream, connect_msg)
 
                 logger.debug(
                     "Sent CONNECT message to %s with %d addresses",
@@ -323,24 +474,25 @@ class DCUtRProtocol(Service):
 
                 # Receive the peer's CONNECT message
                 with trio.fail_after(self.read_timeout):
-                    resp_bytes = await stream.read(MAX_MESSAGE_SIZE)
-
-                # Calculate RTT
-                rtt = time.time() - start_time
-
-                # Parse the response
-                resp = HolePunch()
-                resp.ParseFromString(resp_bytes)
+                    resp = await read_dcutr_msg(stream, HolePunch)
 
                 # Verify it's a CONNECT message
                 if resp.type != HolePunch.CONNECT:
                     logger.warning("Expected CONNECT message, got %s", resp.type)
                     return False
 
+                rtt = time.monotonic() - connect_sent_at
+                # Clamp: relay RTT can spike; waiting too long misses the
+                # window on the responder side which dials on SYNC receipt.
+                # Spec wants RTT/2, cap at 2s to stay simultaneous enough.
+                sync_delay = min(max(rtt / 2.0, 0.0), 2.0)
                 logger.debug(
-                    "Received CONNECT response from %s with %d addresses",
+                    "Received CONNECT response from %s with %d addresses "
+                    "(rtt=%.3fs, sync-delay=%.3fs)",
                     peer_id,
                     len(resp.ObsAddrs),
+                    rtt,
+                    sync_delay,
                 )
 
                 # Process observed addresses from the peer
@@ -353,22 +505,26 @@ class DCUtRProtocol(Service):
                         peer_id, peer_addrs, 10 * 60
                     )  # 10 minute TTL
 
-                # Send SYNC message with timing information
-                # We'll use a future time that's 2*RTT from now to ensure both sides
-                # are ready
-                punch_time = time.time() + (2 * rtt) + 1  # Add 1 second buffer
-
+                # Send SYNC message per spec, then wait half the measured
+                # RTT so both sides dial simultaneously (responder dials
+                # immediately on SYNC receipt; we dial after RTT/2).
                 sync_msg = HolePunch()
                 sync_msg.type = HolePunch.SYNC
 
                 with trio.fail_after(self.write_timeout):
-                    await stream.write(sync_msg.SerializeToString())
+                    await write_delimited_msg(stream, sync_msg)
 
                 logger.debug("Sent SYNC message to %s", peer_id)
 
-                # Perform the synchronized hole punch
+                if sync_delay > 0:
+                    await trio.sleep(sync_delay)
+
+                # Perform the hole punch after the sync delay. We are the
+                # DCUtR initiator, i.e. the spec's server side: upgrade our
+                # dials as responder so the security handshake roles match
+                # on a merged simultaneous-open connection.
                 success = await self._perform_hole_punch(
-                    peer_id, peer_addrs, punch_time
+                    peer_id, peer_addrs, as_responder=True
                 )
 
                 if success:
@@ -404,7 +560,11 @@ class DCUtRProtocol(Service):
         return False
 
     async def _perform_hole_punch(
-        self, peer_id: ID, addrs: list[Multiaddr], punch_time: float | None = None
+        self,
+        peer_id: ID,
+        addrs: list[Multiaddr],
+        punch_time: float | None = None,
+        as_responder: bool = False,
     ) -> bool:
         """
         Perform a hole punch attempt with a peer.
@@ -417,6 +577,12 @@ class DCUtRProtocol(Service):
             List of addresses to try
         punch_time : Optional[float]
             Time to perform the punch (if None, do it immediately)
+        as_responder : bool
+            Upgrade hole-punch dials as inbound/responder. Set when we are
+            the DCUtR initiator (spec's server side): our dial may merge
+            with the peer's simultaneous dial into one connection whose
+            handshake roles are fixed by the spec (dialer = client). Dialing
+            as initiator on both ends breaks the security handshake.
 
         Returns
         -------
@@ -442,40 +608,127 @@ class DCUtRProtocol(Service):
         )
 
         # Filter to only include non-relay addresses
-        direct_addrs = [
-            addr for addr in addrs if not str(addr).startswith("/p2p-circuit")
-        ]
+        direct_addrs = [addr for addr in addrs if "/p2p-circuit" not in str(addr)]
+
+        # Also filter out the relay's own address: if we're connected to
+        # this peer via a relay, the peer's ObsAddrs may incorrectly
+        # contain the relay's address (observed by the relay). Extract
+        # the relay peer ID from our relayed connection to this peer,
+        # then drop any address that belongs to that relay.
+        try:
+            network = self.host.get_network()
+            conns = network.connections.get(peer_id, [])
+            if not isinstance(conns, list):
+                conns = [conns]
+            for conn in conns:
+                try:
+                    addrs_list = conn.get_transport_addresses()
+                except Exception:
+                    continue
+                for addr in addrs_list:
+                    if "/p2p-circuit" in str(addr):
+                        # Extract relay peer ID from /p2p-circuit/p2p/<relay-peer>
+                        parts = str(addr).split("/p2p-circuit/p2p/")
+                        if len(parts) > 1:
+                            relay_pid_str = parts[1].split("/")[0]
+                            relay_pid = ID.from_string(relay_pid_str)
+                            # Get relay's addresses to filter them out
+                            relay_addrs = self.host.get_peerstore().addrs(relay_pid)
+                            relay_addr_set = {str(a) for a in relay_addrs}
+                            # Include relay's listen addresses from its peer info
+                            try:
+                                relay_info = (
+                                    self.host.get_peerstore().get_peer_info(relay_pid)
+                                )
+                                for ra in relay_info.addrs:
+                                    relay_addr_set.add(str(ra))
+                            except Exception:
+                                pass
+                            # Filter out relay addresses
+                            direct_addrs = [
+                                a for a in direct_addrs if str(a) not in relay_addr_set
+                            ]
+                            logger.debug(
+                                "Filtered out %d relay addresses for peer %s",
+                                len(relay_addr_set),
+                                peer_id,
+                            )
+                            break
+        except Exception as e:
+            logger.debug("Failed to filter relay addresses for %s: %s", peer_id, e)
+
+        # Augment with peerstore addresses (e.g. from the certified address
+        # book): a peer's DCUtR ObsAddrs may be missing or unusable while
+        # identify provided good direct addresses. This mirrors what
+        # go/rust implementations dial.
+        try:
+            known = {str(a) for a in direct_addrs}
+            for addr in self.host.get_peerstore().addrs(peer_id):
+                s = str(addr)
+                if "/p2p-circuit" in s or s in known:
+                    continue
+                direct_addrs.append(addr)
+                known.add(s)
+        except Exception as e:
+            logger.debug("Failed to read peerstore addrs for %s: %s", peer_id, e)
 
         if not direct_addrs:
             logger.warning("No direct addresses found for peer %s", peer_id)
             return False
 
-        # Start dialing attempts in parallel
+        # Bind hole-punch dials to our listen address so the NAT mapping
+        # matches the external address we advertised (TCP simultaneous
+        # open). Falls back to ephemeral source when we have no TCP
+        # listen address.
+        source: tuple[str, int] | None = None
+        for _family, lip, lport in _local_tcp_listen_addrs(self.host):
+            source = (lip, lport)
+            break
+        if source is not None:
+            logger.debug("Hole-punch dials will bind source %s:%d", *source)
+
+        # Start dialing attempts in parallel. Retry a few rounds: hole
+        # punching is timing-sensitive (both sides must dial within the
+        # same window for NAT mappings to line up), so a single mistimed
+        # round must not doom the attempt. Per spec step 5, dial every
+        # address from the CONNECT message in parallel.
         logger.debug(
             "Starting parallel dial attempts to %s using %d addresses",
             peer_id,
-            len(direct_addrs[:5]),
+            len(direct_addrs),
         )
-        async with trio.open_nursery() as nursery:
-            for addr in direct_addrs[
-                :5
-            ]:  # Limit to 5 addresses to avoid too many connections
-                nursery.start_soon(self._dial_peer, peer_id, addr)
+        for _round in range(3):
+            async with trio.open_nursery() as nursery:
+                for addr in direct_addrs:
+                    nursery.start_soon(
+                        self._dial_peer, peer_id, addr, source, as_responder
+                    )
 
-        # Wait a bit for connections to establish and settle
-        await trio.sleep(0.5)
+            # Wait a bit for connections to establish and settle
+            await trio.sleep(0.5)
 
-        # Check if we established a direct connection (verify, don't trust cache)
-        is_direct = await self._verify_direct_connection(peer_id)
-        if is_direct:
-            logger.debug("Verified direct connection to %s after hole punch", peer_id)
-        else:
+            # Check if we established a direct connection (verify, don't trust cache)
+            is_direct = await self._verify_direct_connection(peer_id)
+            if is_direct:
+                logger.debug(
+                    "Verified direct connection to %s after hole punch", peer_id
+                )
+                return True
             logger.debug(
-                "No direct connection verified to %s after hole punch", peer_id
+                "No direct connection verified to %s after hole punch round",
+                peer_id,
             )
-        return is_direct
+            await trio.sleep(2.0)
 
-    async def _dial_peer(self, peer_id: ID, addr: Multiaddr) -> None:
+        return False
+
+    async def _dial_peer(
+        self,
+        peer_id: ID,
+        addr: Multiaddr,
+        source: tuple[str, int] | None = None,
+        as_responder: bool = False,
+    ) -> None:
         """
         Attempt to dial a peer at a specific address.
 
@@ -485,17 +738,38 @@ class DCUtRProtocol(Service):
             The peer to dial
         addr : Multiaddr
             The address to dial
+        source : tuple[str, int] | None
+            Optional (ip, port) to bind the outbound socket to. For TCP
+            hole punching this is our listen address: the SYN must leave
+            from the listen port so the NAT mapping matches the external
+            address we advertised.
+        as_responder : bool
+            Upgrade as inbound/responder (we are the DCUtR initiator /
+            spec server side). See :meth:`_perform_hole_punch`.
 
         """
         try:
             logger.debug("Attempting to dial %s at %s", peer_id, addr)
 
-            # Create peer info
-            peer_info = PeerInfo(peer_id, [addr])
+            # Snapshot peerstore addresses: a wrong address (e.g. a relay
+            # address a peer advertised as its own) fails the dial with a
+            # peer-ID mismatch, and the swarm clears the peer's addresses
+            # on mismatch. Restore them so one bad address cannot wipe out
+            # the good ones we still need to try.
+            try:
+                known_addrs = list(self.host.get_peerstore().addrs(peer_id))
+            except Exception:
+                known_addrs = []
 
-            # Try to connect with timeout
+            # Force a fresh direct dial to this address. host.connect() is
+            # not usable here: it returns the existing relayed connection
+            # as "connected" without dialing anything.
+            network = self.host.get_network()
             with trio.fail_after(self.dial_timeout):
-                await self.host.connect(peer_info)
+                if as_responder:
+                    await network.dial_addr_as_responder(addr, peer_id, source)
+                else:
+                    await network.dial_addr(addr, peer_id, source)
 
             logger.debug("Connection established to %s at %s", peer_id, addr)
 
@@ -520,6 +794,11 @@ class DCUtRProtocol(Service):
             logger.debug("Timeout dialing %s at %s", peer_id, addr)
         except Exception as e:
             logger.debug("Error dialing %s at %s: %s", peer_id, addr, str(e))
+            if "mismatch" in str(e).lower() and known_addrs:
+                try:
+                    self.host.get_peerstore().add_addrs(peer_id, known_addrs, 600)
+                except Exception:
+                    pass
 
     async def _verify_direct_connection(self, peer_id: ID) -> bool:
         """
@@ -551,14 +830,21 @@ class DCUtRProtocol(Service):
         # Check if any connection is direct (not relayed)
         for conn in connections:
             try:
-                # Get the transport addresses
-                addrs = conn.get_transport_addresses()
+                # Use actual transport addresses only: falling back to
+                # peerstore addresses here would report relayed-only peers
+                # as directly connected (false positive), since the
+                # peerstore also holds the addresses we learned to reach
+                # them at all.
+                actual = getattr(conn, "_actual_transport_addresses", None)
+                if actual is not None:
+                    addrs = actual
+                else:
+                    addrs = conn.get_transport_addresses()
 
-                # If we got addresses, check if any is direct
+                # If we got addresses, check if any is direct: an address
+                # without a /p2p-circuit component anywhere is direct.
                 if addrs:
-                    # If any address doesn't start with /p2p-circuit,
-                    # it's a direct connection
-                    if any(not str(addr).startswith("/p2p-circuit") for addr in addrs):
+                    if any("/p2p-circuit" not in str(addr) for addr in addrs):
                         return True
                 else:
                     # If no addresses returned, check the connection type another way
@@ -577,7 +863,7 @@ class DCUtRProtocol(Service):
                                 raw_addrs = raw_conn.get_transport_addresses()
                                 if raw_addrs:
                                     if any(
-                                        not str(addr).startswith("/p2p-circuit")
+                                        "/p2p-circuit" not in str(addr)
                                         for addr in raw_addrs
                                     ):
                                         return True
@@ -621,26 +907,80 @@ class DCUtRProtocol(Service):
         """
         Get our observed addresses to share with the peer.
 
+        Prefers externally observed (NAT-mapped) addresses tracked by the
+        host's observed-address manager — even with a single observer, since
+        hole punching typically coordinates through exactly one relay and
+        the default confirmation threshold would otherwise hide the only
+        dialable address. Falls back to listen addresses.
+
+        NAT port prediction: a relay observes us at (WAN_IP:mapped_port),
+        but the mapped port belongs to the relay connection's ephemeral
+        socket — dialing it reaches the wrong socket. Since hole-punch
+        dials leave FROM our listen port (see ``_dial_peer``) and NATs
+        typically preserve ports, the dialable address is
+        (WAN_IP:listen_port). When external observations exist, advertise
+        those predictions (spec allows predicted addresses); otherwise
+        fall back to listen addresses (direct/LAN case).
+
         Returns
         -------
         List[bytes]
             List of observed addresses as bytes
 
         """
-        # Get all listen addresses
-        addrs = self.host.get_addrs()
+        listen_tcp = _local_tcp_listen_addrs(self.host)
+        predicted: list[Multiaddr] = []
 
-        # Filter out relay addresses
-        direct_addrs = [
-            addr for addr in addrs if not str(addr).startswith("/p2p-circuit")
-        ]
+        manager = getattr(self.host, "_observed_addr_manager", None)
+        if manager is not None:
+            try:
+                wan_ips = _external_ips(
+                    a
+                    for a in manager.addrs(min_observers=1)
+                    if "/p2p-circuit" not in str(a)
+                )
+                for family, wan_ip in wan_ips:
+                    for lfamily, _lip, lport in listen_tcp:
+                        if lfamily == family:
+                            predicted.append(
+                                Multiaddr(f"/ip{family}/{wan_ip}/tcp/{lport}")
+                            )
+            except Exception as e:
+                logger.debug("Failed to read observed addresses: %s", e)
+
+        if predicted:
+            seen: set[str] = set()
+            direct_addrs = []
+            for addr in predicted:
+                s = str(addr)
+                if s not in seen:
+                    seen.add(s)
+                    direct_addrs.append(addr)
+            logger.debug("Advertising predicted NAT addresses: %s", seen)
+        else:
+            # No external observations (direct connection or no relay yet):
+            # advertise listen addresses.
+            addrs = self.host.get_addrs()
+            direct_addrs = [
+                addr for addr in addrs if "/p2p-circuit" not in str(addr)
+            ]
 
         # Limit the number of addresses
         if len(direct_addrs) > MAX_OBSERVED_ADDRS:
             direct_addrs = direct_addrs[:MAX_OBSERVED_ADDRS]
 
-        # Convert to bytes
-        addr_bytes = [addr.to_bytes() for addr in direct_addrs]
+        # Convert to bytes. DCUtR peers parse ObsAddrs strictly: send bare
+        # multiaddrs without a /p2p/ suffix (the responder already knows our
+        # peer ID from the connection), matching go/rust implementations.
+        addr_bytes = []
+        for addr in direct_addrs:
+            try:
+                p2p_value = addr.value_for_protocol("p2p")
+            except Exception:
+                p2p_value = None
+            if p2p_value:
+                addr = addr.decapsulate(Multiaddr(f"/p2p/{p2p_value}"))
+            addr_bytes.append(addr.to_bytes())
 
         return addr_bytes
 
@@ -664,8 +1004,11 @@ class DCUtRProtocol(Service):
         for addr_byte in addr_bytes:
             try:
                 addr = Multiaddr(addr_byte)
-                # Validate the address (basic check)
-                if str(addr).startswith("/ip"):
+                # Accept any valid multiaddr; relayed addresses are
+                # filtered later in _perform_hole_punch. Restricting to
+                # /ip* here drops valid /dns* observed addrs that
+                # go/rust peers send.
+                if len(str(addr)) > 0:
                     result.append(addr)
             except Exception as e:
                 logger.debug("Error decoding multiaddr: %s", str(e))

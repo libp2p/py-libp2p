@@ -14,6 +14,7 @@ from libp2p.relay.circuit_v2.dcutr import (
 )
 from libp2p.relay.circuit_v2.pb.dcutr_pb2 import HolePunch
 from libp2p.tools.anyio_service import background_trio_service
+from libp2p.utils.varint import encode_varint_prefixed
 
 logger = logging.getLogger(__name__)
 
@@ -190,13 +191,15 @@ async def test_dcutr_real_perform_hole_punch(monkeypatch):
         AsyncMock(return_value=[b"/ip4/127.0.0.1/tcp/1234"]),
     )
     mock_stream = MagicMock()
+    # Wire messages are unsigned-varint length-prefixed; feed them byte by
+    # byte so delimited reads behave like real short-read streams.
+    framed = encode_varint_prefixed(
+        HolePunch(
+            type=HolePunch.CONNECT, ObsAddrs=[b"/ip4/192.168.1.1/tcp/4321"]
+        ).SerializeToString()
+    ) + encode_varint_prefixed(HolePunch(type=HolePunch.SYNC).SerializeToString())
     mock_stream.read = AsyncMock(
-        side_effect=[
-            HolePunch(
-                type=HolePunch.CONNECT, ObsAddrs=[b"/ip4/192.168.1.1/tcp/4321"]
-            ).SerializeToString(),
-            HolePunch(type=HolePunch.SYNC).SerializeToString(),
-        ]
+        side_effect=[framed[i : i + 1] for i in range(len(framed))]
     )
     mock_stream.write = AsyncMock()
     mock_stream.close = AsyncMock()

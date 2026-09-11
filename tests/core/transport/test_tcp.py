@@ -86,20 +86,24 @@ def test_tcp_can_dial_rejects_udp_and_quic():
 @pytest.mark.trio
 async def test_tcp_listener_raises_on_bind_failure(nursery):
     """listen() raises OpenConnectionError (not a raw OSError) when port is in use."""
+    import socket as stdlib_socket
 
     async def noop_handler(_s):
         pass
 
     transport = TCP()
 
-    # Bind to a specific port with the first listener
-    listener1 = transport.create_listener(noop_handler)
+    # Occupy a port with a plain socket WITHOUT SO_REUSEPORT, so our
+    # reuseport listener cannot take it either.
+    holder = stdlib_socket.socket(stdlib_socket.AF_INET, stdlib_socket.SOCK_STREAM)
+    holder.setsockopt(stdlib_socket.SOL_SOCKET, stdlib_socket.SO_REUSEADDR, 1)
     try:
-        await listener1.listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
-        bound_port = listener1.get_addrs()[0].value_for_protocol("tcp")
+        holder.bind(("127.0.0.1", 0))
+        holder.listen(1)
+        bound_port = holder.getsockname()[1]
 
-        # Attempting to bind the same port a second time should raise
-        # OpenConnectionError, not a raw OSError from trio.serve_tcp.
+        # Attempting to bind the taken port should raise
+        # OpenConnectionError, not a raw OSError.
         listener2 = transport.create_listener(noop_handler)
         try:
             with pytest.raises(
@@ -109,7 +113,32 @@ async def test_tcp_listener_raises_on_bind_failure(nursery):
         finally:
             await listener2.close()
     finally:
+        holder.close()
+
+
+@pytest.mark.trio
+async def test_tcp_listeners_can_share_port_with_reuseport(nursery):
+    """Two listeners can share one port (SO_REUSEPORT for hole punching)."""
+
+    async def noop_handler(_s):
+        pass
+
+    transport = TCP()
+    listener1 = transport.create_listener(noop_handler)
+    try:
+        await listener1.listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
+        bound_port = listener1.get_addrs()[0].value_for_protocol("tcp")
+
+        listener2 = transport.create_listener(noop_handler)
+        try:
+            await listener2.listen(Multiaddr(f"/ip4/127.0.0.1/tcp/{bound_port}"))
+            ports = {a.value_for_protocol("tcp") for a in listener2.get_addrs()}
+            assert str(bound_port) in ports
+        finally:
+            await listener2.close()
+    finally:
         await listener1.close()
+
 
 
 @pytest.mark.trio

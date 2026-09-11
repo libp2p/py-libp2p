@@ -3,16 +3,44 @@ Utility functions for the circuit v2 module.
 """
 
 import logging
+from typing import Any, TypeVar
 
 from libp2p.abc import IHost
 from libp2p.peer.envelope import consume_envelope
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.utils.varint import (
+    encode_varint_prefixed,
+    read_varint_prefixed_bytes,
+)
 
 from .pb.circuit_pb2 import HopMessage, StopMessage
 
 logger = logging.getLogger(__name__)
+
+MsgT = TypeVar("MsgT")
+
+
+async def write_delimited_msg(stream: Any, msg: Any) -> None:
+    """
+    Write a protobuf message with an unsigned-varint length prefix.
+
+    Circuit relay v2 (HOP/STOP) and DCUtR messages are length-delimited on
+    the wire per the libp2p specs; peers written against the spec (e.g.
+    rust-libp2p, go-libp2p) reject raw undelimited messages.
+    """
+    await stream.write(encode_varint_prefixed(msg.SerializeToString()))
+
+
+async def read_delimited_msg(stream: Any, msg_cls: type[MsgT]) -> MsgT:
+    """
+    Read one unsigned-varint length-prefixed protobuf message from a stream.
+    """
+    data = await read_varint_prefixed_bytes(stream)
+    msg = msg_cls()
+    msg.ParseFromString(data)
+    return msg
 
 
 def maybe_consume_signed_record(

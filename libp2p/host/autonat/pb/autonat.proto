@@ -9,41 +9,40 @@ service AutoNAT {
 
 // Message types
 enum Type {
-  UNKNOWN = 0;
-  DIAL = 1;
-  DIAL_RESPONSE = 2;
+  DIAL = 0;
+  DIAL_RESPONSE = 1;
 }
 
 // Status codes
 enum Status {
   OK = 0;
-  E_DIAL_ERROR = 1;
-  E_DIAL_REFUSED = 2;
-  E_DIAL_FAILED = 3;
-  E_INTERNAL_ERROR = 100;
+  E_DIAL_ERROR = 100;
+  E_DIAL_REFUSED = 101;
+  E_BAD_REQUEST = 200;
+  E_INTERNAL_ERROR = 300;
 }
 
 // Main message
 message Message {
-  Type type = 1;
-  DialRequest dial = 2;
-  DialResponse dial_response = 3;
+  optional Type type = 1;
+  optional DialRequest dial = 2;
+  optional DialResponse dial_response = 3;
 }
 
 // Dial request
 message DialRequest {
-  repeated PeerInfo peers = 1;
+  optional PeerInfo peer = 1;
 }
 
 // Dial response
 message DialResponse {
-  Status status = 1;
-  repeated PeerInfo peers = 2;
+  optional Status status = 1;
+  optional string statusText = 2;
+  optional bytes addr = 3;
 }
 
 // Peer information
 message PeerInfo {
-  bytes id = 1;
+  optional bytes id = 1;
   repeated bytes addrs = 2;
-  bool success = 3;
 }

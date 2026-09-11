@@ -1,12 +1,15 @@
 import logging
 
+from multiaddr import (
+    Multiaddr,
+)
+
 from libp2p.custom_types import (
     TProtocol,
 )
 from libp2p.host.autonat.pb.autonat_pb2 import (
     DialResponse,
     Message,
-    PeerInfo,
     Status,
     Type,
 )
@@ -19,11 +22,18 @@ from libp2p.network.stream.net_stream import (
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.peer.peerinfo import (
+    PeerInfo,
+)
 from libp2p.peer.peerstore import (
     IPeerStore,
 )
+from libp2p.utils.varint import (
+    encode_varint_prefixed,
+    read_varint_prefixed_bytes,
+)
 
-AUTONAT_PROTOCOL_ID = TProtocol("/ipfs/autonat/1.0.0")
+AUTONAT_PROTOCOL_ID = TProtocol("/libp2p/autonat/1.0.0")
 
 logger = logging.getLogger(__name__)
 
@@ -81,11 +91,11 @@ class AutoNATService:
 
         """
         try:
-            request_bytes = await stream.read()
+            request_bytes = await read_varint_prefixed_bytes(stream)
             request = Message()
             request.ParseFromString(request_bytes)
             response = await self._handle_request(request)
-            await stream.write(response.SerializeToString())
+            await stream.write(encode_varint_prefixed(response.SerializeToString()))
         except Exception as e:
             logger.error("Error handling AutoNAT stream: %s", str(e))
         finally:
@@ -131,63 +141,70 @@ class AutoNATService:
         """
         Process an AutoNAT dial request.
 
+        Dials the requesting peer back on its advertised addresses and
+        reports the outcome, mirroring the canonical AutoNAT behaviour.
+
         Parameters
         ----------
         message : Message
-            The dial request message containing peer information to test
-            connectivity.
+            The dial request message containing the peer to dial back.
 
         Returns
         -------
         Message
-            The response message containing the results of the dial
-            attempts, including success/failure status for each peer.
+            A DIAL_RESPONSE carrying the dial outcome and, on success, the
+            address that was successfully dialed.
 
         """
         response = Message()
         response.type = Type.DIAL_RESPONSE
         dial_response = DialResponse()
-        dial_response.status = Status.OK
 
-        for peer in message.dial.peers:
-            peer_id = ID(peer.id)
-            if peer_id in self.dial_results:
-                success = self.dial_results[peer_id]
-            else:
-                success = await self._try_dial(peer_id)
-                self.dial_results[peer_id] = success
+        peer_id = ID(message.dial.peer.id)
+        dialed_addr = await self._try_dial(peer_id, list(message.dial.peer.addrs))
+        self.dial_results[peer_id] = dialed_addr is not None
 
-            peer_info = PeerInfo()
-            peer_info.id = peer_id.to_bytes()
-            peer_info.addrs.extend(peer.addrs)
-            peer_info.success = success
-            dial_response.peers.append(peer_info)
+        if dialed_addr is not None:
+            dial_response.status = Status.OK
+            dial_response.addr = dialed_addr
+        else:
+            dial_response.status = Status.E_DIAL_ERROR
 
         response.dial_response.CopyFrom(dial_response)
         return response
 
-    async def _try_dial(self, peer_id: ID) -> bool:
+    async def _try_dial(self, peer_id: ID, addrs: list[bytes]) -> bytes | None:
         """
         Attempt to establish a connection with a peer.
+
+        Tries each advertised address in turn and returns the first one
+        that yields a connection.
 
         Parameters
         ----------
         peer_id : ID
             The identifier of the peer to attempt to dial.
+        addrs : list[bytes]
+            The peer's advertised addresses to try.
 
         Returns
         -------
-        bool
-            True if the connection was successfully established,
-            False if the connection attempt failed.
+        bytes | None
+            The successfully dialed address, or None if all attempts failed.
 
         """
+        candidates: list[bytes] = list(addrs)
         try:
-            stream = await self.host.new_stream(peer_id, [AUTONAT_PROTOCOL_ID])
-            await stream.close()
-            return True
+            candidates.extend(self.peerstore.addrs(peer_id))
         except Exception:
-            return False
+            pass
+        for addr in candidates:
+            try:
+                await self.host.connect(PeerInfo(peer_id, [Multiaddr(addr)]))
+                return bytes(addr)
+            except Exception:
+                continue
+        return None
 
     def get_status(self) -> int:
         """

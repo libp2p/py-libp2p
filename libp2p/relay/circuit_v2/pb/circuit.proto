@@ -2,7 +2,18 @@ syntax = "proto3";
 
 package circuit.pb.v2;
 
-// Circuit v2 message types
+// Circuit v2 message types.
+//
+// This schema mirrors the canonical circuit relay v2 protobuf definition
+// (type numbers, field numbers and Status codes). The only intentional
+// extension is HopMessage.senderRecord, which carries the client's signed
+// peer record on RESERVE; peers that do not understand it skip the field.
+
+message PeerId {
+  bytes id = 1;
+  repeated bytes addrs = 2;
+}
+
 message HopMessage {
   enum Type {
     RESERVE = 0;
@@ -10,11 +21,11 @@ message HopMessage {
     STATUS = 2;
   }
 
-  Type type = 1;
-  bytes peer = 2;
-  Reservation reservation = 3;
-  Limit limit = 4;
-  Status status = 5;
+  optional Type type = 1;
+  optional PeerId peer = 2;
+  optional Reservation reservation = 3;
+  optional Limit limit = 4;
+  optional Status status = 5;
   optional bytes senderRecord = 6;  // Envelope(PeerRecord)
 }
 
@@ -24,35 +35,32 @@ message StopMessage {
     STATUS = 1;
   }
 
-  Type type = 1;
-  bytes peer = 2;
-  Status status = 3;
-  optional bytes senderRecord = 4;   // Envelope(PeerRecord) encoded
+  optional Type type = 1;
+  optional PeerId peer = 2;
+  optional Limit limit = 3;
+  optional Status status = 4;
 }
 
 message Reservation {
-  bytes voucher = 1;
-  bytes signature = 2;
-  int64 expire = 3;
+  optional uint64 expire = 1; // Unix expiration time (UTC)
+  repeated bytes addrs = 2;   // relay addrs for reserving peer
+  optional bytes voucher = 3; // reservation voucher
 }
 
 message Limit {
-  int64 duration = 1;
-  int64 data = 2;
+  optional uint32 duration = 1; // seconds
+  optional uint64 data = 2;     // bytes
 }
 
-message Status {
-  enum Code {
-    OK = 0;
-    RESERVATION_REFUSED = 100;
-    RESOURCE_LIMIT_EXCEEDED = 101;
-    PERMISSION_DENIED = 102;
-    CONNECTION_FAILED = 200;
-    DIAL_REFUSED = 201;
-    NO_RESERVATION = 204;
-    STOP_FAILED = 300;
-    MALFORMED_MESSAGE = 400;
-  }
-  Code code = 1;
-  string message = 2;
+enum Status {
+  // Zero value required for proto3 compatibility; never sent on the wire.
+  UNUSED = 0;
+  OK = 100;
+  RESERVATION_REFUSED = 200;
+  RESOURCE_LIMIT_EXCEEDED = 201;
+  PERMISSION_DENIED = 202;
+  CONNECTION_FAILED = 203;
+  NO_RESERVATION = 204;
+  MALFORMED_MESSAGE = 400;
+  UNEXPECTED_MESSAGE = 401;
 }

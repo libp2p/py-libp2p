@@ -1,7 +1,6 @@
 """Tests for the Circuit Relay v2 protocol."""
 
 import logging
-import os
 import time
 from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
@@ -34,11 +33,16 @@ from libp2p.relay.circuit_v2.protocol import (
     STOP_PROTOCOL_ID,
     CircuitV2Protocol,
 )
+from libp2p.relay.circuit_v2.protocol_buffer import StatusCode
 from libp2p.relay.circuit_v2.resources import (
     RelayLimits,
     RelayResourceManager,
 )
-from libp2p.relay.circuit_v2.utils import maybe_consume_signed_record
+from libp2p.relay.circuit_v2.utils import (
+    maybe_consume_signed_record,
+    read_delimited_msg,
+    write_delimited_msg,
+)
 from libp2p.tools.anyio_service import (
     background_trio_service,
 )
@@ -117,9 +121,7 @@ def test_circuit_v2_verify_reservation(limits, peer_id, key_pair):
 
     # Invalid protobuf reservation
     invalid_proto = PbReservation(
-        expire=int(reservation.expires_at),
-        voucher=os.urandom(32),
-        signature=key_pair.private_key.sign(os.urandom(32)),
+        expire=int(reservation.expires_at) + 100,
     )
     assert manager.verify_reservation(peer_id, invalid_proto) is False
 
@@ -167,18 +169,16 @@ async def assert_stream_response(
                         "Attempt %d: Received HOP response: type=%s, status=%s",
                         attempt + 1,
                         response.type,
-                        response.status.code
-                        if response.HasField("status")
-                        else "No status",
+                        response.status if response.HasField("status") else "No status",
                     )
 
                     all_responses.append(
                         {
                             "type": response.type,
-                            "status": response.status.code
+                            "status": response.status
                             if response.HasField("status")
                             else None,
-                            "message": response.status.message
+                            "message": str(response.status)
                             if response.HasField("status")
                             else None,
                         }
@@ -188,7 +188,7 @@ async def assert_stream_response(
                     if (
                         expected_status is not None
                         and response.HasField("status")
-                        and response.status.code == expected_status
+                        and response.status == expected_status
                     ):
                         if response.type != expected_type:
                             logger.warning(
@@ -216,15 +216,15 @@ async def assert_stream_response(
 
                     # Check status code if present
                     if response.HasField("status"):
-                        if response.status.code != expected_status:
+                        if response.status != expected_status:
                             logger.warning(
                                 "Wrong status code: expected %s, got %s",
                                 expected_status,
-                                response.status.code,
+                                response.status,
                             )
                             last_error = (
                                 f"Wrong status code: expected {expected_status}, "
-                                f"got {response.status.code}"
+                                f"got {response.status}"
                             )
                             if attempt < retries - 1:  # Not the last attempt
                                 continue
@@ -257,8 +257,8 @@ async def assert_stream_response(
                         status_code = None
                         status_message = None
                         if has_status:
-                            status_code = stop_msg.status.code
-                            status_message = stop_msg.status.message
+                            status_code = stop_msg.status
+                            status_message = str(stop_msg.status)
 
                         response_dict: dict[str, Any] = {
                             "stop_type": stop_msg.type,  # Keep original type
@@ -386,7 +386,7 @@ async def test_circuit_v2_protocol_initialization():
 
 @pytest.mark.trio
 async def test_circuit_v2_voucher_verification_complete():
-    """Test complete voucher verification with cryptographic signatures."""
+    """Test complete reservation verification (expiry based)."""
     async with HostFactory.create_batch_and_listen(2) as hosts:
         relay_host, client_host = hosts
         logger.info("Created hosts for test_circuit_v2_voucher_verification_complete")
@@ -418,49 +418,26 @@ async def test_circuit_v2_voucher_verification_complete():
         # Ensure the reservation has the host reference
         assert reservation.host is not None, "Reservation should have host reference"
 
-        # Convert to protobuf with signature
+        # Convert to protobuf (no voucher is sent on the wire, matching
+        # spec relays like rust-libp2p)
         pb_reservation = reservation.to_proto()
 
-        # Verify the reservation has a signature
-        assert pb_reservation.signature != b"", "Reservation should have a signature"
-        assert len(pb_reservation.signature) > 0, "Signature should not be empty"
-
-        logger.info(
-            "Created reservation with signature length: %d bytes",
-            len(pb_reservation.signature),
-        )
-
-        # Verify the reservation with correct signature
-        logger.info("Verifying reservation with correct signature")
+        # Verify the reservation with matching expiry
+        logger.info("Verifying reservation with correct expiry")
         is_valid = resource_manager.verify_reservation(client_peer_id, pb_reservation)
         assert is_valid is True, "Valid reservation should pass verification"
-        logger.info("Reservation verification succeeded with valid signature")
+        logger.info("Reservation verification succeeded")
 
-        # Test with tampered voucher (should fail)
+        # Test with tampered expiry (should fail)
         tampered_reservation = proto.Reservation(
-            expire=pb_reservation.expire,
-            voucher=b"tampered-voucher-data",
-            signature=pb_reservation.signature,
+            expire=pb_reservation.expire + 100,
         )
 
         is_valid_tampered = resource_manager.verify_reservation(
             client_peer_id, tampered_reservation
         )
-        assert is_valid_tampered is False, "Tampered voucher should fail verification"
-        logger.info("Tampered voucher correctly rejected")
-
-        # Test with wrong signature (should fail)
-        wrong_sig_reservation = proto.Reservation(
-            expire=pb_reservation.expire,
-            voucher=pb_reservation.voucher,
-            signature=b"wrong-signature-data",
-        )
-
-        is_valid_wrong_sig = resource_manager.verify_reservation(
-            client_peer_id, wrong_sig_reservation
-        )
-        assert is_valid_wrong_sig is False, "Wrong signature should fail verification"
-        logger.info("Wrong signature correctly rejected")
+        assert is_valid_tampered is False, "Tampered expiry should fail verification"
+        logger.info("Tampered expiry correctly rejected")
 
         # Test with different peer ID (should fail)
         other_peer_id = relay_host.get_id()
@@ -472,21 +449,6 @@ async def test_circuit_v2_voucher_verification_complete():
             "Reservation for different peer should fail verification"
         )
         logger.info("Reservation for wrong peer correctly rejected")
-
-        # Test with missing signature (should fail)
-        no_sig_reservation = proto.Reservation(
-            expire=pb_reservation.expire,
-            voucher=pb_reservation.voucher,
-            signature=b"",
-        )
-
-        is_valid_no_sig = resource_manager.verify_reservation(
-            client_peer_id, no_sig_reservation
-        )
-        assert is_valid_no_sig is False, (
-            "Reservation without signature should fail verification"
-        )
-        logger.info("Reservation without signature correctly rejected")
 
         # Test with expired reservation
         expired_reservation = resource_manager._reservations[client_peer_id]
@@ -508,17 +470,15 @@ async def test_circuit_v2_voucher_verification_complete():
         assert temp_reservation is not None, "Temp reservation should exist"
 
         temp_pb_reservation = temp_reservation.to_proto()
-        assert temp_pb_reservation.signature == b"", (
-            "Should have empty signature without host"
-        )
+        assert temp_pb_reservation.expire > 0, "Expiry should be set"
 
         is_valid_no_host = resource_manager_no_host.verify_reservation(
             temp_peer_id, temp_pb_reservation
         )
-        assert is_valid_no_host is False, (
-            "Reservation verification should fail when no host available"
+        assert is_valid_no_host is True, (
+            "Voucher verification needs no host under the spec model"
         )
-        logger.info("Reservation correctly rejected when no host available")
+        logger.info("Reservation verified without host available")
 
         logger.info("All voucher verification tests passed successfully!")
 
@@ -543,7 +503,7 @@ async def test_handle_reserve_returns_signed_reservation_payload():
     stream.write = AsyncMock()
 
     reserve_msg = proto.HopMessage(type=proto.HopMessage.RESERVE)
-    reserve_msg.peer = client_peer_id.to_bytes()
+    reserve_msg.peer.id = client_peer_id.to_bytes()
 
     fake_envelope = Mock()
     fake_envelope.marshal_envelope.return_value = b"signed-relay-record"
@@ -565,12 +525,15 @@ async def test_handle_reserve_returns_signed_reservation_payload():
     assert await_args is not None
     response_bytes = await_args.args[0]
     response = proto.HopMessage()
-    response.ParseFromString(response_bytes)
+    # Written messages are unsigned-varint length-prefixed on the wire.
+    prefix_len = 1
+    while response_bytes[prefix_len - 1] & 0x80:
+        prefix_len += 1
+    response.ParseFromString(response_bytes[prefix_len:])
 
     assert response.type == proto.HopMessage.STATUS
-    assert response.status.code == proto.Status.OK
-    assert response.reservation.voucher != b""
-    assert response.reservation.signature != b""
+    assert response.status == StatusCode.OK
+    assert response.reservation.expire > 0
 
 
 @pytest.mark.trio
@@ -588,9 +551,7 @@ async def test_circuit_v2_reservation_basic():
             # Read the request
             logger.info("Mock handler received stream request")
             try:
-                request_data = await stream.read(MAX_READ_LEN)
-                request = proto.HopMessage()
-                request.ParseFromString(request_data)
+                request = await read_delimited_msg(stream, proto.HopMessage)
                 logger.info("Mock handler parsed request: type=%s", request.type)
 
                 # Only handle RESERVE requests
@@ -611,14 +572,9 @@ async def test_circuit_v2_reservation_basic():
                     # Create a valid response
                     response = proto.HopMessage(
                         type=proto.HopMessage.RESERVE,
-                        status=proto.Status(
-                            code=proto.Status.OK,
-                            message="Reservation accepted",
-                        ),
+                        status=StatusCode.OK,
                         reservation=proto.Reservation(
                             expire=int(time.time()) + 3600,  # 1 hour from now
-                            voucher=b"test-voucher",
-                            signature=b"",
                         ),
                         limit=proto.Limit(
                             duration=3600,  # 1 hour
@@ -628,7 +584,7 @@ async def test_circuit_v2_reservation_basic():
 
                     # Send the response
                     logger.info("Mock handler sending response")
-                    await stream.write(response.SerializeToString())
+                    await write_delimited_msg(stream, response)
                     logger.info("Mock handler sent response")
 
                     # Keep stream open for client to read response
@@ -672,13 +628,13 @@ async def test_circuit_v2_reservation_basic():
                 client_host_envelope, _ = env_to_send_in_RPC(client_host)
                 request = proto.HopMessage(
                     type=proto.HopMessage.RESERVE,
-                    peer=client_host.get_id().to_bytes(),
+                    peer=proto.PeerId(id=client_host.get_id().to_bytes()),
                     # Client sends its signed-peer records in reservation request
                     senderRecord=client_host_envelope,
                 )
 
                 logger.info("Sending reservation request")
-                await stream.write(request.SerializeToString())
+                await write_delimited_msg(stream, request)
                 logger.info("Reservation request sent")
 
                 # Wait to ensure the request is processed
@@ -686,20 +642,16 @@ async def test_circuit_v2_reservation_basic():
 
                 # Read response directly
                 logger.info("Reading response directly")
-                response_bytes = await stream.read(MAX_READ_LEN)
-                assert response_bytes, "No response received"
-
-                # Parse response
-                response = proto.HopMessage()
-                response.ParseFromString(response_bytes)
+                response = await read_delimited_msg(stream, proto.HopMessage)
+                assert response is not None, "No response received"
 
                 # Verify response
                 assert response.type == proto.HopMessage.RESERVE, (
                     f"Wrong response type: {response.type}"
                 )
                 assert response.HasField("status"), "No status field"
-                assert response.status.code == proto.Status.OK, (
-                    f"Wrong status code: {response.status.code}"
+                assert response.status == StatusCode.OK, (
+                    f"Wrong status code: {response.status}"
                 )
 
                 # Verify reservation details
@@ -740,15 +692,13 @@ async def test_circuit_v2_reservation_limit():
             # Read the request
             logger.info("Mock handler received stream request")
             try:
-                request_data = await stream.read(MAX_READ_LEN)
-                request = proto.HopMessage()
-                request.ParseFromString(request_data)
+                request = await read_delimited_msg(stream, proto.HopMessage)
                 logger.info("Mock handler parsed request: type=%s", request.type)
 
                 # Only handle RESERVE requests
                 if request.type == proto.HopMessage.RESERVE:
                     # Extract peer ID from request
-                    peer_id = ID(request.peer)
+                    peer_id = ID(request.peer.id)
                     logger.info(
                         "Mock handler received reservation request from %s", peer_id
                     )
@@ -767,12 +717,9 @@ async def test_circuit_v2_reservation_limit():
                                 logger.warning("Invalid senderRecord from %s", peer_id)
                                 response = proto.HopMessage(
                                     type=proto.HopMessage.RESERVE,
-                                    status=proto.Status(
-                                        code=proto.Status.PERMISSION_DENIED,
-                                        message="Invalid senderRecord",
-                                    ),
+                                    status=StatusCode.PERMISSION_DENIED,
                                 )
-                                await stream.write(response.SerializeToString())
+                                await write_delimited_msg(stream, response)
                                 return
                         except Exception as e:
                             logger.warning(
@@ -780,12 +727,9 @@ async def test_circuit_v2_reservation_limit():
                             )
                             response = proto.HopMessage(
                                 type=proto.HopMessage.RESERVE,
-                                status=proto.Status(
-                                    code=proto.Status.PERMISSION_DENIED,
-                                    message=f"SPR validation error: {e}",
-                                ),
+                                status=StatusCode.PERMISSION_DENIED,
                             )
-                            await stream.write(response.SerializeToString())
+                            await write_delimited_msg(stream, response)
                             return
                     else:
                         logger.warning(
@@ -794,12 +738,9 @@ async def test_circuit_v2_reservation_limit():
                         )
                         response = proto.HopMessage(
                             type=proto.HopMessage.RESERVE,
-                            status=proto.Status(
-                                code=proto.Status.PERMISSION_DENIED,
-                                message="Missing senderRecord",
-                            ),
+                            status=StatusCode.PERMISSION_DENIED,
                         )
-                        await stream.write(response.SerializeToString())
+                        await write_delimited_msg(stream, response)
                         return
 
                     # Check if we've reached reservation limit
@@ -814,14 +755,9 @@ async def test_circuit_v2_reservation_limit():
                         # Create a success response
                         response = proto.HopMessage(
                             type=proto.HopMessage.RESERVE,
-                            status=proto.Status(
-                                code=proto.Status.OK,
-                                message="Reservation accepted",
-                            ),
+                            status=StatusCode.OK,
                             reservation=proto.Reservation(
                                 expire=int(time.time()) + 3600,  # 1 hour from now
-                                voucher=b"test-voucher",
-                                signature=b"",
                             ),
                             limit=proto.Limit(
                                 duration=3600,  # 1 hour
@@ -835,10 +771,7 @@ async def test_circuit_v2_reservation_limit():
                         # Reject the reservation due to limits
                         response = proto.HopMessage(
                             type=proto.HopMessage.RESERVE,
-                            status=proto.Status(
-                                code=proto.Status.RESOURCE_LIMIT_EXCEEDED,
-                                message="Reservation limit exceeded",
-                            ),
+                            status=StatusCode.RESOURCE_LIMIT_EXCEEDED,
                         )
                         logger.info(
                             "Mock handler rejecting reservation for %s due to limit",
@@ -847,7 +780,7 @@ async def test_circuit_v2_reservation_limit():
 
                     # Send the response
                     logger.info("Mock handler sending response")
-                    await stream.write(response.SerializeToString())
+                    await write_delimited_msg(stream, response)
                     logger.info("Mock handler sent response")
 
                     # Keep stream open for client to read response
@@ -894,12 +827,12 @@ async def test_circuit_v2_reservation_limit():
                 logger.info("Preparing reservation request for client1")
                 request1 = proto.HopMessage(
                     type=proto.HopMessage.RESERVE,
-                    peer=client1_host.get_id().to_bytes(),
+                    peer=proto.PeerId(id=client1_host.get_id().to_bytes()),
                     senderRecord=client1_host_envelope,
                 )
 
                 logger.info("Sending reservation request for client1")
-                await stream1.write(request1.SerializeToString())
+                await write_delimited_msg(stream1, request1)
                 logger.info("Sent reservation request for client1")
 
                 # Wait to ensure the request is processed
@@ -907,20 +840,16 @@ async def test_circuit_v2_reservation_limit():
 
                 # Read response directly
                 logger.info("Reading response for client1")
-                response_bytes = await stream1.read(MAX_READ_LEN)
-                assert response_bytes, "No response received for client1"
-
-                # Parse response
-                response1 = proto.HopMessage()
-                response1.ParseFromString(response_bytes)
+                response1 = await read_delimited_msg(stream1, proto.HopMessage)
+                assert response1 is not None, "No response received for client1"
 
                 # Verify response
                 assert response1.type == proto.HopMessage.RESERVE, (
                     f"Wrong response type: {response1.type}"
                 )
                 assert response1.HasField("status"), "No status field"
-                assert response1.status.code == proto.Status.OK, (
-                    f"Wrong status code: {response1.status.code}"
+                assert response1.status == StatusCode.OK, (
+                    f"Wrong status code: {response1.status}"
                 )
 
                 # Verify reservation details
@@ -953,12 +882,12 @@ async def test_circuit_v2_reservation_limit():
                 logger.info("Preparing reservation request for client2")
                 request2 = proto.HopMessage(
                     type=proto.HopMessage.RESERVE,
-                    peer=client2_host.get_id().to_bytes(),
+                    peer=proto.PeerId(id=client2_host.get_id().to_bytes()),
                     senderRecord=client2_host_envelope,
                 )
 
                 logger.info("Sending reservation request for client2")
-                await stream2.write(request2.SerializeToString())
+                await write_delimited_msg(stream2, request2)
                 logger.info("Sent reservation request for client2")
 
                 # Wait to ensure the request is processed
@@ -966,20 +895,16 @@ async def test_circuit_v2_reservation_limit():
 
                 # Read response directly
                 logger.info("Reading response for client2")
-                response_bytes = await stream2.read(MAX_READ_LEN)
-                assert response_bytes, "No response received for client2"
-
-                # Parse response
-                response2 = proto.HopMessage()
-                response2.ParseFromString(response_bytes)
+                response2 = await read_delimited_msg(stream2, proto.HopMessage)
+                assert response2 is not None, "No response received for client2"
 
                 # Verify response
                 assert response2.type == proto.HopMessage.RESERVE, (
                     f"Wrong response type: {response2.type}"
                 )
                 assert response2.HasField("status"), "No status field"
-                assert response2.status.code == proto.Status.RESOURCE_LIMIT_EXCEEDED, (
-                    f"Wrong status code: {response2.status.code}, "
+                assert response2.status == StatusCode.RESOURCE_LIMIT_EXCEEDED, (
+                    f"Wrong status code: {response2.status}, "
                     f"expected RESOURCE_LIMIT_EXCEEDED"
                 )
                 logger.info("Verified client2 was correctly rejected")
@@ -1014,9 +939,7 @@ async def test_circuit_v2_fails_with_invalid_SPR():
         # Handler that checks SPR validity
         async def spr_validation_handler(stream):
             try:
-                request_data = await stream.read(MAX_READ_LEN)
-                request = proto.HopMessage()
-                request.ParseFromString(request_data)
+                request = await read_delimited_msg(stream, proto.HopMessage)
 
                 if request.type == proto.HopMessage.RESERVE:
                     # Reject specific invalid SPR
@@ -1024,17 +947,15 @@ async def test_circuit_v2_fails_with_invalid_SPR():
                         request.HasField("senderRecord")
                         and request.senderRecord == b"invalid-spr"
                     ):
-                        status_code = proto.Status.MALFORMED_MESSAGE
-                        message = "Invalid SPR rejected"
+                        status_code = StatusCode.MALFORMED_MESSAGE
                     else:
-                        status_code = proto.Status.OK
-                        message = "Valid SPR accepted"
+                        status_code = StatusCode.OK
 
                     response = proto.HopMessage(
                         type=proto.HopMessage.RESERVE,
-                        status=proto.Status(code=status_code, message=message),
+                        status=status_code,
                     )
-                    await stream.write(response.SerializeToString())
+                    await write_delimited_msg(stream, response)
                     await trio.sleep(2)  # Brief wait for client to read
             except Exception as e:
                 logger.error("Handler error: %s", str(e))
@@ -1042,12 +963,9 @@ async def test_circuit_v2_fails_with_invalid_SPR():
                 try:
                     error_response = proto.HopMessage(
                         type=proto.HopMessage.RESERVE,
-                        status=proto.Status(
-                            code=proto.Status.MALFORMED_MESSAGE,
-                            message=f"Handler error: {str(e)}",
-                        ),
+                        status=StatusCode.MALFORMED_MESSAGE,
                     )
-                    await stream.write(error_response.SerializeToString())
+                    await write_delimited_msg(stream, error_response)
                 except Exception:
                     pass
 
@@ -1064,21 +982,18 @@ async def test_circuit_v2_fails_with_invalid_SPR():
                 )
                 request = proto.HopMessage(
                     type=proto.HopMessage.RESERVE,
-                    peer=client_host.get_id().to_bytes(),
+                    peer=proto.PeerId(id=client_host.get_id().to_bytes()),
                     senderRecord=b"invalid-spr",  # Invalid SPR
                 )
-                await stream.write(request.SerializeToString())
+                await write_delimited_msg(stream, request)
                 await trio.sleep(SLEEP_TIME)
 
-                response_bytes = await stream.read(MAX_READ_LEN)
-                assert response_bytes, "No response received"
-
-                response = proto.HopMessage()
-                response.ParseFromString(response_bytes)
+                response = await read_delimited_msg(stream, proto.HopMessage)
+                assert response is not None, "No response received"
 
                 assert response.HasField("status"), "No status field"
-                assert response.status.code == proto.Status.MALFORMED_MESSAGE, (
-                    f"Expected MALFORMED_MESSAGE, got {response.status.code}"
+                assert response.status == StatusCode.MALFORMED_MESSAGE, (
+                    f"Expected MALFORMED_MESSAGE, got {response.status}"
                 )
                 logger.info("Successfully verified invalid SPR rejection")
         finally:
@@ -1149,33 +1064,27 @@ async def test_reservation_fails_with_invalid_record_transfer():
 
                     request = proto.HopMessage(
                         type=proto.HopMessage.RESERVE,
-                        peer=client_host.get_id().to_bytes(),
+                        peer=proto.PeerId(id=client_host.get_id().to_bytes()),
                         senderRecord=corrupted_env.marshal_envelope(),  # Invalid SPR
                     )
 
-                    await stream.write(request.SerializeToString())
+                    await write_delimited_msg(stream, request)
                     logger.info("Sent request with invalid SPR")
                     await trio.sleep(SLEEP_TIME)
 
                     # Try to read response, but expect the stream to be closed
                     try:
-                        response_bytes = await stream.read(MAX_READ_LEN)
-                        if not response_bytes:
+                        response = await read_delimited_msg(stream, proto.HopMessage)
+                        if response is None:
                             # Empty response indicates stream was closed
                             stream_closed_by_relay = True
                             logger.info("Stream was closed by relay (empty response)")
                         else:
-                            # If we get a response, parse it and check for error
-                            response = proto.HopMessage()
-                            response.ParseFromString(response_bytes)
-
                             if (
                                 response.HasField("status")
-                                and response.status.code != proto.Status.OK
+                                and response.status != StatusCode.OK
                             ):
-                                logger.info(
-                                    f"Invalid SPR rejected : {response.status.code}"
-                                )
+                                logger.info(f"Invalid SPR rejected : {response.status}")
                             else:
                                 logger.warning("Unexpected response to invalid SPR")
                     except (StreamEOF, StreamError, StreamReset) as e:
@@ -1255,26 +1164,22 @@ async def test_circuit_v2_connect_fails_without_reservation():
 
                     connect_msg = proto.HopMessage(
                         type=proto.HopMessage.CONNECT,
-                        peer=dest_host.get_id().to_bytes(),
+                        peer=proto.PeerId(id=dest_host.get_id().to_bytes()),
                     )
 
-                    await stream.write(connect_msg.SerializeToString())
+                    await write_delimited_msg(stream, connect_msg)
                     logger.info(
                         "Sent CONNECT request for destination without reservation"
                     )
 
                     # Read response
-                    response_bytes = await stream.read(MAX_READ_LEN)
-                    assert response_bytes, "No response received"
-
-                    response = proto.HopMessage()
-                    response.ParseFromString(response_bytes)
+                    response = await read_delimited_msg(stream, proto.HopMessage)
+                    assert response is not None, "No response received"
 
                     # Verify response status is NO_RESERVATION (204)
                     assert response.type == proto.HopMessage.STATUS
-                    assert response.status.code == proto.Status.NO_RESERVATION, (
-                        "Expected status NO_RESERVATION(204), "
-                        f"got {response.status.code}"
+                    assert response.status == StatusCode.NO_RESERVATION, (
+                        f"Expected status NO_RESERVATION(204), got {response.status}"
                     )
 
                     # Verify stream is reset (or EOF)
@@ -1317,11 +1222,11 @@ async def test_circuit_v2_connect_fails_when_source_limit_exceeded():
                 try:
                     reserve_msg = proto.HopMessage(
                         type=proto.HopMessage.RESERVE,
-                        peer=host.get_id().to_bytes(),
+                        peer=proto.PeerId(id=host.get_id().to_bytes()),
                         senderRecord=envelope_bytes,
                     )
-                    await stream.write(reserve_msg.SerializeToString())
-                    await stream.read(MAX_READ_LEN)
+                    await write_delimited_msg(stream, reserve_msg)
+                    await read_delimited_msg(stream, proto.HopMessage)
                 finally:
                     await close_stream(stream)
 
@@ -1348,25 +1253,20 @@ async def test_circuit_v2_connect_fails_when_source_limit_exceeded():
 
                     connect_msg = proto.HopMessage(
                         type=proto.HopMessage.CONNECT,
-                        peer=dest_host.get_id().to_bytes(),
+                        peer=proto.PeerId(id=dest_host.get_id().to_bytes()),
                     )
-                    await stream.write(connect_msg.SerializeToString())
+                    await write_delimited_msg(stream, connect_msg)
                     logger.info(
                         "Sent CONNECT request with source connection limit exceeded"
                     )
 
-                    response_bytes = await stream.read(MAX_READ_LEN)
-                    assert response_bytes, "No response received"
-
-                    response = proto.HopMessage()
-                    response.ParseFromString(response_bytes)
+                    response = await read_delimited_msg(stream, proto.HopMessage)
+                    assert response is not None, "No response received"
 
                     assert response.type == proto.HopMessage.STATUS
-                    assert (
-                        response.status.code == proto.Status.RESOURCE_LIMIT_EXCEEDED
-                    ), (
+                    assert response.status == StatusCode.RESOURCE_LIMIT_EXCEEDED, (
                         "Expected status RESOURCE_LIMIT_EXCEEDED(101), "
-                        f"got {response.status.code}"
+                        f"got {response.status}"
                     )
 
                     try:

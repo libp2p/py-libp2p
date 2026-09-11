@@ -143,6 +143,24 @@ _IDENTIFY_PROTOCOLS: set[TProtocol] = {
 }
 
 
+def _is_relayed_connection(conn: Any) -> bool:
+    """
+    Return True if a connection is relayed (circuit relay).
+
+    Observations received over relayed connections describe the relay
+    pipe endpoint rather than our externally dialable address and must
+    not feed the observed-address manager.
+    """
+    try:
+        get_addrs = getattr(conn, "get_transport_addresses", None)
+        if not callable(get_addrs):
+            return False
+        addrs = get_addrs() or []
+    except Exception:
+        return False
+    return any("/p2p-circuit" in str(a) for a in addrs)
+
+
 class _IdentifyNotifee(INotifee):
     """
     Network notifee that triggers automatic outbound Identify when new
@@ -1266,15 +1284,29 @@ class BasicHost(IHost):
                 else:
                     try:
                         our_observed = multiaddr.Multiaddr(identify_msg.observed_addr)
-                        logger.debug(
-                            "Identify[%s]: recording observed_addr %s from peer %s",
-                            reason,
-                            our_observed,
-                            peer_id,
-                        )
-                        self._observed_addr_manager.record_observation(
-                            swarm_conn, our_observed, self.get_transport_addrs()
-                        )
+                        if _is_relayed_connection(swarm_conn):
+                            # Observations over relayed connections report the
+                            # relay pipe endpoint (the relay's own address),
+                            # not our external address. Recording them
+                            # poisons hole punching (peers would dial the
+                            # relay instead of our NAT mapping).
+                            logger.debug(
+                                "Identify[%s]: ignoring observed_addr %s from peer %s "
+                                "(relayed connection)",
+                                reason,
+                                our_observed,
+                                peer_id,
+                            )
+                        else:
+                            logger.debug(
+                                "Identify[%s]: recording observed_addr %s from peer %s",
+                                reason,
+                                our_observed,
+                                peer_id,
+                            )
+                            self._observed_addr_manager.record_observation(
+                                swarm_conn, our_observed, self.get_transport_addrs()
+                            )
                     except MultiaddrError as exc:
                         # Malformed observed_addr bytes or unknown protocols from a
                         # misbehaving peer. Expected at low rates; log quietly.

@@ -4,6 +4,7 @@ from collections.abc import (
     Sequence,
 )
 import logging
+import socket as stdlib_socket
 import typing
 
 from multiaddr import Multiaddr
@@ -38,6 +39,140 @@ from libp2p.utils.multiaddr_utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _set_reuse_flags(sock: trio.socket.SocketType) -> None:
+    """
+    Best-effort SO_REUSEADDR/SO_REUSEPORT for TCP hole punching.
+
+    Hole punching (DCUtR simultaneous open) requires dialing FROM the
+    listen port, which means the listener and outbound dial sockets must
+    share the same (ip, port). On Linux this needs SO_REUSEPORT on both.
+    Failures are ignored (e.g. platforms without SO_REUSEPORT) — callers
+    fall back to normal behaviour.
+    """
+    try:
+        sock.setsockopt(
+            stdlib_socket.SOL_SOCKET, stdlib_socket.SO_REUSEADDR, 1
+        )
+    except OSError:
+        pass
+    try:
+        sock.setsockopt(
+            stdlib_socket.SOL_SOCKET, stdlib_socket.SO_REUSEPORT, 1
+        )
+    except (AttributeError, OSError):
+        pass
+
+
+async def _open_reuseport_listeners(
+    host: str | None, port: int
+) -> list[trio.SocketListener]:
+    """
+    Open TCP listen sockets with SO_REUSEPORT (mirrors ``trio.serve_tcp``
+    address resolution, but allows hole-punch dials to bind the same port).
+    """
+    if host is None:
+        # Match trio.serve_tcp(host=None): listen on all interfaces.
+        targets: list[tuple[int, str]] = [
+            (trio.socket.AF_INET, "0.0.0.0"),
+        ]
+        try:
+            targets.append((trio.socket.AF_INET6, "::"))
+        except Exception:
+            pass
+    elif ":" in host:
+        targets = [(trio.socket.AF_INET6, host)]
+    else:
+        targets = [(trio.socket.AF_INET, host)]
+
+    listeners: list[trio.SocketListener] = []
+    last_error: Exception | None = None
+    for family, ip in targets:
+        try:
+            sock = trio.socket.socket(family, stdlib_socket.SOCK_STREAM)
+        except OSError as e:
+            last_error = e
+            logger.debug("reuseport socket create for %s:%d failed: %s", ip, port, e)
+            continue
+        _set_reuse_flags(sock)
+        try:
+            await sock.bind((ip, port))
+            sock.listen(128)
+        except OSError as e:
+            last_error = e
+            logger.debug("reuseport listen on %s:%d failed: %s", ip, port, e)
+            try:
+                sock.close()
+            except Exception:
+                pass
+            continue
+        # SocketListener requires an already-listening socket: wrap last.
+        try:
+            listeners.append(trio.SocketListener(sock))
+        except Exception as e:
+            last_error = e
+            logger.debug("SocketListener wrap for %s:%d failed: %s", ip, port, e)
+            try:
+                sock.close()
+            except Exception:
+                pass
+            continue
+    if not listeners:
+        raise OpenConnectionError(
+            f"Failed to listen on {host}:{port}: {last_error}"
+        )
+    return listeners
+
+
+async def _open_tcp_stream_from(
+    host: str, port: int, source: tuple[str, int]
+) -> trio.SocketStream:
+    """
+    Open a TCP stream bound to ``source`` (ip, port).
+
+    Used for hole punching: the SYN must leave from the listen port so the
+    NAT mapping lines up with the advertised external address.
+    """
+    src_ip, src_port = source
+    family = trio.socket.AF_INET6 if ":" in host else trio.socket.AF_INET
+    if (":" in src_ip) != (":" in host):
+        raise OpenConnectionError(
+            f"Source/destination IP family mismatch: {src_ip} vs {host}"
+        )
+    try:
+        sock = trio.socket.socket(family, stdlib_socket.SOCK_STREAM)
+    except OSError as e:
+        raise OpenConnectionError(f"Failed to create TCP socket: {e}") from e
+    _set_reuse_flags(sock)
+    try:
+        await sock.bind((src_ip, src_port))
+    except OSError as e:
+        # Platform cannot share the listen port for outbound dials (e.g.
+        # macOS refuses connect() from a bound listening port). Fall back
+        # to an ephemeral source: direct connections still work, only NAT
+        # hole punching (which needs the bound source) is unavailable there.
+        logger.debug(
+            "Hole-punch source bind %s:%d failed (%s); using ephemeral source",
+            src_ip,
+            src_port,
+            e,
+        )
+        sock.close()
+        try:
+            return await trio.open_tcp_stream(host, port)
+        except OSError as conn_e:
+            raise OpenConnectionError(
+                f"Failed to connect {host}:{port}: {conn_e}"
+            ) from conn_e
+    try:
+        await sock.connect((host, port))
+    except OSError as e:
+        sock.close()
+        raise OpenConnectionError(
+            f"Failed to connect {host}:{port} from {src_ip}:{src_port}: {e}"
+        ) from e
+    return trio.SocketStream(sock)
 
 
 class TCPListener(IListener):
@@ -75,9 +210,11 @@ class TCPListener(IListener):
             host: str,
             task_status: TaskStatus[Sequence[trio.SocketListener]],
         ) -> None:
-            """Just a proxy function to add logging here."""
+            """Serve with SO_REUSEPORT sockets so hole-punch dials can
+            bind the same (ip, port) for TCP simultaneous open."""
             logger.debug("serve_tcp %s %s", host, port)
-            await trio.serve_tcp(handler, port, host=host, task_status=task_status)
+            listeners = await _open_reuseport_listeners(host, port)
+            await trio.serve_listeners(handler, listeners, task_status=task_status)
 
         async def handler(stream: trio.SocketStream) -> None:
             remote_host: str = ""
@@ -258,7 +395,53 @@ class TCP(ITransport):
             )
         return await self._dial_resolved(maddr)
 
-    async def _dial_resolved(self, maddr: Multiaddr) -> IRawConnection:
+    async def dial_with_source(
+        self, maddr: Multiaddr, source: tuple[str, int]
+    ) -> IRawConnection:
+        """
+        Dial like :meth:`dial` but bind the outbound socket to ``source``
+        (ip, port) first.
+
+        Used for TCP hole punching (DCUtR simultaneous open): the SYN must
+        leave from the listen port so the NAT mapping matches the advertised
+        external address. Requires the listener to have SO_REUSEPORT (set
+        by :class:`TCPListener`).
+        """
+        protocols = list(maddr.protocols())
+        dns_protocols = {"dns", "dns4", "dns6", "dnsaddr"}
+        if protocols and protocols[0].name in dns_protocols:
+            resolved = await resolve_multiaddr_with_retry(
+                maddr,
+                resolver=DNSResolver(),
+                max_retries=self._dns_max_retries,
+                timeout_seconds=self._dns_resolution_timeout,
+            )
+            if not resolved:
+                raise OpenConnectionError(
+                    f"Failed to resolve DNS for {maddr} (retries exhausted)"
+                )
+            last_error: Exception | None = None
+            for resolved_addr in resolved:
+                try:
+                    return await self._dial_resolved(resolved_addr, source=source)
+                except Exception as e:
+                    last_error = e
+                    logger.debug(
+                        "Dial to resolved address %s failed: %s", resolved_addr, e
+                    )
+                    continue
+            if last_error is not None:
+                raise OpenConnectionError(
+                    f"Failed to connect to any resolved address for {maddr}"
+                ) from last_error
+            raise OpenConnectionError(
+                f"Failed to connect to any resolved address for {maddr}"
+            )
+        return await self._dial_resolved(maddr, source=source)
+
+    async def _dial_resolved(
+        self, maddr: Multiaddr, source: tuple[str, int] | None = None
+    ) -> IRawConnection:
         """Dial using a multiaddr that has an IP (no DNS)."""
         host_str = extract_ip_from_multiaddr(maddr)
         try:
@@ -291,7 +474,10 @@ class TCP(ITransport):
             logger.debug("=== OPENING TCP STREAM ===")
             logger.debug("Host: %s", host_str)
             logger.debug("Port: %d", port_int)
-            stream = await trio.open_tcp_stream(host_str, port_int)
+            if source is None:
+                stream = await trio.open_tcp_stream(host_str, port_int)
+            else:
+                stream = await _open_tcp_stream_from(host_str, port_int, source)
             logger.debug("Successfully opened TCP stream")
         except OSError as error:
             logger.error("Failed to open TCP stream: %s", error)

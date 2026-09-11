@@ -159,7 +159,7 @@ async def test_swarm_retry_logic():
     # Mock the single attempt method to fail twice then succeed
     attempt_count = [0]
 
-    async def mock_single_attempt(addr, peer_id):
+    async def mock_single_attempt(addr, peer_id, source=None):
         attempt_count[0] += 1
         if attempt_count[0] < 3:
             raise SwarmException(f"Attempt {attempt_count[0]} failed")

@@ -1596,6 +1596,76 @@ class INetwork(ABC):
         """
 
     @abstractmethod
+    async def dial_addr(
+        self,
+        addr: Multiaddr,
+        peer_id: ID,
+        source: tuple[str, int] | None = None,
+    ) -> INetConn:
+        """
+        Dial a specific multiaddress for the peer, always creating a fresh
+        connection (no reuse of existing connections, unlike dial_peer).
+
+        Parameters
+        ----------
+        addr : Multiaddr
+            The address to dial.
+        peer_id : ID
+            The identifier of the peer to dial.
+        source : tuple[str, int] | None
+            Optional (ip, port) to bind the outbound socket to (TCP hole
+            punching: dial from the listen port). Transports without
+            source-dial support ignore it.
+
+        Returns
+        -------
+        INetConn
+            The established connection to the peer.
+
+        Raises
+        ------
+        SwarmException
+            If an error occurs during dialing.
+
+        """
+
+    @abstractmethod
+    async def dial_addr_as_responder(
+        self,
+        addr: Multiaddr,
+        peer_id: ID,
+        source: tuple[str, int] | None = None,
+    ) -> INetConn:
+        """
+        Dial an address but upgrade as inbound (responder).
+
+        Used for TCP hole punching (DCUtR simultaneous open), where the
+        dialed socket may merge with the peer's simultaneous dial and the
+        spec assigns fixed handshake roles (dialer = client/initiator,
+        inbound peer = server/responder).
+
+        Parameters
+        ----------
+        addr : Multiaddr
+            The address to dial.
+        peer_id : ID
+            The expected peer (verified after upgrade).
+        source : tuple[str, int] | None
+            Optional (ip, port) to bind the outbound socket to.
+
+        Returns
+        -------
+        INetConn
+            The established connection to the peer.
+
+        Raises
+        ------
+        SwarmException
+            If dial, upgrade, or peer verification fails.
+
+        """
+
+    @abstractmethod
     async def new_stream(self, peer_id: ID) -> INetStream:
         """
         Create a new network stream to the specified peer.

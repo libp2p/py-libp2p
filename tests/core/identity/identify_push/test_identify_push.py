@@ -791,28 +791,29 @@ async def test_pubkey_update_preserves_protocols():
 
 
 @pytest.mark.trio
-async def test_private_addr_always_filtered():
-    """Private addrs should be filtered even if no public addrs exist."""
+async def test_private_addrs_stored_for_hole_punching():
+    """
+    Private addrs are stored (go-libp2p parity): filtering happens at
+    dial time, not storage time. Dropping them breaks hole punching,
+    which relies on the private addresses relayed peers advertise.
+    """
     peer_id = ID.from_base58("QmQvGbd2FwM5WJMW226R7z8Z4KxXmBvjPXYz3yQ5f8XyA9")
     peerstore = PeerStore()
 
     identify_msg = Identify()
     addrs = [
-        multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/1234"),
         multiaddr.Multiaddr("/ip4/10.0.0.1/tcp/1234"),
         multiaddr.Multiaddr("/ip4/192.168.1.1/tcp/1234"),
-        multiaddr.Multiaddr("/ip4/169.254.1.1/tcp/1234"),
         multiaddr.Multiaddr("/ip4/172.16.0.1/tcp/1234"),
-        multiaddr.Multiaddr("/ip6/::1/tcp/1234"),
-        multiaddr.Multiaddr("/ip6/fe80::1/tcp/1234"),
     ]
     for a in addrs:
         identify_msg.listen_addrs.append(a.to_bytes())
 
     await _update_peerstore_from_identify(peerstore, peer_id, identify_msg)
 
-    with pytest.raises(PeerStoreError):
-        peerstore.addrs(peer_id)
+    stored = {str(a) for a in peerstore.addrs(peer_id)}
+    for a in addrs:
+        assert str(a) in stored
 
 
 @pytest.mark.trio

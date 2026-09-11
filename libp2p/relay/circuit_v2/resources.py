@@ -27,7 +27,6 @@ from .pb.circuit_pb2 import Reservation as PbReservation
 logger = logging.getLogger(__name__)
 
 # Prefix for data to be signed, helps prevent signature reuse attacks
-RELAY_VOUCHER_DOMAIN_SEP = b"libp2p-relay-voucher:"
 
 RANDOM_BYTES_LENGTH = 16  # 128 bits of randomness
 TIMESTAMP_MULTIPLIER = 1000000  # To convert seconds to microseconds
@@ -184,68 +183,10 @@ class Reservation:
             The protobuf representation of this reservation
 
         """
-        signature = b""
-
-        # Sign the voucher if we have a host with a private key
-        if self.host is not None:
-            try:
-                # Get the host's private key for signing
-                private_key = self.host.get_private_key()
-
-                # Get the data to sign
-                data_to_sign = self.get_data_to_sign()
-
-                # Sign the data
-                signature = private_key.sign(data_to_sign)
-
-                logger.debug(
-                    "Successfully signed reservation voucher for peer %s, "
-                    "signature length: %d bytes, data length: %d bytes",
-                    self.peer_id,
-                    len(signature),
-                    len(data_to_sign),
-                )
-            except Exception as e:
-                logger.warning(
-                    "Failed to sign reservation voucher for peer %s: %s. "
-                    "Using empty signature.",
-                    self.peer_id,
-                    str(e),
-                )
-                signature = b""
-        else:
-            logger.debug(
-                "No host provided for reservation %s, using empty signature",
-                self.peer_id,
-            )
-
         return PbReservation(
             expire=int(self.expires_at),
-            voucher=self.voucher,
-            signature=signature,
+            addrs=self.addrs,
         )
-
-    def get_data_to_sign(self) -> bytes:
-        """
-        Get the data that should be signed for this reservation.
-
-        Returns
-        -------
-        bytes
-            The data to sign, which includes the domain separator, voucher,
-            and expiration
-
-        """
-        expiration_bytes = int(self.expires_at).to_bytes(8, byteorder="big")
-        data = RELAY_VOUCHER_DOMAIN_SEP + self.voucher + expiration_bytes
-        logger.debug(
-            "Data to sign: domain_sep=%s, voucher=%s, expire=%d, total_length=%d",
-            RELAY_VOUCHER_DOMAIN_SEP.hex()[:10] + "...",
-            self.voucher.hex()[:10] + "...",
-            int(self.expires_at),
-            len(data),
-        )
-        return data
 
 
 class RelayResourceManager:
@@ -358,93 +299,17 @@ class RelayResourceManager:
             )
             return False
 
-        # Check if the voucher matches - this must always happen
-        if proto_res.voucher != reservation.voucher:
+        # Check the voucher only when the peer presents one. Relays
+        # following the spec (e.g. rust-libp2p) omit vouchers; requiring
+        # them would break interop. A presented voucher must match.
+        if proto_res.voucher and proto_res.voucher != reservation.voucher:
             logger.debug(
-                "Voucher mismatch for peer %s: expected %s, got %s",
-                peer_id,
-                reservation.voucher.hex(),
-                proto_res.voucher.hex(),
-            )
-            return False
-
-        # Signature verification is required for security
-        if not proto_res.signature:
-            logger.debug(
-                "No signature provided, rejecting reservation for peer %s", peer_id
-            )
-            return False
-
-        if self.host is None:
-            logger.warning(
-                "No host available for signature verification, rejecting "
-                "reservation for peer %s",
+                "Voucher mismatch for peer %s",
                 peer_id,
             )
             return False
 
-        # Verify the signature using the relay's public key (not the client's)
-        data_to_sign = self._get_data_to_sign(proto_res.voucher, proto_res.expire)
-        return self._verify_signature_with_relay_key(data_to_sign, proto_res.signature)
-
-    def _verify_signature_with_relay_key(self, data: bytes, signature: bytes) -> bool:
-        """
-        Verify a signature using the relay's public key.
-
-        Parameters
-        ----------
-        data : bytes
-            The data that was signed
-        signature : bytes
-            The signature to verify
-
-        Returns
-        -------
-        bool
-            True if the signature is valid
-
-        """
-        if self.host is None:
-            logger.warning("No host available for verification")
-            return False
-
-        try:
-            # Get the relay's public key (not the client's)
-            relay_public_key = self.host.get_public_key()
-
-            if relay_public_key is None:
-                logger.warning("Relay public key not available")
-                return False
-
-            # Verify the signature against the relay's public key
-            is_valid = relay_public_key.verify(data, signature)
-            logger.debug("Signature verification result: %s", is_valid)
-            return is_valid
-
-        except Exception as e:
-            logger.error("Error in relay signature verification: %s", str(e))
-            return False
-
-    def _get_data_to_sign(self, voucher: bytes, expire: int) -> bytes:
-        """
-        Get the data that should be signed for a reservation.
-
-        Parameters
-        ----------
-        voucher : bytes
-            The voucher token
-        expire : int
-            The expiration timestamp
-
-        Returns
-        -------
-        bytes
-            The data to sign
-
-        """
-        expiration_bytes = int(expire).to_bytes(8, byteorder="big")
-        data = RELAY_VOUCHER_DOMAIN_SEP + voucher + expiration_bytes
-        return data
+        return True
 
     def can_accept_connection(self, peer_id: ID) -> bool:
         """
