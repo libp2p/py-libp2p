@@ -257,6 +257,10 @@ async def test_identify_push_multiple_peers_integration(security_protocol):
             # Check that host_b's peerstore has been updated with host_c's info
             assert host_c.get_id() in host_b.get_peerstore().peer_ids()
 
+            # Close host_c's remaining outbound dial socket (c->b) before
+            # host_c.run() exits, so it does not leak until a later test's GC.
+            await host_c.disconnect(host_b.get_id())
+
 
 @pytest.mark.trio
 async def test_identify_push_large_message_handling(security_protocol):

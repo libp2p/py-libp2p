@@ -161,17 +161,25 @@ async def test_tcp_dial(nursery):
         await transport.dial(Multiaddr("/ip4/127.0.0.1/tcp/1"))
 
     listener = transport.create_listener(handler)
-    await listener.listen(LISTEN_MADDR)
-    addrs = listener.get_addrs()
-    assert len(addrs) == 1
-    listen_addr = addrs[0]
-    raw_conn = await transport.dial(listen_addr)
-    await event.wait()
+    try:
+        await listener.listen(LISTEN_MADDR)
+        addrs = listener.get_addrs()
+        assert len(addrs) == 1
+        listen_addr = addrs[0]
+        raw_conn = await transport.dial(listen_addr)
+        try:
+            await event.wait()
 
-    data = b"123"
-    assert raw_conn_other_side is not None
-    await raw_conn_other_side.write(data)
-    assert (await raw_conn.read(len(data))) == data
+            data = b"123"
+            assert raw_conn_other_side is not None
+            await raw_conn_other_side.write(data)
+            assert (await raw_conn.read(len(data))) == data
+        finally:
+            await raw_conn.close()
+            if raw_conn_other_side is not None:
+                await raw_conn_other_side.close()
+    finally:
+        await listener.close()
 
 
 @pytest.mark.trio
@@ -335,24 +343,32 @@ async def test_ipv6_tcp_listen_and_dial(nursery):
     # Listen on IPv6 loopback
     listen_addr = Multiaddr("/ip6/::1/tcp/0")
     listener = transport.create_listener(handler)
-    await listener.listen(listen_addr)
-    addrs = listener.get_addrs()
-    assert len(addrs) == 1
+    try:
+        await listener.listen(listen_addr)
+        addrs = listener.get_addrs()
+        assert len(addrs) == 1
 
-    # Verify that the address is IPv6
-    listen_addr = addrs[0]
-    protocol = get_ip_protocol_from_multiaddr(listen_addr)
-    assert protocol == "ip6", f"Expected ip6 protocol, got {protocol}"
+        # Verify that the address is IPv6
+        listen_addr = addrs[0]
+        protocol = get_ip_protocol_from_multiaddr(listen_addr)
+        assert protocol == "ip6", f"Expected ip6 protocol, got {protocol}"
 
-    # Dial to IPv6 address
-    raw_conn = await transport.dial(listen_addr)
-    await event.wait()
+        # Dial to IPv6 address
+        raw_conn = await transport.dial(listen_addr)
+        try:
+            await event.wait()
 
-    # Test data transfer
-    data = b"test_ipv6_data"
-    assert raw_conn_other_side is not None
-    await raw_conn_other_side.write(data)
-    assert (await raw_conn.read(len(data))) == data
+            # Test data transfer
+            data = b"test_ipv6_data"
+            assert raw_conn_other_side is not None
+            await raw_conn_other_side.write(data)
+            assert (await raw_conn.read(len(data))) == data
+        finally:
+            await raw_conn.close()
+            if raw_conn_other_side is not None:
+                await raw_conn_other_side.close()
+    finally:
+        await listener.close()
 
 
 @pytest.mark.trio
@@ -371,24 +387,32 @@ async def test_ipv6_tcp_dial_with_ipv4_fallback(nursery):
     # Listen on IPv4 loopback
     listen_addr = Multiaddr("/ip4/127.0.0.1/tcp/0")
     listener = transport.create_listener(handler)
-    await listener.listen(listen_addr)
-    addrs = listener.get_addrs()
-    assert len(addrs) == 1
+    try:
+        await listener.listen(listen_addr)
+        addrs = listener.get_addrs()
+        assert len(addrs) == 1
 
-    # Verify that the address is IPv4
-    listen_addr = addrs[0]
-    protocol = get_ip_protocol_from_multiaddr(listen_addr)
-    assert protocol == "ip4", f"Expected ip4 protocol, got {protocol}"
+        # Verify that the address is IPv4
+        listen_addr = addrs[0]
+        protocol = get_ip_protocol_from_multiaddr(listen_addr)
+        assert protocol == "ip4", f"Expected ip4 protocol, got {protocol}"
 
-    # Dial to IPv4 address (should still work)
-    raw_conn = await transport.dial(listen_addr)
-    await event.wait()
+        # Dial to IPv4 address (should still work)
+        raw_conn = await transport.dial(listen_addr)
+        try:
+            await event.wait()
 
-    # Test data transfer
-    data = b"test_ipv4_data"
-    assert raw_conn_other_side is not None
-    await raw_conn_other_side.write(data)
-    assert (await raw_conn.read(len(data))) == data
+            # Test data transfer
+            data = b"test_ipv4_data"
+            assert raw_conn_other_side is not None
+            await raw_conn_other_side.write(data)
+            assert (await raw_conn.read(len(data))) == data
+        finally:
+            await raw_conn.close()
+            if raw_conn_other_side is not None:
+                await raw_conn_other_side.close()
+    finally:
+        await listener.close()
 
 
 def test_extract_ip_from_multiaddr():

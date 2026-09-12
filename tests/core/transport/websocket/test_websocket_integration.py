@@ -104,7 +104,10 @@ async def create_websocket_host(
                 await swarm.listen(addr)
                 # Small delay to ensure listener is ready
                 await trio.sleep(0.05)
-        yield host
+        try:
+            yield host
+        finally:
+            await swarm.close()
 
 
 @pytest.mark.trio

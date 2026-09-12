@@ -515,6 +515,12 @@ async def test_swarm_listen_multiple_addresses_connectivity(security_protocol):
                             f"Failed to establish libp2p connection to {full_addr}: {e}"
                         )
 
+            # Deterministic teardown: close swarms (live connections +
+            # listeners); service-stop alone leaves dialed sockets open
+            # (#1485). Idempotent with the manager stop that follows.
+            await swarm2.close()
+        await swarm1.close()
+
 
 @pytest.mark.trio
 async def test_swarm_listener_resilience_on_upgrade_failure(security_protocol):

@@ -88,6 +88,7 @@ async def test_read_after_abrupt_reset_raises_error() -> None:
         assert exc.transport == "tcp"
         logger.info("read() raised ConnectionClosedError on RST: %s", exc)
 
+        await local_conn.close()
         await listener.close()
         nursery.cancel_scope.cancel()
 
@@ -136,6 +137,7 @@ async def test_write_after_abrupt_reset_raises_error() -> None:
         assert exc.transport == "tcp"
         logger.info("write() raised ConnectionClosedError on RST: %s", exc)
 
+        await local_conn.close()
         await listener.close()
         nursery.cancel_scope.cancel()
 
@@ -174,6 +176,7 @@ async def test_graceful_close_read_returns_eof() -> None:
         assert data == b""
         logger.info("Graceful close correctly returned EOF (b'')")
 
+        await local_conn.close()
         await listener.close()
         nursery.cancel_scope.cancel()
 
@@ -214,5 +217,6 @@ async def test_normal_data_transfer_works() -> None:
 
         logger.info("Normal data transfer works as expected")
 
+        await local_conn.close()
         await listener.close()
         nursery.cancel_scope.cancel()

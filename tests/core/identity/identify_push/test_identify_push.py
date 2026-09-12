@@ -242,6 +242,10 @@ async def test_identify_push_to_peers(security_protocol):
             # Check that host_b's peerstore has been updated with host_c's info
             assert host_c.get_id() in host_b.get_peerstore().peer_ids()
 
+            # Close host_c's remaining outbound dial socket (c->b) before
+            # host_c.run() exits, so it does not leak until a later test's GC.
+            await host_c.disconnect(host_b.get_id())
+
 
 @pytest.mark.trio
 async def test_push_identify_to_peers_with_explicit_params(security_protocol):
@@ -311,6 +315,11 @@ async def test_push_identify_to_peers_with_explicit_params(security_protocol):
             peerstore_protocols_b = set(peerstore_b.get_protocols(peer_id_a))
             host_a_protocols = set(host_a.get_mux().get_protocols())
             assert all(p in peerstore_protocols_b for p in host_a_protocols)
+
+            # Close host_c/host_d outbound dial sockets before their run()
+            # blocks exit, so they do not leak until a later test's GC.
+            await host_c.disconnect(host_a.get_id())
+            await host_d.disconnect(host_a.get_id())
 
 
 @pytest.mark.trio

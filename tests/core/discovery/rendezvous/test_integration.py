@@ -146,6 +146,12 @@ async def test_full_rendezvous_workflow():
                         logger.error("Integration test error: %s", e)
                         # Don't fail the test for connection issues in unit tests
                         raise
+                    finally:
+                        # Close the outbound client->server connections that
+                        # register()/discover() dialed, so their sockets don't
+                        # leak past the async-with teardown.
+                        await client1_host.disconnect(server_peer_id)
+                        await client2_host.disconnect(server_peer_id)
 
     except Exception as e:
         # Handle any startup/shutdown errors gracefully
