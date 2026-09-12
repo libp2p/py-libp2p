@@ -19,6 +19,7 @@ from libp2p.network.stream.exceptions import (
     StreamReset,
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
+from libp2p.peer.id import ID
 from libp2p.stream_muxer.exceptions import MuxedStreamError
 from libp2p.utils import (
     decode_varint_with_size,
@@ -144,6 +145,37 @@ def parse_identify_response(response: bytes) -> Identify:
         raise
 
 
+def _prefer_circuit_addr(
+    host: IHost, peer_id: ID, fallback: Multiaddr | None
+) -> Multiaddr | None:
+    """
+    Return the circuit address for a relayed connection to ``peer_id``.
+
+    Returns ``fallback`` unchanged when the peer has no relayed connection
+    (direct connections keep reporting the socket remote address).
+    """
+    try:
+        network = host.get_network()
+        conns = (getattr(network, "connections", {}) or {}).get(peer_id, [])
+    except Exception:
+        return fallback
+    if not isinstance(conns, list):
+        conns = [conns]
+    for conn in conns:
+        try:
+            addrs = conn.get_transport_addresses() or []
+        except Exception:
+            continue
+        for addr in addrs:
+            try:
+                s = str(addr)
+            except Exception:
+                continue
+            if "/p2p-circuit" in s:
+                return addr if isinstance(addr, Multiaddr) else fallback
+    return fallback
+
+
 def identify_handler_for(
     host: IHost, use_varint_format: bool = True
 ) -> StreamHandlerFn:
@@ -160,6 +192,16 @@ def identify_handler_for(
             # Convert to multiaddr
             if remote_address:
                 observed_multiaddr = _remote_address_to_multiaddr(remote_address)
+
+            # On relayed connections the raw socket remote is the relay's
+            # own address. Reporting it as the peer's observed address
+            # poisons strict peers: they record it as *their* external and
+            # advertise the relay back in DCUtR (undialable). Report the
+            # circuit address instead, which peers filter (matching
+            # go/rust behavior).
+            observed_multiaddr = _prefer_circuit_addr(
+                host, peer_id, observed_multiaddr
+            )
 
         except Exception as e:
             logger.error("Error getting remote address: %s", e)

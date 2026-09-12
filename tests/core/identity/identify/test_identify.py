@@ -120,3 +120,35 @@ async def test_identify_protocol(security_protocol):
                 ).raw_payload
             ).peer_id
         )
+
+
+@pytest.mark.trio
+async def test_prefer_circuit_addr_on_relayed_connection():
+    """Identify reports the circuit address (not the relay's socket addr)
+    when the peer is reached through a relayed connection."""
+    from unittest.mock import MagicMock
+
+    from libp2p.crypto.ed25519 import create_new_key_pair
+    from libp2p.identity.identify.identify import _prefer_circuit_addr
+    from libp2p.peer.id import ID as PeerID
+
+    peer_id = PeerID.from_pubkey(create_new_key_pair().public_key)
+    relay_id = PeerID.from_pubkey(create_new_key_pair().public_key)
+    relay_addr = Multiaddr(f"/p2p/{relay_id.to_string()}/p2p-circuit")
+    direct_addr = Multiaddr("/ip4/127.0.0.1/tcp/4001")
+    fallback = Multiaddr("/ip4/9.9.9.9/tcp/1")
+
+    relayed_conn = MagicMock()
+    relayed_conn.get_transport_addresses.return_value = [relay_addr]
+    direct_conn = MagicMock()
+    direct_conn.get_transport_addresses.return_value = [direct_addr]
+
+    host = MagicMock()
+    host.get_network.return_value.connections = {peer_id: [relayed_conn]}
+    assert _prefer_circuit_addr(host, peer_id, fallback) == relay_addr
+
+    host.get_network.return_value.connections = {peer_id: [direct_conn]}
+    assert _prefer_circuit_addr(host, peer_id, fallback) == fallback
+
+    host.get_network.return_value.connections = {}
+    assert _prefer_circuit_addr(host, peer_id, fallback) == fallback
