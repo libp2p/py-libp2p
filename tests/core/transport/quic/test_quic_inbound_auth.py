@@ -101,6 +101,7 @@ async def test_listener_rejects_inbound_without_peer_certificate() -> None:
             nursery.cancel_scope.cancel()
     finally:
         await listener.close()
+        await server_transport.close()
 
     stats = listener.get_stats()
     assert handler_called is False
@@ -127,6 +128,7 @@ async def test_listener_accepts_authenticated_libp2p_peer() -> None:
     client_key = create_new_key_pair()
     client_config = QUICTransportConfig(idle_timeout=10.0, connection_timeout=5.0)
     client_transport = QUICTransport(client_key.private_key, client_config)
+    client_conn = None
 
     try:
         async with trio.open_nursery() as nursery:
@@ -139,12 +141,16 @@ async def test_listener_accepts_authenticated_libp2p_peer() -> None:
             )
 
             client_transport.set_background_nursery(nursery)
-            await client_transport.dial(server_addr)
+            client_conn = await client_transport.dial(server_addr)
             await trio.sleep(1.0)
 
             nursery.cancel_scope.cancel()
     finally:
+        if client_conn is not None:
+            await client_conn.close()
         await listener.close()
+        await client_transport.close()
+        await server_transport.close()
 
     assert handler_called is True
 

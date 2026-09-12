@@ -1301,11 +1301,15 @@ async def test_websocket_listener_addr_format():
         await trio.sleep(0)
 
     listener_wss = transport_wss.create_listener(dummy_handler_wss)
-    # Type assertion to access private attributes for testing
-    assert hasattr(listener_wss, "_tls_config")
-    assert getattr(listener_wss, "_tls_config") is not None
-    assert hasattr(listener_wss, "_handshake_timeout")
-    assert getattr(listener_wss, "_handshake_timeout") == 15.0
+    try:
+        # Type assertion to access private attributes for testing
+        assert hasattr(listener_wss, "_tls_config")
+        assert getattr(listener_wss, "_tls_config") is not None
+        assert hasattr(listener_wss, "_handshake_timeout")
+        assert getattr(listener_wss, "_handshake_timeout") == 15.0
+    finally:
+        await listener_ws.close()
+        await listener_wss.close()
 
 
 @pytest.mark.trio
