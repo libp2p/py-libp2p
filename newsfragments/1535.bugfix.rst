@@ -1,0 +1,1 @@
+Fixed the Rendezvous client advertising ``/p2p``-suffixed addresses in REGISTER messages. Strict servers dial back advertised addresses to verify reachability and rejected these registrations, so registering against non-Python servers failed. The client now advertises bare transport addresses.
