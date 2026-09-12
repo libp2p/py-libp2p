@@ -82,6 +82,12 @@ async def test_health_monitor_updates_rtt_on_real_network() -> None:
             assert summary["average_latency_ms"] >= 0
             assert summary["average_health_score"] > 0
 
+            # Deterministic teardown: close swarms (live connections +
+            # listeners); service-stop alone leaves dialed sockets open
+            # (#1485). Idempotent with the manager stop that follows.
+            await swarm_b.close()
+            await swarm_a.close()
+
 
 @pytest.mark.trio
 async def test_health_monitor_detects_failed_ping_on_real_network() -> None:
@@ -129,3 +135,9 @@ async def test_health_monitor_detects_failed_ping_on_real_network() -> None:
             assert result.success is False
             health.update_ping_metrics(0.0, False)
             assert health.ping_success_rate < 1.0
+
+            # Deterministic teardown: close swarms (live connections +
+            # listeners); service-stop alone leaves dialed sockets open
+            # (#1485). Idempotent with the manager stop that follows.
+            await swarm_b.close()
+            await swarm_a.close()

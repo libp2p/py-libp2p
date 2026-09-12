@@ -380,3 +380,7 @@ async def test_identify_multi_transport_host_addresses(security_protocol):
             assert _multiaddr_to_bytes(addr) in result.listen_addrs, (
                 f"Address {addr} not advertised by host_a"
             )
+
+        # Close host_b's dial socket to host_a before the background services
+        # shut down, so it does not leak until a later test's GC.
+        await host_b.disconnect(host_a.get_id())
