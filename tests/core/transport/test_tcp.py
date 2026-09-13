@@ -95,9 +95,15 @@ async def test_tcp_listener_raises_on_bind_failure(nursery):
     transport = TCP()
 
     # Occupy a port with a plain socket WITHOUT SO_REUSEPORT, so our
-    # reuseport listener cannot take it either.
+    # reuseport listener cannot take it either. On Windows SO_REUSEADDR
+    # alone still permits a second bind, so use SO_EXCLUSIVEADDRUSE there.
     holder = stdlib_socket.socket(stdlib_socket.AF_INET, stdlib_socket.SOCK_STREAM)
-    holder.setsockopt(stdlib_socket.SOL_SOCKET, stdlib_socket.SO_REUSEADDR, 1)
+    if hasattr(stdlib_socket, "SO_EXCLUSIVEADDRUSE"):
+        holder.setsockopt(
+            stdlib_socket.SOL_SOCKET, stdlib_socket.SO_EXCLUSIVEADDRUSE, 1
+        )
+    else:
+        holder.setsockopt(stdlib_socket.SOL_SOCKET, stdlib_socket.SO_REUSEADDR, 1)
     try:
         holder.bind(("127.0.0.1", 0))
         holder.listen(1)
