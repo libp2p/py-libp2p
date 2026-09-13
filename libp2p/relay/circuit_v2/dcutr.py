@@ -9,6 +9,8 @@ using hole punching techniques.
 """
 
 import logging
+import os
+import random
 import time
 from typing import Any
 
@@ -30,9 +32,6 @@ from libp2p.relay.circuit_v2.config import (
     DEFAULT_DCUTR_READ_TIMEOUT,
     DEFAULT_DCUTR_WRITE_TIMEOUT,
     DEFAULT_DIAL_TIMEOUT,
-)
-from libp2p.relay.circuit_v2.nat import (
-    ReachabilityChecker,
 )
 from libp2p.relay.circuit_v2.pb.dcutr_pb2 import (
     HolePunch,
@@ -60,8 +59,13 @@ MAX_MESSAGE_SIZE = 4 * 1024
 # Spec: inbound peers SHOULD retry twice (total 3 attempts) before giving up.
 MAX_HOLE_PUNCH_ATTEMPTS = 3
 
-# Delay between retry attempts
-HOLE_PUNCH_RETRY_DELAY = 30  # seconds
+# Upper bound for one hole-punch dial round; outstanding dials are
+# cancelled once a direct connection verifies (spec step 6).
+_HOLE_PUNCH_ROUND_TIMEOUT = 5.0
+
+# Grace period before closing the relay connection after a successful
+# upgrade (spec step 6: migrate to direct, close relay after grace).
+RELAY_CLOSE_GRACE_PERIOD = 60.0
 
 # Maximum observed addresses to exchange
 MAX_OBSERVED_ADDRS = 20
@@ -84,6 +88,27 @@ def _tcp_ip_port(addr: Multiaddr) -> tuple[int, str, int] | None:
     """Extract (family, ip, tcp_port) from a multiaddr, or None."""
     try:
         port_str = addr.value_for_protocol("tcp")
+    except Exception:
+        return None
+    if port_str is None:
+        return None
+    for family, proto in ((4, "ip4"), (6, "ip6")):
+        try:
+            ip = addr.value_for_protocol(proto)
+        except Exception:
+            continue
+        if ip is not None:
+            try:
+                return (family, ip, int(port_str))
+            except ValueError:
+                return None
+    return None
+
+
+def _udp_ip_port(addr: Multiaddr) -> tuple[int, str, int] | None:
+    """Extract (family, ip, udp_port) from a multiaddr, or None."""
+    try:
+        port_str = addr.value_for_protocol("udp")
     except Exception:
         return None
     if port_str is None:
@@ -188,7 +213,6 @@ class DCUtRProtocol(Service):
         # inbound DCUtR sessions ("Already expecting an incoming
         # connection"), so at most one outbound session may exist.
         self._initiate_locks: dict[ID, trio.Lock] = {}
-        self._reachability_checker = ReachabilityChecker(host)
         self._nursery: trio.Nursery | None = None
 
     def _initiate_lock_for(self, peer_id: ID) -> trio.Lock:
@@ -428,12 +452,49 @@ class DCUtRProtocol(Service):
         async with self._initiate_lock_for(peer_id):
             return await self._initiate_hole_punch_locked(peer_id)
 
+    async def _try_unilateral_upgrade(self, peer_id: ID) -> bool:
+        """
+        Attempt a plain direct dial before the DCUtR exchange (spec step 0).
+
+        If the peer advertises public (non-relay) addresses it may be
+        directly reachable without hole punching. Success skips DCUtR
+        entirely and does not consume the hole-punch attempt budget.
+        """
+        try:
+            addrs = [
+                a
+                for a in self.host.get_peerstore().addrs(peer_id)
+                if "/p2p-circuit" not in str(a)
+            ]
+        except Exception:
+            return False
+        if not addrs:
+            return False
+        try:
+            with trio.move_on_after(self.dial_timeout):
+                async with trio.open_nursery() as nursery:
+                    for addr in addrs:
+                        nursery.start_soon(self._dial_peer, peer_id, addr)
+        except Exception as e:
+            logger.debug("Unilateral upgrade to %s failed: %s", peer_id, e)
+        return await self._verify_direct_connection(peer_id)
+
     async def _initiate_hole_punch_locked(self, peer_id: ID) -> bool:
         """Hole-punch initiation body; caller must hold the peer's lock."""
         # Check if there's already an active hole punch attempt
         if peer_id in self._in_progress:
             logger.debug("Hole punch already in progress with %s", peer_id)
             return False
+
+        # Spec step 0: try a unilateral direct dial first. A directly
+        # reachable peer needs no hole punching; success here bypasses
+        # the DCUtR exchange and the attempt budget below.
+        if await self._try_unilateral_upgrade(peer_id):
+            logger.info(
+                "Unilateral direct upgrade to %s succeeded, skipping DCUtR",
+                peer_id,
+            )
+            return True
 
         # Check if we've exceeded the maximum number of attempts
         attempts = self._hole_punch_attempts.get(peer_id, 0)
@@ -563,7 +624,6 @@ class DCUtRProtocol(Service):
         self,
         peer_id: ID,
         addrs: list[Multiaddr],
-        punch_time: float | None = None,
         as_responder: bool = False,
     ) -> bool:
         """
@@ -575,8 +635,6 @@ class DCUtRProtocol(Service):
             The peer to hole punch with
         addrs : list[Multiaddr]
             List of addresses to try
-        punch_time : Optional[float]
-            Time to perform the punch (if None, do it immediately)
         as_responder : bool
             Upgrade hole-punch dials as inbound/responder. Set when we are
             the DCUtR initiator (spec's server side): our dial may merge
@@ -593,14 +651,6 @@ class DCUtRProtocol(Service):
         if not addrs:
             logger.warning("No addresses to try for hole punch with %s", peer_id)
             return False
-
-        # If punch_time is specified, wait until that time
-        if punch_time is not None:
-            now = time.time()
-            if punch_time > now:
-                wait_time = punch_time - now
-                logger.debug("Waiting %.2f seconds before hole punch", wait_time)
-                await trio.sleep(wait_time)
 
         # Try to dial each address
         logger.debug(
@@ -697,30 +747,54 @@ class DCUtRProtocol(Service):
             peer_id,
             len(direct_addrs),
         )
-        for _round in range(3):
-            async with trio.open_nursery() as nursery:
-                for addr in direct_addrs:
-                    nursery.start_soon(
-                        self._dial_peer, peer_id, addr, source, as_responder
+        # Spec step 5 (QUIC): the initiator sprays random UDP packets at
+        # 10-200ms intervals while the responder dials. A plain QUIC dial
+        # emits Initials, but the specified spam opens the NAT mapping
+        # more aggressively.
+        quic_addrs = [
+            a
+            for a in direct_addrs
+            if "quic" in str(a).lower() and _udp_ip_port(a) is not None
+        ]
+        stop_spam = trio.Event()
+        succeeded = False
+        try:
+            async with trio.open_nursery() as attempt_nursery:
+                if as_responder and quic_addrs:
+                    for addr in quic_addrs:
+                        attempt_nursery.start_soon(
+                            self._spam_udp_for_hole_punch, addr, stop_spam
+                        )
+                for _round in range(3):
+                    async with trio.open_nursery() as nursery:
+                        for addr in direct_addrs:
+                            nursery.start_soon(
+                                self._dial_peer, peer_id, addr, source, as_responder
+                            )
+                        # Spec step 6: cancel outstanding attempts once one
+                        # succeeds instead of waiting out the round.
+                        with trio.move_on_after(_HOLE_PUNCH_ROUND_TIMEOUT):
+                            while not await self._verify_direct_connection(peer_id):
+                                await trio.sleep(0.2)
+                        nursery.cancel_scope.cancel()
+                    # Verify (don't trust cache) before declaring success.
+                    if await self._verify_direct_connection(peer_id):
+                        logger.debug(
+                            "Verified direct connection to %s after hole punch",
+                            peer_id,
+                        )
+                        stop_spam.set()
+                        self._schedule_relay_close(peer_id)
+                        succeeded = True
+                        break
+                    logger.debug(
+                        "No direct connection verified to %s after hole punch round",
+                        peer_id,
                     )
-
-            # Wait a bit for connections to establish and settle
-            await trio.sleep(0.5)
-
-            # Check if we established a direct connection (verify, don't trust cache)
-            is_direct = await self._verify_direct_connection(peer_id)
-            if is_direct:
-                logger.debug(
-                    "Verified direct connection to %s after hole punch", peer_id
-                )
-                return True
-            logger.debug(
-                "No direct connection verified to %s after hole punch round",
-                peer_id,
-            )
-            await trio.sleep(2.0)
-
-        return False
+                    await trio.sleep(2.0)
+        finally:
+            stop_spam.set()
+        return succeeded
 
     async def _dial_peer(
         self,
@@ -799,6 +873,84 @@ class DCUtRProtocol(Service):
                     self.host.get_peerstore().add_addrs(peer_id, known_addrs, 600)
                 except Exception:
                     pass
+
+    async def _spam_udp_for_hole_punch(self, addr: Multiaddr, stop: trio.Event) -> None:
+        """
+        Spray random UDP packets at a QUIC address (spec step 5).
+
+        The DCUtR initiator sends random payloads at random 10-200ms
+        intervals while the responder dials, opening the NAT mapping.
+        Runs until ``stop`` is set or the surrounding nursery closes.
+        """
+        parsed = _udp_ip_port(addr)
+        if parsed is None:
+            return
+        family, ip, port = parsed
+        sock = trio.socket.socket(
+            trio.socket.AF_INET6 if family == 6 else trio.socket.AF_INET,
+            trio.socket.SOCK_DGRAM,
+        )
+        try:
+            while not stop.is_set():
+                try:
+                    await sock.sendto(os.urandom(128), (ip, port))
+                except Exception:
+                    pass
+                await trio.sleep(random.uniform(0.01, 0.2))
+        except trio.Cancelled:
+            raise
+        except Exception as e:
+            logger.debug("QUIC hole-punch spam to %s failed: %s", addr, e)
+        finally:
+            try:
+                sock.close()
+            except Exception:
+                pass
+
+    def _schedule_relay_close(self, peer_id: ID) -> None:
+        """
+        Close relayed connections after a grace period (spec step 6).
+
+        New streams migrate to the direct connection; the relay leg is
+        closed once the grace period lapses. No-op when the service
+        nursery is unavailable (e.g. direct method use in tests).
+        """
+        if self._nursery is None:
+            return
+        try:
+            self._nursery.start_soon(self._close_relayed_conns_after_grace, peer_id)
+        except Exception as e:
+            logger.debug("Failed to schedule relay close for %s: %s", peer_id, e)
+
+    async def _close_relayed_conns_after_grace(
+        self, peer_id: ID, grace: float = RELAY_CLOSE_GRACE_PERIOD
+    ) -> None:
+        """Close a peer's relayed connections once direct is confirmed."""
+        await trio.sleep(grace)
+        try:
+            # Never strand the peer: only close relay legs while a
+            # direct connection still verifies.
+            if not await self._verify_direct_connection(peer_id):
+                return
+            network = self.host.get_network()
+            conns = getattr(network, "connections", {}).get(peer_id, [])
+            if not isinstance(conns, list):
+                conns = [conns]
+            for conn in conns:
+                try:
+                    addrs = conn.get_transport_addresses()
+                except Exception:
+                    continue
+                if addrs and all("/p2p-circuit" in str(a) for a in addrs):
+                    logger.info(
+                        "Closing relayed connection to %s after direct upgrade",
+                        peer_id,
+                    )
+                    await conn.close()
+        except trio.Cancelled:
+            raise
+        except Exception as e:
+            logger.debug("Relay close after grace for %s failed: %s", peer_id, e)
 
     async def _verify_direct_connection(self, peer_id: ID) -> bool:
         """
