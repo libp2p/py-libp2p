@@ -1,4 +1,5 @@
 import logging
+import socket as stdlib_socket
 
 import pytest
 import multiaddr
@@ -116,6 +117,10 @@ async def test_tcp_listener_raises_on_bind_failure(nursery):
         holder.close()
 
 
+@pytest.mark.skipif(
+    not hasattr(stdlib_socket, "SO_REUSEPORT"),
+    reason="SO_REUSEPORT not available on this platform",
+)
 @pytest.mark.trio
 async def test_tcp_listeners_can_share_port_with_reuseport(nursery):
     """Two listeners can share one port (SO_REUSEPORT for hole punching)."""
