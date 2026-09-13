@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-from libp2p.host.autonat.pb import autonat_pb2 as libp2p_dot_host_dot_autonat_dot_pb_dot_autonat__pb2
+import autonat_pb2 as autonat__pb2
 
 GRPC_GENERATED_VERSION = '1.74.0'
 GRPC_VERSION = grpc.__version__
@@ -18,15 +18,15 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + f' but the generated code in libp2p/host/autonat/pb/autonat_pb2_grpc.py depends on'
+        + f' but the generated code in autonat_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
     )
 
 
-class AutoNATStub:
-    """AutoNAT service definition
+class AutoNATStub(object):
+    """AutoNAT service definition (libp2p/specs autonat-v1, Recommendation).
     """
 
     def __init__(self, channel):
@@ -37,13 +37,13 @@ class AutoNATStub:
         """
         self.Dial = channel.unary_unary(
                 '/autonat.pb.AutoNAT/Dial',
-                request_serializer=libp2p_dot_host_dot_autonat_dot_pb_dot_autonat__pb2.Message.SerializeToString,
-                response_deserializer=libp2p_dot_host_dot_autonat_dot_pb_dot_autonat__pb2.Message.FromString,
+                request_serializer=autonat__pb2.Message.SerializeToString,
+                response_deserializer=autonat__pb2.Message.FromString,
                 _registered_method=True)
 
 
-class AutoNATServicer:
-    """AutoNAT service definition
+class AutoNATServicer(object):
+    """AutoNAT service definition (libp2p/specs autonat-v1, Recommendation).
     """
 
     def Dial(self, request, context):
@@ -57,8 +57,8 @@ def add_AutoNATServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'Dial': grpc.unary_unary_rpc_method_handler(
                     servicer.Dial,
-                    request_deserializer=libp2p_dot_host_dot_autonat_dot_pb_dot_autonat__pb2.Message.FromString,
-                    response_serializer=libp2p_dot_host_dot_autonat_dot_pb_dot_autonat__pb2.Message.SerializeToString,
+                    request_deserializer=autonat__pb2.Message.FromString,
+                    response_serializer=autonat__pb2.Message.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -68,8 +68,8 @@ def add_AutoNATServicer_to_server(servicer, server):
 
 
  # This class is part of an EXPERIMENTAL API.
-class AutoNAT:
-    """AutoNAT service definition
+class AutoNAT(object):
+    """AutoNAT service definition (libp2p/specs autonat-v1, Recommendation).
     """
 
     @staticmethod
@@ -87,8 +87,8 @@ class AutoNAT:
             request,
             target,
             '/autonat.pb.AutoNAT/Dial',
-            libp2p_dot_host_dot_autonat_dot_pb_dot_autonat__pb2.Message.SerializeToString,
-            libp2p_dot_host_dot_autonat_dot_pb_dot_autonat__pb2.Message.FromString,
+            autonat__pb2.Message.SerializeToString,
+            autonat__pb2.Message.FromString,
             options,
             channel_credentials,
             insecure,

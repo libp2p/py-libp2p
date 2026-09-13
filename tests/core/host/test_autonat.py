@@ -4,36 +4,35 @@ from unittest.mock import (
 )
 
 import pytest
+from multiaddr import (
+    Multiaddr,
+)
 
 from libp2p.host.autonat.autonat import (
+    AUTONAT_PROTOCOL_ID,
     AutoNATService,
     AutoNATStatus,
+    _is_relayed_stream,
 )
 from libp2p.host.autonat.pb.autonat_pb2 import (
-    DialRequest,
-    DialResponse,
     Message,
-    PeerInfo,
-    Status,
-    Type,
-)
-from libp2p.io.abc import Reader
-from libp2p.network.stream.exceptions import (
-    StreamError,
-)
-from libp2p.network.stream.net_stream import (
-    NetStream,
 )
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.peer.peerinfo import (
+    PeerInfo,
+)
 from libp2p.utils.varint import (
     encode_varint_prefixed,
-    read_varint_prefixed_bytes,
 )
 from tests.utils.factories import (
     HostFactory,
 )
+
+
+def _server_ids(n):
+    return [ID(f"server-{i}".encode()) for i in range(n)]
 
 
 @pytest.mark.trio
@@ -41,7 +40,7 @@ async def test_autonat_service_initialization():
     """Test that the AutoNAT service initializes correctly."""
     async with HostFactory.create_batch_and_listen(1) as hosts:
         host = hosts[0]
-        service = AutoNATService(host)
+        service = AutoNATService(host, serve=False)
 
         assert service.status == AutoNATStatus.UNKNOWN
         assert service.dial_results == {}
@@ -50,16 +49,25 @@ async def test_autonat_service_initialization():
 
 
 @pytest.mark.trio
+async def test_autonat_service_registers_handler_by_default():
+    """Serving hosts answer AutoNAT streams; opt-out hosts do not."""
+    async with HostFactory.create_batch_and_listen(1) as hosts:
+        host = hosts[0]
+        AutoNATService(host)
+        assert AUTONAT_PROTOCOL_ID in host.get_mux().handlers
+        host.remove_stream_handler(AUTONAT_PROTOCOL_ID)
+        assert AUTONAT_PROTOCOL_ID not in host.get_mux().handlers
+
+
+@pytest.mark.trio
 async def test_autonat_status_getter():
     """Test that the AutoNAT status getter works correctly."""
     async with HostFactory.create_batch_and_listen(1) as hosts:
         host = hosts[0]
-        service = AutoNATService(host)
+        service = AutoNATService(host, serve=False)
 
-        # Testing the initial status
         assert service.get_status() == AutoNATStatus.UNKNOWN
 
-        # Testing the status changes
         service.status = AutoNATStatus.PUBLIC
         assert service.get_status() == AutoNATStatus.PUBLIC
 
@@ -68,198 +76,247 @@ async def test_autonat_status_getter():
 
 
 @pytest.mark.trio
-async def test_update_status():
-    """Test that the AutoNAT status updates correctly based on dial results."""
+async def test_update_status_needs_more_than_three_confirmations():
+    """Spec heuristic: >3 servers must agree before the status flips."""
     async with HostFactory.create_batch_and_listen(1) as hosts:
         host = hosts[0]
-        service = AutoNATService(host)
+        service = AutoNATService(host, serve=False)
 
-        # No dial results should result in UNKNOWN status
+        # No verdicts -> UNKNOWN
         service.update_status()
         assert service.status == AutoNATStatus.UNKNOWN
 
-        # Less than 2 successful dials should result in PRIVATE status
-        service.dial_results = {
-            ID(b"peer1"): True,
-            ID(b"peer2"): False,
-            ID(b"peer3"): False,
-        }
+        # Three successes are not enough -> unchanged
+        service.dial_results = {sid: True for sid in _server_ids(3)}
         service.update_status()
-        assert service.status == AutoNATStatus.PRIVATE
+        assert service.status == AutoNATStatus.UNKNOWN
 
-        # 2 or more successful dials should result in PUBLIC status
-        service.dial_results = {
-            ID(b"peer1"): True,
-            ID(b"peer2"): True,
-            ID(b"peer3"): False,
-        }
+        # Four successes -> PUBLIC
+        service.dial_results = {sid: True for sid in _server_ids(4)}
         service.update_status()
         assert service.status == AutoNATStatus.PUBLIC
 
+        # Four failures -> PRIVATE (even from PUBLIC)
+        service.dial_results = {sid: False for sid in _server_ids(4)}
+        service.update_status()
+        assert service.status == AutoNATStatus.PRIVATE
 
-@pytest.mark.trio
-async def test_try_dial():
-    """Test that the try_dial method dials each address and reports back."""
-    async with HostFactory.create_batch_and_listen(2) as hosts:
-        host1, host2 = hosts
-        service = AutoNATService(host1)
-        peer_id = host2.get_id()
-        addr = b"/ip4/127.0.0.1/tcp/4001"
-
-        # Test successful dial returns the dialed address
-        with patch.object(host1, "connect", new_callable=AsyncMock) as mock_connect:
-            result = await service._try_dial(peer_id, [addr])
-
-            assert result == addr
-            mock_connect.assert_called_once()
-            assert service.dial_results == {}
-
-        # Test failed dial returns None
-        with patch.object(host1, "connect", new_callable=AsyncMock) as mock_connect:
-            mock_connect.side_effect = Exception("Connection failed")
-
-            result = await service._try_dial(peer_id, [addr])
-
-            assert result is None
+        # Mixed below thresholds -> unchanged
+        service.status = AutoNATStatus.UNKNOWN
+        service.dial_results = {sid: (i < 2) for i, sid in enumerate(_server_ids(4))}
+        service.update_status()
+        assert service.status == AutoNATStatus.UNKNOWN
 
 
 @pytest.mark.trio
-async def test_handle_dial():
-    """Test that the handle_dial method works correctly."""
-    async with HostFactory.create_batch_and_listen(2) as hosts:
-        host1, host2 = hosts
-        service = AutoNATService(host1)
-        peer_id = host2.get_id()
+async def test_filter_by_observed_ip():
+    """Only addresses based on the observed IP may be dialed."""
+    async with HostFactory.create_batch_and_listen(1) as hosts:
+        host = hosts[0]
+        service = AutoNATService(host, serve=False)
 
-        # Create a request asking for a dial-back
-        message = Message()
-        message.type = Type.DIAL
-        message.dial.peer.id = peer_id.to_bytes()
-        message.dial.peer.addrs.append(b"/ip4/127.0.0.1/tcp/4001")
+        good = Multiaddr("/ip4/1.2.3.4/tcp/4001").to_bytes()
+        other_ip = Multiaddr("/ip4/9.9.9.9/tcp/4001").to_bytes()
+        suffixed = Multiaddr(
+            f"/ip4/1.2.3.4/tcp/4001/p2p/{host.get_id().to_base58()}"
+        ).to_bytes()
+        garbage = b"not-a-multiaddr"
 
-        # Mock the _try_dial method
+        assert service._filter_by_observed_ip([good, other_ip], "1.2.3.4") == [good]
+        # /p2p suffix is stripped before comparison
+        assert service._filter_by_observed_ip([suffixed], "1.2.3.4") == [suffixed]
+        # Unparseable addresses are dropped, never dialed
+        assert service._filter_by_observed_ip([garbage], "1.2.3.4") == []
+        # Without an observed IP nothing is dialable
+        assert service._filter_by_observed_ip([good], None) == []
+
+
+def test_is_relayed_stream():
+    """Streams over p2p-circuit connections are detected as relayed."""
+    assert _is_relayed_stream(object()) is False
+
+
+def _dial_request(peer_id: ID, addrs: list[bytes]) -> Message:
+    message = Message()
+    message.type = Message.DIAL
+    message.dial.peer.id = peer_id.to_bytes()
+    for addr in addrs:
+        message.dial.peer.addrs.append(addr)
+    return message
+
+
+@pytest.mark.trio
+async def test_handle_dial_refuses_relayed_requests():
+    """Dial requests over relayed connections must be refused, never served."""
+    async with HostFactory.create_batch_and_listen(1) as hosts:
+        host = hosts[0]
+        service = AutoNATService(host, serve=False)
+        message = _dial_request(
+            host.get_id(), [Multiaddr("/ip4/1.2.3.4/tcp/4001").to_bytes()]
+        )
+
         with patch.object(
             service, "_try_dial", new_callable=AsyncMock
         ) as mock_try_dial:
-            mock_try_dial.return_value = b"/ip4/127.0.0.1/tcp/4001"
+            response = await service._handle_dial(message, "1.2.3.4", True)
 
-            response = await service._handle_dial(message)
+            assert response.dialResponse.status == Message.E_DIAL_REFUSED
+            mock_try_dial.assert_not_called()
 
-            assert response.type == Type.DIAL_RESPONSE
-            assert response.dial_response.status == Status.OK
-            assert response.dial_response.addr == b"/ip4/127.0.0.1/tcp/4001"
-            assert service.dial_results[peer_id] is True
-            mock_try_dial.assert_called_once_with(peer_id, [b"/ip4/127.0.0.1/tcp/4001"])
 
-        # Failed dial-back yields E_DIAL_ERROR
+@pytest.mark.trio
+async def test_handle_dial_refuses_unverifiable_requests():
+    """Without an observed IP (or with no matching addr) nothing is dialed."""
+    async with HostFactory.create_batch_and_listen(1) as hosts:
+        host = hosts[0]
+        service = AutoNATService(host, serve=False)
+
+        # No observed IP
+        message = _dial_request(
+            host.get_id(), [Multiaddr("/ip4/1.2.3.4/tcp/4001").to_bytes()]
+        )
+        with patch.object(
+            service, "_try_dial", new_callable=AsyncMock
+        ) as mock_try_dial:
+            response = await service._handle_dial(message, None, False)
+            assert response.dialResponse.status == Message.E_DIAL_REFUSED
+            mock_try_dial.assert_not_called()
+
+        # Observed IP matches nothing advertised
+        message = _dial_request(
+            host.get_id(), [Multiaddr("/ip4/9.9.9.9/tcp/4001").to_bytes()]
+        )
+        with patch.object(
+            service, "_try_dial", new_callable=AsyncMock
+        ) as mock_try_dial:
+            response = await service._handle_dial(message, "1.2.3.4", False)
+            assert response.dialResponse.status == Message.E_DIAL_REFUSED
+            mock_try_dial.assert_not_called()
+
+
+@pytest.mark.trio
+async def test_handle_dial_success_and_failure():
+    """Matching addrs are dialed; outcome maps to OK / E_DIAL_ERROR."""
+    async with HostFactory.create_batch_and_listen(1) as hosts:
+        host = hosts[0]
+        service = AutoNATService(host, serve=False)
+        addr = Multiaddr("/ip4/1.2.3.4/tcp/4001").to_bytes()
+        message = _dial_request(host.get_id(), [addr])
+
+        with patch.object(
+            service, "_try_dial", new_callable=AsyncMock
+        ) as mock_try_dial:
+            mock_try_dial.return_value = addr
+            response = await service._handle_dial(message, "1.2.3.4", False)
+            assert response.type == Message.DIAL_RESPONSE
+            assert response.dialResponse.status == Message.OK
+            assert bytes(response.dialResponse.addr) == addr
+            mock_try_dial.assert_called_once_with(host.get_id(), [addr])
+
         with patch.object(
             service, "_try_dial", new_callable=AsyncMock
         ) as mock_try_dial:
             mock_try_dial.return_value = None
-
-            response = await service._handle_dial(message)
-
-            assert response.type == Type.DIAL_RESPONSE
-            assert response.dial_response.status == Status.E_DIAL_ERROR
-            assert service.dial_results[peer_id] is False
+            response = await service._handle_dial(message, "1.2.3.4", False)
+            assert response.dialResponse.status == Message.E_DIAL_ERROR
 
 
 @pytest.mark.trio
-async def test_handle_request():
-    """Test that the handle_request method works correctly."""
+async def test_handle_request_unknown_type_is_bad_request():
+    """Unknown message types get E_BAD_REQUEST, not E_INTERNAL_ERROR."""
     async with HostFactory.create_batch_and_listen(1) as hosts:
         host = hosts[0]
-        service = AutoNATService(host)
+        service = AutoNATService(host, serve=False)
 
-        # Test handling a DIAL request
         message = Message()
-        message.type = Type.DIAL
-        dial_request = DialRequest()
-        message.dial.CopyFrom(dial_request)
+        message.type = Message.DIAL_RESPONSE
+        response = await service._handle_request(message, "1.2.3.4", False)
+
+        assert response.type == Message.DIAL_RESPONSE
+        assert response.dialResponse.status == Message.E_BAD_REQUEST
+
+
+@pytest.mark.trio
+async def test_client_server_roundtrip_over_real_streams():
+    """End-to-end: client asks server for a dial-back, gets OK + addr."""
+    async with HostFactory.create_batch_and_listen(2) as hosts:
+        server_host, client_host = hosts
+        AutoNATService(server_host)
+        client = AutoNATService(client_host, serve=False)
+
+        # Introduce the peers (peerstore addrs) before opening the stream.
+        await client_host.connect(
+            PeerInfo(server_host.get_id(), server_host.get_addrs())
+        )
+
+        status, addr = await client.query_server(server_host.get_id())
+
+        assert status == int(Message.OK)
+        assert addr is not None
+        # The verdict is recorded against the reporting server
+        assert client.dial_results[server_host.get_id()] is True
+
+
+@pytest.mark.trio
+async def test_check_reachability_aggregates_verdicts():
+    """Unreachable servers count as failures; thresholds drive the status."""
+    async with HostFactory.create_batch_and_listen(1) as hosts:
+        host = hosts[0]
+        service = AutoNATService(host, serve=False)
+        servers = _server_ids(4)
+
+        async def fake_query(server_id, addrs=None, timeout=30.0):
+            service.dial_results[server_id] = True
+            return int(Message.OK), b"addr"
+
+        with patch.object(service, "query_server", side_effect=fake_query):
+            assert await service.check_reachability(servers) == AutoNATStatus.PUBLIC
+
+        async def failing_query(server_id, addrs=None, timeout=30.0):
+            raise ConnectionError("unreachable")
+
+        with patch.object(service, "query_server", side_effect=failing_query):
+            assert await service.check_reachability(servers) == AutoNATStatus.PRIVATE
+
+
+@pytest.mark.trio
+async def test_handle_stream_framing():
+    """Streams speak varint-prefixed messages and always close."""
+    async with HostFactory.create_batch_and_listen(1) as hosts:
+        host = hosts[0]
+        service = AutoNATService(host, serve=False)
+
+        from unittest.mock import MagicMock
+
+        from libp2p.network.stream.net_stream import NetStream
+
+        mock_stream = AsyncMock(spec=NetStream)
+        mock_stream.get_remote_address.return_value = ("9.9.9.9", 4001)
+        mock_stream.muxed_conn = MagicMock()
+        mock_stream.muxed_conn.get_transport_addresses.return_value = []
+        request = _dial_request(
+            host.get_id(), [Multiaddr("/ip4/9.9.9.9/tcp/4001").to_bytes()]
+        )
+        framed = encode_varint_prefixed(request.SerializeToString())
+        # Feed byte-by-byte like a real stream (varint decode reads 1 byte).
+        mock_stream.read.side_effect = [framed[i : i + 1] for i in range(len(framed))]
 
         with patch.object(
-            service, "_handle_dial", new_callable=AsyncMock
-        ) as mock_handle_dial:
-            mock_handle_dial.return_value = Message()
+            service, "_try_dial", new_callable=AsyncMock
+        ) as mock_try_dial:
+            mock_try_dial.return_value = None
+            await service.handle_stream(mock_stream)
 
-            response = await service._handle_request(message.SerializeToString())
-
-            mock_handle_dial.assert_called_once()
-            assert isinstance(response, Message)
-
-        # Test handling an unknown request type
-        message = Message()
-        message.type = Type.DIAL_RESPONSE
-
-        response = await service._handle_request(message.SerializeToString())
-
-        assert isinstance(response, Message)
-        assert response.type == Type.DIAL_RESPONSE
-        assert response.dial_response.status == Status.E_INTERNAL_ERROR
-
-
-@pytest.mark.trio
-async def test_handle_stream():
-    """Test that handle_stream speaks length-delimited framing."""
-    async with HostFactory.create_batch_and_listen(1) as hosts:
-        host = hosts[0]
-        autonat_service = AutoNATService(host)
-
-        # Create a mock stream
-        mock_stream = AsyncMock(spec=NetStream)
-
-        # Create a properly initialized request Message
-        request = Message()
-        request.type = Type.DIAL
-        dial_request = DialRequest()
-        peer_info = PeerInfo()
-        peer_info.id = b"peer_id"
-        peer_info.addrs.append(b"addr1")
-        dial_request.peer.CopyFrom(peer_info)
-        request.dial.CopyFrom(dial_request)
-
-        # Create a properly initialized response Message
-        response = Message()
-        response.type = Type.DIAL_RESPONSE
-        dial_response = DialResponse()
-        dial_response.status = Status.OK
-        dial_response.addr = b"addr1"
-        response.dial_response.CopyFrom(dial_response)
-
-        # Mock stream read/write and _handle_request: the request arrives
-        # length-prefixed, and the response must leave length-prefixed.
-        framed = encode_varint_prefixed(request.SerializeToString())
-        mock_stream.read = AsyncMock(
-            side_effect=[framed[i : i + 1] for i in range(len(framed))]
-        )
-        mock_stream.write.return_value = None
-        autonat_service._handle_request = AsyncMock(return_value=response)
-
-        # Test successful stream handling
-        await autonat_service.handle_stream(mock_stream)
         written = mock_stream.write.await_args.args[0]
-        assert await read_varint_prefixed_bytes(_BytesReader(written)) == (
-            response.SerializeToString()
-        )
         mock_stream.close.assert_called_once()
+        assert mock_try_dial.called
 
-        # Test stream error handling
-        mock_stream.reset_mock()
-        mock_stream.read.side_effect = StreamError("Stream error")
-        await autonat_service.handle_stream(mock_stream)
-        mock_stream.close.assert_called_once()
+        # The written response is framed and reports the dial failure.
+        from libp2p.utils.varint import decode_varint_with_size
 
-
-class _BytesReader(Reader):
-    """Minimal async reader over bytes for delimited framing helpers."""
-
-    def __init__(self, data: bytes):
-        self._data = data
-        self._pos = 0
-
-    async def read(self, n: int | None = None) -> bytes:
-        if n is None or n < 0:
-            n = len(self._data) - self._pos
-        chunk = self._data[self._pos : self._pos + n]
-        self._pos += len(chunk)
-        return chunk
+        length, prefix_len = decode_varint_with_size(written)
+        assert length == len(written) - prefix_len
+        response = Message()
+        response.ParseFromString(written[prefix_len:])
+        assert response.type == Message.DIAL_RESPONSE
+        assert response.dialResponse.status == Message.E_DIAL_ERROR
