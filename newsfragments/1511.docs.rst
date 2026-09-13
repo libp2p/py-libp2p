@@ -1,0 +1,1 @@
+Document the two WebRTC-Direct signalling paths (the spec STUN listener vs the dev-only ``POST /sdp`` harness) and add v1-vs-v2 dial guidance — v1 as the migration default and v2 (libp2p/specs#715) as the recommended flow that browser dialling will require — in the ``libp2p.transport.webrtc`` package docstring and the README.

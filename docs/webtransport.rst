@@ -72,6 +72,28 @@ WebTransport **requires** TLS (HTTP/3) **and** Noise for Peer ID authentication.
 That is intentional double encryption: TLS authenticates the certificate /
 certhash path; Noise authenticates the libp2p identity. Do not drop Noise.
 
+Self-signed leaves mirror go-libp2p ``generateCert``: empty subject,
+``BasicConstraints`` (CA), ``KeyUsage`` (digitalSignature | keyCertSign),
+``ExtKeyUsage`` (serverAuth | clientAuth), ECDSA P-256, and a default validity
+of **13 days** (hard ceiling **14 days** per the W3C custom-certificate rule).
+Those fields are required for Chromium to accept the leaf via
+``serverCertificateHashes`` even when the SHA-256 matches ``/certhash/``.
+
+Browser dials
+-------------
+
+Browser clients (js-libp2p ``@libp2p/webtransport``, Chromium
+``WebTransport``) must run in a **secure context** (``https:`` or
+``http://localhost`` / ``http://127.0.0.1``). Prefer **Chromium**: it supports
+hash-pinned self-signed certs through ``serverCertificateHashes``, which maps
+to libp2p multiaddr ``/certhash/`` components. Firefox WebTransport pinning
+differs and may not accept the same path.
+
+Manual check: listen with ``enable_webtransport=True``, copy a listen multiaddr
+that includes ``/certhash/``, convert the SHA-256 digests for
+``serverCertificateHashes``, then confirm ``await wt.ready`` succeeds before
+Noise / application streams. See ``examples/webtransport/DEMO.md``.
+
 Demo
 ----
 

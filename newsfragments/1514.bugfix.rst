@@ -1,0 +1,1 @@
+Fixed WebTransport self-signed leaf generation so Chromium accepts ``/certhash/`` pins via ``serverCertificateHashes`` (empty subject, BasicConstraints/KeyUsage/EKU aligned with go-libp2p; default validity 13 days).

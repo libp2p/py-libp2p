@@ -1,0 +1,1 @@
+Quietly exit `host.run` / `host.close` when muxer background tasks see expected peer hangup, so apps no longer need ExceptionGroup teardown swallows.

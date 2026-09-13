@@ -414,24 +414,44 @@ class AnyIOManager(InternalManagerAPI):
                 self._root_tasks.discard(task)
 
         except Exception as err:
-            self.logger.error(
-                "%s: task %s exited with error: %s",
-                self._service,
-                task,
-                err,
-                exc_info=not isinstance(err, DaemonTaskExit),
+            from libp2p.utils.connection_shutdown import (
+                is_expected_connection_shutdown,
+                log_expected_connection_shutdown,
             )
-            # HIGH COMPLEXITY: Trigger cancellation and re-raise
-            # Don't collect here - let the outer task_group handler collect
-            self.logger.debug("%s: calling cancel() due to exception", self._service)
-            self.cancel()
-            self.logger.debug(
-                "%s: cancel() called, is_cancelled=%s",
-                self._service,
-                self.is_cancelled,
-            )
-            # Re-raise so AnyIO's task group can cancel all other tasks immediately
-            raise
+
+            # Peer hangup / clean muxer teardown must not cancel the whole Swarm
+            # or surface as ExceptionGroup to host.run / host.close callers.
+            if is_expected_connection_shutdown(err):
+                log_expected_connection_shutdown(
+                    component=str(self._service),
+                    direction="task_exit",
+                    exc=err,
+                )
+                if task.parent is None:
+                    self._root_tasks.discard(task)
+                if isinstance(task, FunctionTask) and task.count_in_stats:
+                    self._finished_task_count += 1
+            else:
+                self.logger.error(
+                    "%s: task %s exited with error: %s",
+                    self._service,
+                    task,
+                    err,
+                    exc_info=not isinstance(err, DaemonTaskExit),
+                )
+                # HIGH COMPLEXITY: Trigger cancellation and re-raise
+                # Don't collect here - let the outer task_group handler collect
+                self.logger.debug(
+                    "%s: calling cancel() due to exception", self._service
+                )
+                self.cancel()
+                self.logger.debug(
+                    "%s: cancel() called, is_cancelled=%s",
+                    self._service,
+                    self.is_cancelled,
+                )
+                # Re-raise so AnyIO's task group can cancel all other tasks immediately
+                raise
 
         else:
             # Task completed successfully

@@ -6,6 +6,7 @@ Manages bidirectional QUIC connections with integrated stream multiplexing.
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 import logging
+import os
 import socket
 import time
 from typing import TYPE_CHECKING, Any, Optional
@@ -24,6 +25,7 @@ from libp2p.peer.id import ID
 from libp2p.rcmgr import Direction
 from libp2p.stream_muxer.exceptions import MuxedConnUnavailable
 
+from . import aioquic_compat
 from .exceptions import (
     QUICConnectionClosedError,
     QUICConnectionError,
@@ -43,17 +45,21 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Every QUICConnection wraps an aioquic QuicConnection; make sure the aioquic
+# fixes are in place before any stream data is sent.
+aioquic_compat.apply()
+
 # Event-loop cadence for QUIC connections.  The sans-IO aioquic core needs
 # periodic pumping for timers and queued events, but the old fixed 1-10ms
 # polling (and a zero-sleep yield while events were being processed) made
 # every connection — including fully idle ones and in-flight handshakes —
-# wake the trio event loop hundreds to thousands of times per second.
-# With hundreds of connections that saturates a core, starves established
-# connections, and causes mass disconnects.  Idle connections now sleep up
-# to _IDLE_POLL_INTERVAL (waking sooner when aioquic reports a pending
-# timer), and active connections pace themselves at _ACTIVE_POLL_INTERVAL.
+# Event-loop pacing: idle connections sleep up to _IDLE_POLL_INTERVAL (waking
+# sooner when aioquic reports a pending timer that includes pacing). Active
+# connections yield cooperatively; avoid a fixed 1ms sleep after every batch
+# (that inflated ACK→send RTT), but use a short _ACTIVE_POLL_INTERVAL when
+# spinning without a sooner timer so peer packet tasks are not starved.
 _IDLE_POLL_INTERVAL = 2.0  # seconds: max idle gap between event-loop polls
-_ACTIVE_POLL_INTERVAL = 0.001  # seconds: min gap between event-processing runs
+_ACTIVE_POLL_INTERVAL = 0.0001  # seconds: yield gap when actively draining
 
 
 class QUICConnection(IRawConnection, IMuxedConn):
@@ -195,6 +201,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self.on_close: Callable[[], Awaitable[None]] | None = None
         self.event_started = trio.Event()
         self._activity_event: trio.Event = trio.Event()
+        self._last_cc_stats_log: float = 0.0
 
         self._available_connection_ids: set[bytes] = set()
         self._current_connection_id: bytes | None = None
@@ -529,14 +536,16 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
                 # Transmit any pending data
                 await self._transmit()
+                self._maybe_log_congestion_stats()
 
                 if events_processed:
-                    # When active events were processed, pace at 1ms so other tasks
-                    # run and remaining in-flight events are drained without spinning.
-                    await trio.sleep(0.001)
+                    # Cooperative yield without a fixed 1ms RTT tax.
+                    await trio.sleep(_ACTIVE_POLL_INTERVAL)
                     continue
 
                 # Calculate next sleep duration based on pending aioquic timer
+                # (includes pacing delay). Idle connections sleep up to
+                # _IDLE_POLL_INTERVAL; wake earlier on datagram activity.
                 timer = self._quic.get_timer()
                 now = time.time()
                 if timer is not None:
@@ -550,8 +559,8 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     if self._activity_event.is_set():
                         self._activity_event = trio.Event()
                 else:
-                    # Timer already due; yield cooperatively to drain immediately
-                    await trio.sleep(0.001)
+                    # Timer already due; cooperative yield, then drain again.
+                    await trio.sleep(_ACTIVE_POLL_INTERVAL)
 
         except Exception as e:
             if not self._closed:
@@ -1092,6 +1101,26 @@ class QUICConnection(IRawConnection, IMuxedConn):
             stream = self._get_stream_fast(stream_id)  # Use fast lookup
 
             if not stream:
+                # After _remove_stream(), late FIN-only events must not recreate
+                # wrappers (inbound ghosts starve accept_stream under load).
+                if self._is_fin_only_events(stream_events):
+                    direction = (
+                        "inbound" if self._is_incoming_stream(stream_id) else "outbound"
+                    )
+                    logger.debug(
+                        "Ignoring late FIN on closed %s stream %s "
+                        "(is_initiator=%s, quic.is_client=%s)",
+                        direction,
+                        stream_id,
+                        self._is_initiator,
+                        getattr(
+                            getattr(self._quic, "configuration", None),
+                            "is_client",
+                            None,
+                        ),
+                    )
+                    continue
+
                 if self._is_incoming_stream(stream_id):
                     try:
                         stream = await self._create_inbound_stream(stream_id)
@@ -1101,28 +1130,6 @@ class QUICConnection(IRawConnection, IMuxedConn):
                         await self._transmit()
                         continue
                 else:
-                    # Common benign case: we closed and removed a locally-initiated
-                    # stream wrapper, then received a late FIN-only event.
-                    fin_only = True
-                    for e in stream_events:
-                        data = getattr(e, "data", b"")
-                        end_stream = getattr(e, "end_stream", False)
-                        if data or not end_stream:
-                            fin_only = False
-                            break
-                    if fin_only:
-                        logger.debug(
-                            "Ignoring late FIN on closed outbound stream %s "
-                            "(is_initiator=%s, quic.is_client=%s)",
-                            stream_id,
-                            self._is_initiator,
-                            getattr(
-                                getattr(self._quic, "configuration", None),
-                                "is_client",
-                                None,
-                            ),
-                        )
-                        continue
                     is_client = getattr(
                         getattr(self._quic, "configuration", None), "is_client", None
                     )
@@ -1495,23 +1502,30 @@ class QUICConnection(IRawConnection, IMuxedConn):
             stream = self._get_stream_fast(stream_id)
 
             if not stream:
+                # After _remove_stream(), late FIN-only events must not recreate
+                # wrappers (inbound ghosts starve accept_stream under load).
+                if self._is_fin_only_event(event):
+                    direction = (
+                        "inbound" if self._is_incoming_stream(stream_id) else "outbound"
+                    )
+                    logger.debug(
+                        "Ignoring late FIN on closed %s stream %s "
+                        "(is_initiator=%s, quic.is_client=%s)",
+                        direction,
+                        stream_id,
+                        self._is_initiator,
+                        getattr(
+                            getattr(self._quic, "configuration", None),
+                            "is_client",
+                            None,
+                        ),
+                    )
+                    return
+
                 if self._is_incoming_stream(stream_id):
                     logger.debug(f"Creating new incoming stream {stream_id}")
                     stream = await self._create_inbound_stream(stream_id)
                 else:
-                    if not event.data and event.end_stream:
-                        logger.debug(
-                            "Ignoring late FIN on closed outbound stream %s "
-                            "(is_initiator=%s, quic.is_client=%s)",
-                            stream_id,
-                            self._is_initiator,
-                            getattr(
-                                getattr(self._quic, "configuration", None),
-                                "is_client",
-                                None,
-                            ),
-                        )
-                        return
                     is_client = getattr(
                         getattr(self._quic, "configuration", None), "is_client", None
                     )
@@ -1548,6 +1562,23 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         # Create new inbound stream
         return await self._create_inbound_stream(stream_id)
+
+    @staticmethod
+    def _is_fin_only_event(event: events.StreamDataReceived) -> bool:
+        """Return True when the event is an empty end-of-stream (FIN-only)."""
+        return (not event.data) and bool(event.end_stream)
+
+    @staticmethod
+    def _is_fin_only_events(events_list: list[QuicEvent]) -> bool:
+        """Return True when every event in the batch is FIN-only."""
+        if not events_list:
+            return False
+        for event in events_list:
+            data = getattr(event, "data", b"")
+            end_stream = getattr(event, "end_stream", False)
+            if data or not end_stream:
+                return False
+        return True
 
     def _is_incoming_stream(self, stream_id: int) -> bool:
         """
@@ -1630,6 +1661,26 @@ class QUICConnection(IRawConnection, IMuxedConn):
         except Exception as e:
             logger.error(f"Transmission error: {e}")
             await self._handle_connection_error(e)
+            return
+
+        # Every receive path (client receiver, listener routing, event loop)
+        # ends here after aioquic has consumed incoming ACKs, so this is the
+        # single place to wake writers blocked on send backpressure.
+        self._refresh_send_backpressure()
+
+    # Send-side backpressure support
+
+    def stream_send_buffer_size(self, stream_id: int) -> int:
+        """Bytes written to ``stream_id`` that the peer has not acknowledged yet."""
+        return aioquic_compat.stream_send_buffer_size(self._quic, stream_id)
+
+    def _refresh_send_backpressure(self) -> None:
+        """Release streams whose un-ACKed send buffer dropped below the watermark."""
+        for stream in list(self._streams.values()):
+            # Writers re-arm backpressure themselves after each write step;
+            # here we only need to look at streams that are currently blocked.
+            if not stream._backpressure_event.is_set():
+                stream._update_send_backpressure()
 
     # Additional methods for stream data processing
     async def _process_quic_event(self, event: events.QuicEvent) -> None:
@@ -1918,6 +1969,43 @@ class QUICConnection(IRawConnection, IMuxedConn):
         """Update connection statistics."""
         # Add any periodic stats updates here
         pass
+
+    def get_congestion_stats(self) -> dict[str, float | int | None]:
+        """
+        Snapshot aioquic congestion-control state for throughput diagnosis.
+
+        Returns congestion_window, bytes_in_flight, and smoothed_rtt when the
+        underlying QuicConnection exposes ``_loss`` (aioquic private API).
+        """
+        loss = getattr(self._quic, "_loss", None)
+        if loss is None:
+            return {
+                "congestion_window": None,
+                "bytes_in_flight": None,
+                "smoothed_rtt": None,
+            }
+        return {
+            "congestion_window": int(getattr(loss, "congestion_window", 0) or 0),
+            "bytes_in_flight": int(getattr(loss, "bytes_in_flight", 0) or 0),
+            "smoothed_rtt": float(getattr(loss, "_rtt_smoothed", 0.0) or 0.0),
+        }
+
+    def _maybe_log_congestion_stats(self) -> None:
+        """Periodically log CWND/RTT when LIBP2P_QUIC_CC_STATS is set."""
+        if not os.environ.get("LIBP2P_QUIC_CC_STATS", "").strip():
+            return
+        now = time.monotonic()
+        if now - self._last_cc_stats_log < 0.05:
+            return
+        self._last_cc_stats_log = now
+        stats = self.get_congestion_stats()
+        logger.info(
+            "QUIC CC stats cwnd=%s bif=%s srtt=%.6f peer=%s",
+            stats["congestion_window"],
+            stats["bytes_in_flight"],
+            float(stats["smoothed_rtt"] or 0.0),
+            self._remote_peer_id,
+        )
 
     async def _cleanup_idle_streams(self) -> None:
         """Clean up idle streams that are no longer needed."""

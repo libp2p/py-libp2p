@@ -164,7 +164,7 @@ async def test_peers_subscribe():
                 and pubsubs_fsub[0].my_id in pubsubs_fsub[1].peer_topics[TESTING_TOPIC]
             ):
                 await trio.sleep(0.01)
-        assert pubsubs_fsub[0].my_id not in pubsubs_fsub[1].peer_topics[TESTING_TOPIC]
+        assert TESTING_TOPIC not in pubsubs_fsub[1].peer_topics
 
         envelope_b_unsub = (
             pubsubs_fsub[1]
@@ -585,6 +585,9 @@ async def test_handle_subscription():
         unsub_msg = rpc_pb2.RPC.SubOpts(subscribe=False, topicid=TESTING_TOPIC)
         pubsubs_fsub[0].handle_subscription(peer_ids[0], unsub_msg)
         assert peer_ids[0] not in pubsubs_fsub[0].peer_topics[TESTING_TOPIC]
+        assert len(pubsubs_fsub[0].peer_topics[TESTING_TOPIC]) == 1
+        pubsubs_fsub[0].handle_subscription(peer_ids[1], unsub_msg)
+        assert TESTING_TOPIC not in pubsubs_fsub[0].peer_topics
 
 
 @pytest.mark.trio
@@ -777,7 +780,8 @@ async def test_dead_peer_clears_subscriptions_of_half_registered_peer():
 
         pubsub._handle_dead_peer(peer_id)
 
-        assert peer_id not in pubsub.peer_topics[TESTING_TOPIC]
+        assert peer_id not in pubsub.peer_topics.get(TESTING_TOPIC, set())
+        assert TESTING_TOPIC not in pubsub.peer_topics
 
 
 @pytest.mark.trio

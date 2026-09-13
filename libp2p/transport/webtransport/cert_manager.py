@@ -17,7 +17,8 @@ from .exceptions import WebTransportCertificateError
 
 logger = logging.getLogger(__name__)
 
-_MAX_VALIDITY_DAYS = 14
+# Mint current + successor with <14-day windows (W3C ceiling is 14).
+_MAX_VALIDITY_DAYS = 13
 
 
 class WebTransportCertManager:

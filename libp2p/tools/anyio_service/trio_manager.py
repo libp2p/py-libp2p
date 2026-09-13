@@ -357,16 +357,32 @@ class TrioManager(InternalManagerAPI):
                         )
 
         except Exception as err:
-            self.logger.error(
-                "%s: task %s exited with error: %s",
-                self._service,
-                task,
-                err,
-                exc_info=not isinstance(err, DaemonTaskExit),
+            from libp2p.utils.connection_shutdown import (
+                is_expected_connection_shutdown,
+                log_expected_connection_shutdown,
             )
-            # HIGH COMPLEXITY: Collect error and trigger cancellation
-            self._errors.append(cast(EXC_INFO, sys.exc_info()))
-            self.cancel()
+
+            if is_expected_connection_shutdown(err):
+                log_expected_connection_shutdown(
+                    component=str(self._service),
+                    direction="task_exit",
+                    exc=err,
+                )
+                if task.parent is None:
+                    self._root_tasks.discard(task)
+                if isinstance(task, FunctionTask) and task.count_in_stats:
+                    self._finished_task_count += 1
+            else:
+                self.logger.error(
+                    "%s: task %s exited with error: %s",
+                    self._service,
+                    task,
+                    err,
+                    exc_info=not isinstance(err, DaemonTaskExit),
+                )
+                # HIGH COMPLEXITY: Collect error and trigger cancellation
+                self._errors.append(cast(EXC_INFO, sys.exc_info()))
+                self.cancel()
 
         else:
             # Task completed successfully

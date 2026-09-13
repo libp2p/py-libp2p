@@ -4,6 +4,12 @@ WebTransport certificate utilities.
 Generates ECDSA P-256 self-signed certificates (≤14 days) and computes
 SHA-256 fingerprints as multihash / multibase for ``/certhash/<mh>``.
 
+Leaf generation mirrors go-libp2p ``p2p/transport/webtransport/crypto.go``
+(``generateCert``): empty subject, BasicConstraints CA, KeyUsage, and
+ExtKeyUsage ServerAuth|ClientAuth so Chromium ``serverCertificateHashes``
+accepts the leaf. Default validity is 13 days (strictly under the W3C
+≤14-day custom-certificate rule).
+
 Spec: https://github.com/libp2p/specs/blob/master/webtransport/README.md
 """
 
@@ -18,7 +24,7 @@ import struct
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.x509.oid import NameOID
+from cryptography.x509.oid import ExtendedKeyUsageOID
 
 from .exceptions import WebTransportCertificateError
 
@@ -27,7 +33,11 @@ logger = logging.getLogger(__name__)
 _SHA256_MULTIHASH_CODE = 0x12
 _SHA256_DIGEST_SIZE = 32
 _MULTIBASE_BASE64URL_PREFIX = "u"
-_CERTIFICATE_VALIDITY_DAYS = 14
+# W3C WebTransport custom certificate requirement: validity ≤ 14 days.
+_MAX_CERTIFICATE_VALIDITY_DAYS = 14
+# Prefer strictly under 14 days for Chromium edge cases (matches go-libp2p
+# practice of staying inside the window with margin).
+_DEFAULT_CERTIFICATE_VALIDITY_DAYS = 13
 
 
 class WebTransportCertificate:
@@ -48,7 +58,7 @@ class WebTransportCertificate:
     def generate(
         cls,
         common_name: str = "libp2p-webtransport",
-        validity_days: int = _CERTIFICATE_VALIDITY_DAYS,
+        validity_days: int = _DEFAULT_CERTIFICATE_VALIDITY_DAYS,
         not_valid_before: datetime | None = None,
         not_valid_after: datetime | None = None,
     ) -> WebTransportCertificate:
@@ -56,29 +66,30 @@ class WebTransportCertificate:
         Generate a fresh ECDSA P-256 self-signed certificate.
 
         Validity MUST be at most 14 days per the WebTransport / W3C rules.
+        Default is 13 days. The leaf uses an empty subject and go-libp2p-aligned
+        X.509 extensions so Chromium ``serverCertificateHashes`` accepts it.
+
+        ``common_name`` is retained for API compatibility but is not written
+        onto the certificate (Chrome-compatible leaves require an empty
+        subject, matching go-libp2p).
         """
-        if validity_days > _CERTIFICATE_VALIDITY_DAYS:
+        _ = common_name  # API compat; subject must stay empty for Chromium.
+        if validity_days > _MAX_CERTIFICATE_VALIDITY_DAYS:
             raise WebTransportCertificateError(
-                f"Certificate validity must be ≤{_CERTIFICATE_VALIDITY_DAYS} days"
+                f"Certificate validity must be ≤{_MAX_CERTIFICATE_VALIDITY_DAYS} days"
             )
         try:
             private_key = ec.generate_private_key(ec.SECP256R1())
             now = datetime.now(timezone.utc)
             start = not_valid_before or (now - timedelta(minutes=1))
             end = not_valid_after or (start + timedelta(days=validity_days))
-            if end - start > timedelta(days=_CERTIFICATE_VALIDITY_DAYS, minutes=2):
+            if end - start > timedelta(days=_MAX_CERTIFICATE_VALIDITY_DAYS, minutes=2):
                 raise WebTransportCertificateError(
                     "Certificate validity window exceeds 14 days"
                 )
 
-            subject = issuer = x509.Name(
-                [
-                    x509.NameAttribute(
-                        NameOID.COMMON_NAME,
-                        common_name,  # type: ignore[arg-type]
-                    )
-                ]
-            )
+            # Empty subject/issuer — go-libp2p crypto.go generateCert.
+            subject = issuer = x509.Name([])
             certificate = (
                 x509.CertificateBuilder()
                 .subject_name(subject)
@@ -87,6 +98,33 @@ class WebTransportCertificate:
                 .serial_number(x509.random_serial_number())
                 .not_valid_before(start)
                 .not_valid_after(end)
+                .add_extension(
+                    x509.BasicConstraints(ca=True, path_length=None),
+                    critical=True,
+                )
+                .add_extension(
+                    x509.KeyUsage(
+                        digital_signature=True,
+                        content_commitment=False,
+                        key_encipherment=False,
+                        data_encipherment=False,
+                        key_agreement=False,
+                        key_cert_sign=True,
+                        crl_sign=False,
+                        encipher_only=False,
+                        decipher_only=False,
+                    ),
+                    critical=True,
+                )
+                .add_extension(
+                    x509.ExtendedKeyUsage(
+                        [
+                            ExtendedKeyUsageOID.SERVER_AUTH,
+                            ExtendedKeyUsageOID.CLIENT_AUTH,
+                        ]
+                    ),
+                    critical=False,
+                )
                 .sign(private_key, hashes.SHA256())
             )
             logger.debug("Generated WebTransport ECDSA P-256 certificate")

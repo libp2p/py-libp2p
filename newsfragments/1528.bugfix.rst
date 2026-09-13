@@ -1,0 +1,1 @@
+Improve honest QUIC throughput: stop forcing a 1ms event-loop sleep after every batch, wire max_datagram_size to UDP MTU (not the DATAGRAM frame size), expose cubic/initial_rtt on QUICTransportConfig, and coalesce transmits per write watermark batch.

@@ -105,47 +105,55 @@ async def test_full_rendezvous_workflow():
         async with server_host.run([server_listen_addr]):
             async with client1_host.run([client1_listen_addr]):
                 async with client2_host.run([client2_listen_addr]):
-                    # Give hosts time to start
-                    await trio.sleep(0.1)
-
-                    # Create client connections to server
-                    client1 = RendezvousClient(client1_host, server_peer_id)
-                    client2 = RendezvousClient(client2_host, server_peer_id)
-
-                    # Add server to client peerstores with address
-                    server_addrs = server_host.get_addrs()
-                    if server_addrs:
-                        client1_host.get_peerstore().add_addrs(
-                            server_peer_id, server_addrs, ttl=3600
-                        )
-                        client2_host.get_peerstore().add_addrs(
-                            server_peer_id, server_addrs, ttl=3600
-                        )
-
-                    namespace = "test-integration"
-
                     try:
-                        # Client1 registers under namespace
-                        ttl1 = await client1.register(namespace, DEFAULT_TTL)
-                        assert ttl1 > 0
-
-                        # Give registration time to process
+                        # Give hosts time to start
                         await trio.sleep(0.1)
 
-                        # Client2 discovers peers in namespace
-                        discoveredPeers, _ = await client2.discover(namespace)
+                        # Create client connections to server
+                        client1 = RendezvousClient(client1_host, server_peer_id)
+                        client2 = RendezvousClient(client2_host, server_peer_id)
 
-                        # Should find client1
-                        assert len(discoveredPeers) >= 1
-                        client1_peer_id = client1_host.get_id()
-                        discovered_peer_ids = [peer.peer_id for peer in discoveredPeers]
-                        assert client1_peer_id in discovered_peer_ids
+                        # Add server to client peerstores with address
+                        server_addrs = server_host.get_addrs()
+                        if server_addrs:
+                            client1_host.get_peerstore().add_addrs(
+                                server_peer_id, server_addrs, ttl=3600
+                            )
+                            client2_host.get_peerstore().add_addrs(
+                                server_peer_id, server_addrs, ttl=3600
+                            )
 
-                    except Exception as e:
-                        # Log the error for debugging
-                        logger.error("Integration test error: %s", e)
-                        # Don't fail the test for connection issues in unit tests
-                        raise
+                        namespace = "test-integration"
+
+                        try:
+                            # Client1 registers under namespace
+                            ttl1 = await client1.register(namespace, DEFAULT_TTL)
+                            assert ttl1 > 0
+
+                            # Give registration time to process
+                            await trio.sleep(0.1)
+
+                            # Client2 discovers peers in namespace
+                            discoveredPeers, _ = await client2.discover(namespace)
+
+                            # Should find client1
+                            assert len(discoveredPeers) >= 1
+                            client1_peer_id = client1_host.get_id()
+                            discovered_peer_ids = [
+                                peer.peer_id for peer in discoveredPeers
+                            ]
+                            assert client1_peer_id in discovered_peer_ids
+
+                        except Exception as e:
+                            # Log the error for debugging
+                            logger.error("Integration test error: %s", e)
+                            # Don't fail the test for connection issues in unit tests
+                            raise
+                    finally:
+                        # Close while run() contexts are still active.
+                        await client2_host.close()
+                        await client1_host.close()
+                        await server_host.close()
 
     except Exception as e:
         # Handle any startup/shutdown errors gracefully

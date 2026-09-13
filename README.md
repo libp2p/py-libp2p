@@ -39,16 +39,24 @@ ______________________________________________________________________
 | **`libp2p-webrtc-browser-to-server`**  |     🌱     |                                                                                       |
 | **`libp2p-webrtc-private-to-private`** |     🌱     |                                                                                       |
 
-WebRTC-Direct (browser/server) uses the spec STUN path by default: inbound dials
-hit a shared UDP port and the listener infers the offer from the first STUN
-packet; outbound dials synthesise an ICE-Lite answer from the multiaddr with no
-default public STUN servers. The listener accepts both the v1 (SDP munging)
-and v2 (libp2p/specs#715, no munging) flows; the dialer speaks v1 by default
-and v2 via `WebRTCTransportConfig(webrtc_direct_dial_version=2)` while
-specs#715 is unmerged. An experimental HTTP `POST /sdp` harness for
-py↔py debugging is opt-in via
-`WebRTCTransportConfig(enable_sdp_http_harness=True)` — it is not
-interoperable with other libp2p implementations.
+WebRTC-Direct (browser/server) uses the spec **STUN path** by default: inbound
+dials hit a shared UDP port and the listener infers the offer from the first
+STUN packet; outbound dials synthesise an ICE-Lite answer from the multiaddr
+with no default public STUN servers. This is the only signalling path that
+interoperates with go-libp2p / js-libp2p / browsers. An experimental HTTP
+`POST /sdp` harness (`WebRTCTransportConfig(enable_sdp_http_harness=True)`) is
+**for py↔py debugging only** and is *not* interoperable — leave it off in
+production.
+
+**Choosing a dial version.** The listener always accepts both v1 and v2; the
+dialer picks with `WebRTCTransportConfig(webrtc_direct_dial_version=1|2)`:
+
+- **v1** (default today) — the migration path (SDP ufrag/pwd munging). Kept the
+  default while [libp2p/specs#715](https://github.com/libp2p/specs/pull/715) is
+  unmerged so existing v1 peers keep working.
+- **v2** (recommended) — the specs#715 flow, no SDP munging. Prefer it for new
+  deployments; **browser dialling needs v2** once `NoSdpMangleUfrag` support is
+  widespread. The default flips to v2 once specs#715 lands.
 
 ______________________________________________________________________
 
@@ -123,6 +131,35 @@ ______________________________________________________________________
 | **`libp2p-ping`**     |     ✅     |         [source](https://github.com/libp2p/py-libp2p/blob/main/libp2p/host/ping.py)          |
 | **`libp2p-peer`**     |     ✅     |             [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/peer)              |
 | **`libp2p-identify`** |     ✅     | [source](https://github.com/libp2p/py-libp2p/blob/main/libp2p/identity/identify/identify.py) |
+
+______________________________________________________________________
+
+### Identity Persistence
+
+For a stable Peer ID across restarts, use opt-in identity helpers (default
+`new_host()` behavior is unchanged and still generates a random Ed25519 key):
+
+- **File helpers:** `libp2p.identity_utils` — `save_identity` / `load_identity` /
+  `create_identity_from_seed` (libp2p protobuf private-key format; Unix mode `0600`).
+- **Key-pair provider:** `new_host(key_pair_provider=...)` accepts
+  `Callable[[], KeyPair]` as described in issue #312.
+- **Filesystem keystore:** `FileSystemKeyStore` stores named keys under a directory;
+  pass `new_host(keystore=..., identity_name="default")` to load or auto-persist.
+
+Prefer these APIs over the legacy PEM helpers `save_keypair` / `load_keypair`
+(Ed25519-only, fixed path).
+
+Example (keystore)::
+
+```
+from pathlib import Path
+from libp2p import new_host
+from libp2p.crypto.keystore import FileSystemKeyStore
+
+store = FileSystemKeyStore(Path.home() / ".config" / "py-libp2p" / "keystore")
+host = new_host(keystore=store, identity_name="default")
+# Subsequent runs with the same store/name reuse the same Peer ID.
+```
 
 ______________________________________________________________________
 

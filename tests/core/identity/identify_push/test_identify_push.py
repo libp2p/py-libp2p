@@ -82,7 +82,8 @@ async def test_identify_push_protocol(security_protocol):
         # Get the peerstore from host_b
         peerstore = host_b.get_peerstore()
 
-        # Check that host_b's peerstore has been updated with host_a's information
+        # Check that host_b's peerstore has been updated with host_a's
+        # information
         peer_id = host_a.get_id()
 
         # Check that the peer is in the peerstore
@@ -141,7 +142,8 @@ async def test_identify_push_handler(security_protocol):
         # Get the peerstore from host_b
         peerstore = host_b.get_peerstore()
 
-        # Check that host_b's peerstore has been updated with host_a's information
+        # Check that host_b's peerstore has been updated with host_a's
+        # information
         peer_id = host_a.get_id()
 
         # Check that the peer is in the peerstore
@@ -203,44 +205,49 @@ async def test_identify_push_to_peers(security_protocol):
         # Start listening on a random port using the run context manager
         listen_addr = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0")
         async with host_c.run([listen_addr]):
-            # Connect host_c to host_a and host_b
-            await host_c.connect(info_from_p2p_addr(host_a.get_addrs()[0]))
-            await host_c.connect(info_from_p2p_addr(host_b.get_addrs()[0]))
+            try:
+                # Connect host_c to host_a and host_b
+                await host_c.connect(info_from_p2p_addr(host_a.get_addrs()[0]))
+                await host_c.connect(info_from_p2p_addr(host_b.get_addrs()[0]))
 
-            # Push identify information from host_a to all connected peers
-            await push_identify_to_peers(host_a)
+                # Push identify information from host_a to all connected peers
+                await push_identify_to_peers(host_a)
 
-            # Wait a bit for the push to complete
-            await trio.sleep(0.1)
+                # Wait a bit for the push to complete
+                await trio.sleep(0.1)
 
-            # Check that host_b's peerstore has been updated with host_a's information
-            peerstore_b = host_b.get_peerstore()
-            peer_id_a = host_a.get_id()
+                # Check that host_b's peerstore has been updated with host_a's
+                # information
+                peerstore_b = host_b.get_peerstore()
+                peer_id_a = host_a.get_id()
 
-            # Check that the peer is in the peerstore
-            assert peer_id_a in peerstore_b.peer_ids()
+                # Check that the peer is in the peerstore
+                assert peer_id_a in peerstore_b.peer_ids()
 
-            # Check that host_c's peerstore has been updated with host_a's information
-            peerstore_c = host_c.get_peerstore()
+                # Check that host_c's peerstore has been updated with host_a's
+                # information
+                peerstore_c = host_c.get_peerstore()
 
-            # Check that the peer is in the peerstore
-            assert peer_id_a in peerstore_c.peer_ids()
+                # Check that the peer is in the peerstore
+                assert peer_id_a in peerstore_c.peer_ids()
 
-            # Test for push_identify to only connected peers and not all peers
-            # Disconnect a from c.
-            await host_c.disconnect(host_a.get_id())
+                # Test for push_identify to only connected peers and not all peers
+                # Disconnect a from c.
+                await host_c.disconnect(host_a.get_id())
 
-            await push_identify_to_peers(host_c)
+                await push_identify_to_peers(host_c)
 
-            # Wait a bit for the push to complete
-            await trio.sleep(0.1)
+                # Wait a bit for the push to complete
+                await trio.sleep(0.1)
 
-            # push_identify_to_peers only streams to connected peers; after c↔a
-            # disconnect, host_a must not be a push target. (host_a may still list
-            # host_c in peerstore from earlier Identify when c dialed in.)
-            assert host_a.get_id() not in host_c.get_connected_peers()
-            # Check that host_b's peerstore has been updated with host_c's info
-            assert host_c.get_id() in host_b.get_peerstore().peer_ids()
+                # push_identify_to_peers only streams to connected peers; after c↔a
+                # disconnect, host_a must not be a push target. (host_a may still list
+                # host_c in peerstore from earlier Identify when c dialed in.)
+                assert host_a.get_id() not in host_c.get_connected_peers()
+                # Check that host_b's peerstore has been updated with host_c's info
+                assert host_c.get_id() in host_b.get_peerstore().peer_ids()
+            finally:
+                await host_c.close()
 
 
 @pytest.mark.trio
@@ -279,38 +286,44 @@ async def test_push_identify_to_peers_with_explicit_params(security_protocol):
         listen_addr_d = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0")
 
         async with host_c.run([listen_addr_c]), host_d.run([listen_addr_d]):
-            # Connect all hosts to host_a
-            await host_c.connect(info_from_p2p_addr(host_a.get_addrs()[0]))
-            await host_d.connect(info_from_p2p_addr(host_a.get_addrs()[0]))
+            try:
+                # Connect all hosts to host_a
+                await host_c.connect(info_from_p2p_addr(host_a.get_addrs()[0]))
+                await host_d.connect(info_from_p2p_addr(host_a.get_addrs()[0]))
 
-            # Create a specific observed multiaddr for the test
-            observed_addr = multiaddr.Multiaddr("/ip4/192.0.2.1/tcp/1234")
+                # Create a specific observed multiaddr for the test
+                observed_addr = multiaddr.Multiaddr("/ip4/192.0.2.1/tcp/1234")
 
-            # Only push to hosts B and C (not D)
-            selected_peers = {host_b.get_id(), host_c.get_id()}
+                # Only push to hosts B and C (not D)
+                selected_peers = {host_b.get_id(), host_c.get_id()}
 
-            # Push identify information from host_a to selected peers with observed addr
-            await push_identify_to_peers(
-                host=host_a, peer_ids=selected_peers, observed_multiaddr=observed_addr
-            )
+                # Push identify from host_a to selected peers with observed addr
+                await push_identify_to_peers(
+                    host=host_a,
+                    peer_ids=selected_peers,
+                    observed_multiaddr=observed_addr,
+                )
 
-            # Wait a bit for the push to complete
-            await trio.sleep(0.1)
+                # Wait a bit for the push to complete
+                await trio.sleep(0.1)
 
-            # Check that host_b's and host_c's peerstores have been updated
-            peerstore_b = host_b.get_peerstore()
-            peerstore_c = host_c.get_peerstore()
-            peer_id_a = host_a.get_id()
+                # Check that host_b's and host_c's peerstores have been updated
+                peerstore_b = host_b.get_peerstore()
+                peerstore_c = host_c.get_peerstore()
+                peer_id_a = host_a.get_id()
 
-            # Hosts B and C should have peer_id_a in their peerstores
-            # (B only from the explicit push, C from both connect and push)
-            assert peer_id_a in peerstore_b.peer_ids()
-            assert peer_id_a in peerstore_c.peer_ids()
+                # Hosts B and C should have peer_id_a in their peerstores
+                # (B only from the explicit push, C from both connect and push)
+                assert peer_id_a in peerstore_b.peer_ids()
+                assert peer_id_a in peerstore_c.peer_ids()
 
-            # Verify that host_b received host_a's protocols from the push
-            peerstore_protocols_b = set(peerstore_b.get_protocols(peer_id_a))
-            host_a_protocols = set(host_a.get_mux().get_protocols())
-            assert all(p in peerstore_protocols_b for p in host_a_protocols)
+                # Verify that host_b received host_a's protocols from the push
+                peerstore_protocols_b = set(peerstore_b.get_protocols(peer_id_a))
+                host_a_protocols = set(host_a.get_mux().get_protocols())
+                assert all(p in peerstore_protocols_b for p in host_a_protocols)
+            finally:
+                await host_c.close()
+                await host_d.close()
 
 
 @pytest.mark.trio
@@ -554,6 +567,9 @@ async def test_all_peers_receive_identify_push_with_semaphore(security_protocol)
 
             nursery.cancel_scope.cancel()
 
+        for host, _ in dummy_peers:
+            await host.close()
+
 
 @pytest.mark.trio
 async def test_all_peers_receive_identify_push_with_semaphore_under_high_peer_load(
@@ -603,6 +619,9 @@ async def test_all_peers_receive_identify_push_with_semaphore_under_high_peer_lo
 
             # Give time for proper cleanup
             await trio.sleep(0.1)
+
+        for host, _ in dummy_peers:
+            await host.close()
 
 
 @pytest.mark.trio
