@@ -114,7 +114,7 @@ validate-newsfragments:
 check-docs: build-docs validate-newsfragments
 
 build-docs:
-	sphinx-apidoc -o docs/ . "*conftest*" tests/
+	sphinx-apidoc -o docs/ . "*conftest*" tests/ "examples/pubsub/gossipsub*"
 	$(MAKE) -C docs clean
 	$(MAKE) -C docs html
 	$(MAKE) -C docs doctest
