@@ -66,6 +66,7 @@ from .pb.circuit_pb2 import (
 )
 from .protocol_buffer import (
     StatusCode,
+    to_proto_status,
 )
 from .resources import (
     RelayLimits,
@@ -321,7 +322,7 @@ class CircuitV2Protocol(Service):
 
                     response = HopMessage(
                         type=HopMessage.STATUS,
-                        status=StatusCode.CONNECTION_FAILED,
+                        status=to_proto_status(StatusCode.CONNECTION_FAILED),
                     )
                     await write_delimited_msg(stream, response)
                     await trio.sleep(0.5)
@@ -333,7 +334,7 @@ class CircuitV2Protocol(Service):
                     signed_envelope, _ = env_to_send_in_RPC(self.host)
                     response = HopMessage(
                         type=HopMessage.STATUS,
-                        status=StatusCode.MALFORMED_MESSAGE,
+                        status=to_proto_status(StatusCode.MALFORMED_MESSAGE),
                     )
                     await write_delimited_msg(stream, response)
                     await trio.sleep(0.5)  # Longer wait to ensure the message is sent
@@ -519,7 +520,7 @@ class CircuitV2Protocol(Service):
                     # Send status message with STATUS type
                     status_msg = HopMessage(
                         type=HopMessage.STATUS,
-                        status=StatusCode.RESOURCE_LIMIT_EXCEEDED,
+                        status=to_proto_status(StatusCode.RESOURCE_LIMIT_EXCEEDED),
                     )
                     await write_delimited_msg(stream, status_msg)
                     return
@@ -578,8 +579,13 @@ class CircuitV2Protocol(Service):
                 # reported filtered addresses). Fall back to the address
                 # the peer is currently connected from so the reservation
                 # still carries a usable address.
+                # IMuxedConn exposes no remote-address accessor; both bundled
+                # muxers stash the secured session, which does. Guard with
+                # getattr (the codebase idiom for optional capabilities).
                 try:
-                    remote = stream.muxed_conn.get_remote_address()
+                    secured = getattr(stream.muxed_conn, "secured_conn", None)
+                    get_remote = getattr(secured, "get_remote_address", None)
+                    remote = get_remote() if callable(get_remote) else None
                     if remote:
                         host, port = remote[0], int(remote[1])
                         ip_proto = "ip6" if ":" in host else "ip4"
@@ -599,7 +605,7 @@ class CircuitV2Protocol(Service):
             with trio.fail_after(self.write_timeout):
                 response = HopMessage(
                     type=HopMessage.STATUS,
-                    status=status_code,
+                    status=to_proto_status(status_code),
                     reservation=pb_reservation,
                     limit=Limit(
                         duration=self.limits.duration,
@@ -728,7 +734,7 @@ class CircuitV2Protocol(Service):
 
                 # Handle status attributes from the response
                 if resp.HasField("status"):
-                    status_code = resp.status
+                    status_code = StatusCode(resp.status)
                     status_msg = f"status code {status_code}"
                 else:
                     status_code = StatusCode.OK
@@ -901,7 +907,7 @@ class CircuitV2Protocol(Service):
     async def _send_status(
         self,
         stream: ReadWriteCloser,
-        code: int,
+        code: StatusCode,
         message: str,
         envelope: Envelope | None = None,
     ) -> None:
@@ -912,7 +918,7 @@ class CircuitV2Protocol(Service):
                 # Send destination records to source in case of HOP status OK message
                 status_msg = HopMessage(
                     type=HopMessage.STATUS,
-                    status=code,
+                    status=to_proto_status(code),
                 )
 
                 await write_delimited_msg(stream, status_msg)
@@ -927,7 +933,7 @@ class CircuitV2Protocol(Service):
     async def _send_stop_status(
         self,
         stream: ReadWriteCloser,
-        code: int,
+        code: StatusCode,
         message: str,
     ) -> None:
         """Send a status message on a STOP stream."""
@@ -936,7 +942,7 @@ class CircuitV2Protocol(Service):
             with trio.fail_after(STREAM_WRITE_TIMEOUT):
                 status_msg = StopMessage(
                     type=StopMessage.STATUS,
-                    status=code,
+                    status=to_proto_status(code),
                 )
 
                 await write_delimited_msg(stream, status_msg)

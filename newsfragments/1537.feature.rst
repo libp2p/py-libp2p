@@ -1,0 +1,1 @@
+Made DCUtR hole punching spec-compliant (RTT synchronization, dial coordination, TCP simultaneous open with ``SO_REUSEPORT``) so direct connectivity can be established with go-libp2p and rust-libp2p peers behind NATs.

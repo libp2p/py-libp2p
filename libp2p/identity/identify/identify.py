@@ -18,8 +18,8 @@ from libp2p.network.stream.exceptions import (
     StreamClosed,
     StreamReset,
 )
+from libp2p.peer.id import ID as PeerID
 from libp2p.peer.peerstore import env_to_send_in_RPC
-from libp2p.peer.id import ID
 from libp2p.stream_muxer.exceptions import MuxedStreamError
 from libp2p.utils import (
     decode_varint_with_size,
@@ -146,7 +146,7 @@ def parse_identify_response(response: bytes) -> Identify:
 
 
 def _prefer_circuit_addr(
-    host: IHost, peer_id: ID, fallback: Multiaddr | None
+    host: IHost, peer_id: PeerID, fallback: Multiaddr | None
 ) -> Multiaddr | None:
     """
     Return the circuit address for a relayed connection to ``peer_id``.
@@ -199,9 +199,7 @@ def identify_handler_for(
             # advertise the relay back in DCUtR (undialable). Report the
             # circuit address instead, which peers filter (matching
             # go/rust behavior).
-            observed_multiaddr = _prefer_circuit_addr(
-                host, peer_id, observed_multiaddr
-            )
+            observed_multiaddr = _prefer_circuit_addr(host, peer_id, observed_multiaddr)
 
         except Exception as e:
             logger.error("Error getting remote address: %s", e)

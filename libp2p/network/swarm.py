@@ -1491,7 +1491,8 @@ class Swarm(Service, INetworkService):
             except Exception:
                 pass
             raise SwarmException(
-                f"Peer ID mismatch in responder dial: expected {peer_id}, got {actual_id}"
+                "Peer ID mismatch in responder dial: "
+                f"expected {peer_id}, got {actual_id}"
             )
         conns = self.connections.get(peer_id)
         candidates: list[INetConn] = (

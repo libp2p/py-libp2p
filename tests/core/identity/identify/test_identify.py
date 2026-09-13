@@ -124,8 +124,10 @@ async def test_identify_protocol(security_protocol):
 
 @pytest.mark.trio
 async def test_prefer_circuit_addr_on_relayed_connection():
-    """Identify reports the circuit address (not the relay's socket addr)
-    when the peer is reached through a relayed connection."""
+    """
+    Identify reports the circuit address (not the relay's socket addr)
+    when the peer is reached through a relayed connection.
+    """
     from unittest.mock import MagicMock
 
     from libp2p.crypto.ed25519 import create_new_key_pair

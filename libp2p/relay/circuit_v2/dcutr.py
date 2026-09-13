@@ -40,11 +40,11 @@ from libp2p.relay.circuit_v2.pb.dcutr_pb2 import (
 from libp2p.relay.circuit_v2.utils import (
     write_delimited_msg,
 )
-from libp2p.utils.varint import (
-    read_varint_prefixed_bytes_limited,
-)
 from libp2p.tools.anyio_service import (
     Service,
+)
+from libp2p.utils.varint import (
+    read_varint_prefixed_bytes_limited,
 )
 
 logger = logging.getLogger(__name__)
@@ -637,8 +637,8 @@ class DCUtRProtocol(Service):
                             relay_addr_set = {str(a) for a in relay_addrs}
                             # Include relay's listen addresses from its peer info
                             try:
-                                relay_info = (
-                                    self.host.get_peerstore().get_peer_info(relay_pid)
+                                relay_info = self.host.get_peerstore().peer_info(
+                                    relay_pid
                                 )
                                 for ra in relay_info.addrs:
                                     relay_addr_set.add(str(ra))
@@ -961,9 +961,7 @@ class DCUtRProtocol(Service):
             # No external observations (direct connection or no relay yet):
             # advertise listen addresses.
             addrs = self.host.get_addrs()
-            direct_addrs = [
-                addr for addr in addrs if "/p2p-circuit" not in str(addr)
-            ]
+            direct_addrs = [addr for addr in addrs if "/p2p-circuit" not in str(addr)]
 
         # Limit the number of addresses
         if len(direct_addrs) > MAX_OBSERVED_ADDRS:

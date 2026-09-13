@@ -438,7 +438,9 @@ class CircuitV2Transport(ITransport):
                     # and the relay might not have the destination's signed peer record
 
             # Access status attributes directly
-            status_code = resp.status if resp.HasField("status") else StatusCode.OK
+            status_code = (
+                StatusCode(resp.status) if resp.HasField("status") else StatusCode.OK
+            )
 
             if status_code != StatusCode.OK:
                 raise RelayConnectionError(
@@ -608,7 +610,9 @@ class CircuitV2Transport(ITransport):
 
             resp = await read_delimited_msg(relay_stream, HopMessage)
 
-            status_code = resp.status if resp.HasField("status") else StatusCode.OK
+            status_code = (
+                StatusCode(resp.status) if resp.HasField("status") else StatusCode.OK
+            )
 
             if status_code != StatusCode.OK:
                 await relay_stream.close()
@@ -847,7 +851,9 @@ class CircuitV2Transport(ITransport):
                     # Don't fail the reservation - the senderRecord is optional
 
             # Access status attributes directly
-            status_code = resp.status if resp.HasField("status") else StatusCode.OK
+            status_code = (
+                StatusCode(resp.status) if resp.HasField("status") else StatusCode.OK
+            )
             expires = resp.reservation.expire if resp.HasField("reservation") else 0
 
             logger.debug("Reservation response: code=%s", status_code)

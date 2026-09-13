@@ -140,7 +140,6 @@ async def test_tcp_listeners_can_share_port_with_reuseport(nursery):
         await listener1.close()
 
 
-
 @pytest.mark.trio
 async def test_tcp_listener_close_cancels_all_binds(nursery):
     """

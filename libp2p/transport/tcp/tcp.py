@@ -52,15 +52,11 @@ def _set_reuse_flags(sock: trio.socket.SocketType) -> None:
     fall back to normal behaviour.
     """
     try:
-        sock.setsockopt(
-            stdlib_socket.SOL_SOCKET, stdlib_socket.SO_REUSEADDR, 1
-        )
+        sock.setsockopt(stdlib_socket.SOL_SOCKET, stdlib_socket.SO_REUSEADDR, 1)
     except OSError:
         pass
     try:
-        sock.setsockopt(
-            stdlib_socket.SOL_SOCKET, stdlib_socket.SO_REUSEPORT, 1
-        )
+        sock.setsockopt(stdlib_socket.SOL_SOCKET, stdlib_socket.SO_REUSEPORT, 1)
     except (AttributeError, OSError):
         pass
 
@@ -119,9 +115,7 @@ async def _open_reuseport_listeners(
                 pass
             continue
     if not listeners:
-        raise OpenConnectionError(
-            f"Failed to listen on {host}:{port}: {last_error}"
-        )
+        raise OpenConnectionError(f"Failed to listen on {host}:{port}: {last_error}")
     return listeners
 
 
@@ -210,11 +204,19 @@ class TCPListener(IListener):
             host: str,
             task_status: TaskStatus[Sequence[trio.SocketListener]],
         ) -> None:
-            """Serve with SO_REUSEPORT sockets so hole-punch dials can
-            bind the same (ip, port) for TCP simultaneous open."""
+            """
+            Serve with SO_REUSEPORT sockets so hole-punch dials can
+            bind the same (ip, port) for TCP simultaneous open.
+            """
             logger.debug("serve_tcp %s %s", host, port)
             listeners = await _open_reuseport_listeners(host, port)
-            await trio.serve_listeners(handler, listeners, task_status=task_status)
+            # TaskStatus is invariant: SocketListener satisfies
+            # Listener[SocketStream] but the declared types differ.
+            serve_status = typing.cast(
+                TaskStatus[typing.Sequence[trio.abc.Listener[trio.SocketStream]]],
+                task_status,
+            )
+            await trio.serve_listeners(handler, listeners, task_status=serve_status)
 
         async def handler(stream: trio.SocketStream) -> None:
             remote_host: str = ""
