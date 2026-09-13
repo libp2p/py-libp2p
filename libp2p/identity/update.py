@@ -28,58 +28,6 @@ def _safe_parse_multiaddr_cached(raw: bytes) -> Multiaddr | None:
         return None
 
 
-def _is_public_addr(a: Multiaddr) -> bool:
-    """Return True if the multiaddr is a globally routable address."""
-    s = str(a)
-    # IPv4 private/loopback/link-local/non-routable
-    if "/ip4/127." in s:
-        return False
-    if "/ip4/0.0.0.0" in s:
-        return False
-    if "/ip4/10." in s:
-        return False
-    if "/ip4/192.168." in s:
-        return False
-    if "/ip4/169.254." in s:  # link-local (RFC 3927)
-        return False
-    # 172.16.0.0/12
-    if "/ip4/172." in s:
-        try:
-            ip = s.split("/")[2]
-            parts = [int(p) for p in ip.split(".")]
-            if parts[0] == 172 and 16 <= parts[1] <= 31:
-                return False
-        except Exception:
-            pass
-    # IPv6 loopback and link-local
-    if "/ip6/::1" in s:
-        return False
-    # IPv6 unspecified address (::) — match exactly, not substring
-    if "/ip6/::" in s:
-        try:
-            ip_val = a.value_for_protocol(6)
-            if ip_val == "::":
-                return False
-        except Exception:
-            pass
-    if "/ip6/fe80" in s.lower():  # fe80::/10 link-local
-        return False
-    # IPv6 Unique Local Addresses (fc00::/7)
-    s_lower = s.lower()
-    if "/ip6/fc" in s_lower or "/ip6/fd" in s_lower:
-        return False
-    # IPv4 multicast 224.0.0.0/4
-    try:
-        ip_val = a.value_for_protocol(4)
-        if ip_val is not None:
-            first_octet = int(ip_val.split(".")[0])
-            if 224 <= first_octet <= 239:
-                return False
-    except Exception:
-        pass
-    return True
-
-
 async def update_peerstore_from_identify(
     peerstore: IPeerStore, peer_id: ID, identify_msg: Identify
 ) -> None:
@@ -133,9 +81,13 @@ async def update_peerstore_from_identify(
                 if ma is not None:
                     addrs.append(ma)
 
-            # Always filter private/loopback/link-local addresses
-            addrs = [a for a in addrs if _is_public_addr(a)]
-
+            # Store all advertised listen addresses, including private ones.
+            # Filtering happens at dial time, not storage time (matching
+            # go-libp2p). Dropping private addresses here breaks hole
+            # punching: NAT'd peers can only be reached via the private
+            # addresses their relayed/observed connections reveal, and
+            # relay reservations must report usable addresses for strict
+            # implementations to accept them.
             # Replace old addresses (peer is authoritative source for its own addrs)
             try:
                 peerstore.clear_addrs(peer_id)

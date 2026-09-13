@@ -14,11 +14,16 @@ from libp2p.relay.circuit_v2.protocol import (
     PROTOCOL_ID,
     STOP_PROTOCOL_ID,
 )
+from libp2p.relay.circuit_v2.protocol_buffer import (
+    StatusCode,
+    to_proto_status,
+)
+from libp2p.relay.circuit_v2.utils import (
+    read_delimited_msg,
+    write_delimited_msg,
+)
 from libp2p.tools.anyio_service import (
     background_trio_service,
-)
-from libp2p.tools.constants import (
-    MAX_READ_LEN,
 )
 from libp2p.tools.utils import (
     connect,
@@ -43,14 +48,7 @@ async def simple_stream_handler(stream):
     logger.info("Simple stream handler invoked")
     try:
         # Read the request
-        request_data = await stream.read(MAX_READ_LEN)
-        if not request_data:
-            logger.error("Empty request received")
-            return
-
-        # Parse request
-        request = proto.HopMessage()
-        request.ParseFromString(request_data)
+        request = await read_delimited_msg(stream, proto.HopMessage)
         logger.info("Received request: type=%s", request.type)
 
         # Only handle RESERVE requests
@@ -58,14 +56,9 @@ async def simple_stream_handler(stream):
             # Create a valid response
             response = proto.HopMessage(
                 type=proto.HopMessage.STATUS,
-                status=proto.Status(
-                    code=proto.Status.OK,
-                    message="Test reservation accepted",
-                ),
+                status=to_proto_status(StatusCode.OK),
                 reservation=proto.Reservation(
                     expire=int(time.time()) + 3600,  # 1 hour from now
-                    voucher=b"test-voucher",
-                    signature=b"",
                 ),
                 limit=proto.Limit(
                     duration=3600,  # 1 hour
@@ -75,7 +68,7 @@ async def simple_stream_handler(stream):
 
             # Send the response
             logger.info("Sending response")
-            await stream.write(response.SerializeToString())
+            await write_delimited_msg(stream, response)
             logger.info("Response sent")
     except Exception as e:
         logger.error("Error in simple stream handler: %s", str(e))

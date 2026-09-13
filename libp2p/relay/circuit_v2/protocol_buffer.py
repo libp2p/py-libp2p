@@ -8,49 +8,52 @@ to make them easier to work with in type-checked code.
 from enum import (
     IntEnum,
 )
-from typing import (
-    cast,
+
+from .pb.circuit_pb2 import (
+    Status,
 )
 
-from .pb.circuit_pb2 import Status as PbStatus
 
-
-# Define Status codes as an Enum for better type safety and organization
+# Status codes for circuit relay v2, mirroring the canonical protobuf
+# definition. Note this is a plain enum: on the wire, HopMessage.status and
+# StopMessage.status carry one of these values directly.
 class StatusCode(IntEnum):
-    OK = 0
-    RESERVATION_REFUSED = 100
-    RESOURCE_LIMIT_EXCEEDED = 101
-    PERMISSION_DENIED = 102
-    CONNECTION_FAILED = 200
-    DIAL_REFUSED = 201
+    UNUSED = 0
+    OK = 100
+    RESERVATION_REFUSED = 200
+    RESOURCE_LIMIT_EXCEEDED = 201
+    PERMISSION_DENIED = 202
+    CONNECTION_FAILED = 203
     NO_RESERVATION = 204
-    STOP_FAILED = 300
     MALFORMED_MESSAGE = 400
+    UNEXPECTED_MESSAGE = 401
 
 
-def create_status(code: int = StatusCode.OK, message: str = "") -> PbStatus:
+def to_proto_status(code: StatusCode) -> Status.ValueType:
     """
-    Create a protocol buffer Status object.
+    Convert a ``StatusCode`` to the wire value for protobuf ``Status`` fields.
+
+    The generated stubs type ``status`` as ``Status.ValueType`` (a NewType
+    over int, callable at runtime), and the runtime ``EnumTypeWrapper`` is
+    not callable — so the identical integer value is wrapped explicitly.
+    """
+    return Status.ValueType(int(code))
+
+
+def create_status(code: int = StatusCode.OK) -> StatusCode:
+    """
+    Create a protocol buffer Status value.
 
     Parameters
     ----------
     code : int
         The status code. Can be a StatusCode enum value or an integer.
-    message : str
-        The status message
 
     Returns
     -------
-    PbStatus
-        The protocol buffer Status object
+    StatusCode
+        The status enum value for assignment to HopMessage.status or
+        StopMessage.status.
 
     """
-    pb_obj = PbStatus()
-
-    # Convert the status code (int or StatusCode enum) to the protobuf enum value type.
-    # The code field expects PbStatus.Code.ValueType (a NewType wrapper around int).
-    # At runtime, protobuf accepts int directly, but type checker requires ValueType.
-    pb_obj.code = cast(PbStatus.Code.ValueType, int(code))  # type: ignore[assignment,attr-defined]
-    pb_obj.message = message
-
-    return pb_obj
+    return StatusCode(int(code))

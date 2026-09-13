@@ -969,12 +969,20 @@ class Swarm(Service, INetworkService):
 
         return []
 
-    async def _dial_with_retry(self, addr: Multiaddr, peer_id: ID) -> INetConn:
+    async def _dial_with_retry(
+        self,
+        addr: Multiaddr,
+        peer_id: ID,
+        source: tuple[str, int] | None = None,
+    ) -> INetConn:
         """
         Enhanced: Dial with retry logic and exponential backoff.
 
         :param addr: the address to dial
         :param peer_id: the peer we want to connect to
+        :param source: optional (ip, port) to bind the outbound socket to
+            (TCP hole punching: dial from the listen port). Transports
+            without source-dial support ignore it.
         :raises SwarmException: raised when all retry attempts fail
         :return: network connection
         """
@@ -982,7 +990,7 @@ class Swarm(Service, INetworkService):
 
         for attempt in range(self.retry_config.max_retries + 1):
             try:
-                return await self._dial_addr_single_attempt(addr, peer_id)
+                return await self._dial_addr_single_attempt(addr, peer_id, source)
             except Exception as e:
                 last_exception = e
 
@@ -1045,7 +1053,12 @@ class Swarm(Service, INetworkService):
         jitter = delay * self.retry_config.jitter_factor
         return delay + random.uniform(-jitter, jitter)
 
-    async def _dial_addr_single_attempt(self, addr: Multiaddr, peer_id: ID) -> INetConn:
+    async def _dial_addr_single_attempt(
+        self,
+        addr: Multiaddr,
+        peer_id: ID,
+        source: tuple[str, int] | None = None,
+    ) -> INetConn:
         """
         Single attempt to dial an address.
 
@@ -1057,6 +1070,7 @@ class Swarm(Service, INetworkService):
 
         :param addr: the address we want to connect with
         :param peer_id: the peer we want to connect to
+        :param source: optional (ip, port) source binding for hole punching
         :raises SwarmException: raised when an error occurs
         :return: network connection
         """
@@ -1106,7 +1120,11 @@ class Swarm(Service, INetworkService):
             if not existing_p2p:
                 addr = Multiaddr(f"{addr}/p2p/{peer_id}")
 
-            raw_conn = await transport.dial(addr)
+            dial_with_source = getattr(transport, "dial_with_source", None)
+            if source is not None and callable(dial_with_source):
+                raw_conn = await cast(Any, dial_with_source)(addr, source)
+            else:
+                raw_conn = await transport.dial(addr)
 
             # Enable PNET if psk is provided
             if self.psk is not None:
@@ -1365,16 +1383,127 @@ class Swarm(Service, INetworkService):
         logger.debug("successfully dialed peer %s", peer_id)
         return swarm_conn
 
-    async def dial_addr(self, addr: Multiaddr, peer_id: ID) -> INetConn:
+    async def dial_addr(
+        self,
+        addr: Multiaddr,
+        peer_id: ID,
+        source: tuple[str, int] | None = None,
+    ) -> INetConn:
         """
         Enhanced: Try to create a connection to peer_id with addr using retry logic.
 
         :param addr: the address we want to connect with
         :param peer_id: the peer we want to connect to
+        :param source: optional (ip, port) to bind the outbound socket to
+            (TCP hole punching: dial from the listen port)
         :raises SwarmException: raised when an error occurs
         :return: network connection
         """
-        return await self._dial_with_retry(addr, peer_id)
+        return await self._dial_with_retry(addr, peer_id, source)
+
+    async def dial_addr_as_responder(
+        self,
+        addr: Multiaddr,
+        peer_id: ID,
+        source: tuple[str, int] | None = None,
+    ) -> INetConn:
+        """
+        Dial ``addr`` but upgrade the connection as inbound (responder).
+
+        Used for TCP hole punching (DCUtR simultaneous open): the dialed
+        socket may merge with the peer's simultaneous dial into a single
+        connection, on which the spec assigns fixed Noise roles — the
+        original dialer (DCUtR responder) is the client/initiator and the
+        inbound peer (DCUtR initiator) is the server/responder. Upgrading
+        both dials as initiator breaks the handshake (``InvalidTag``).
+
+        Single attempt (no retry): callers run their own rounds.
+
+        :param addr: the address we want to connect with
+        :param peer_id: the expected peer (verified after upgrade)
+        :param source: optional (ip, port) to bind the outbound socket to
+        :raises SwarmException: raised when dial, upgrade, or peer
+            verification fails
+        :return: network connection
+        """
+        transport = self.transport_manager.transport_for_dialing(addr)
+        if transport is None:
+            raise SwarmException(
+                f"No registered transport can dial {addr}. "
+                f"Registered transports: "
+                f"{[type(t).__name__ for t in self.transport_manager.get_transports()]}"
+            )
+
+        try:
+            existing_p2p = addr.value_for_protocol("p2p")
+        except Exception:
+            existing_p2p = None
+        if not existing_p2p:
+            addr = Multiaddr(f"{addr}/p2p/{peer_id}")
+
+        dial_with_source = getattr(transport, "dial_with_source", None)
+        try:
+            if source is not None and callable(dial_with_source):
+                raw_conn = await cast(Any, dial_with_source)(addr, source)
+            else:
+                raw_conn = await transport.dial(addr)
+            if self.psk is not None:
+                raw_conn = new_protected_conn(raw_conn, self.psk)
+        except OpenConnectionError as error:
+            raise SwarmException(
+                f"fail to open connection to peer {peer_id}"
+            ) from error
+        except Exception as e:
+            raise SwarmException(f"Unexpected error dialing peer {peer_id}") from e
+        except BaseException:
+            raise
+
+        if isinstance(raw_conn, IMuxedConn):
+            # Pre-multiplexed transports (QUIC) complete their handshake on
+            # dial with fixed client/server roles that cannot be flipped to
+            # responder. Not supported for hole punching.
+            try:
+                await raw_conn.close()
+            except Exception:
+                pass
+            raise SwarmException(
+                "dial_addr_as_responder not supported for pre-multiplexed transports"
+            )
+        if not isinstance(raw_conn, IRawConnection):
+            raise SwarmException("Expected an IRawConnection to upgrade")
+
+        try:
+            muxed_conn = await self.upgrade_inbound_raw_conn(raw_conn, addr)
+        except BaseException:
+            try:
+                await raw_conn.close()
+            except Exception:
+                pass
+            raise
+
+        # upgrade_inbound_raw_conn registers via add_conn keyed by the
+        # actual remote peer: verify it is who we dialed, then return the
+        # registered swarm connection.
+        actual_id = getattr(muxed_conn, "peer_id", None)
+        if actual_id != peer_id:
+            try:
+                await muxed_conn.close()
+            except Exception:
+                pass
+            raise SwarmException(
+                "Peer ID mismatch in responder dial: "
+                f"expected {peer_id}, got {actual_id}"
+            )
+        conns = self.connections.get(peer_id)
+        candidates: list[INetConn] = (
+            conns if isinstance(conns, list) else ([conns] if conns else [])
+        )
+        for conn in reversed(candidates):
+            if getattr(conn, "muxed_conn", None) is muxed_conn:
+                return conn
+        if candidates:
+            return candidates[-1]
+        raise SwarmException("responder upgrade registered no connection")
 
     async def dial_peer_replacement(self, peer_id: ID) -> INetConn | None:
         """
