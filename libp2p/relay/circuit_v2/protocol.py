@@ -6,6 +6,7 @@ https://github.com/libp2p/specs/blob/master/relay/circuit-v2.md
 """
 
 import logging
+import time
 from typing import (
     Any,
     Protocol as TypingProtocol,
@@ -93,6 +94,24 @@ STREAM_CLOSE_TIMEOUT = 10  # seconds
 MAX_READ_RETRIES = 3  # Balanced retries to handle temporary issues
 
 
+def _is_relayed_stream(stream: INetStream) -> bool:
+    """
+    Return True if the stream runs over a relayed (p2p-circuit) connection.
+
+    The spec directs relays not to accept reservations or connection
+    initiations over already relayed connections.
+    """
+    try:
+        muxed_conn = getattr(stream, "muxed_conn", None)
+        get_addrs = getattr(muxed_conn, "get_transport_addresses", None)
+        if not callable(get_addrs):
+            return False
+        addrs: Any = get_addrs() or []
+    except Exception:
+        return False
+    return any("/p2p-circuit" in str(a) for a in addrs)
+
+
 @runtime_checkable
 class INetStreamWithExtras(TypingProtocol):
     """Extended net stream interface with additional methods."""
@@ -165,7 +184,7 @@ class CircuitV2Protocol(Service):
                 self.host.set_stream_handler(PROTOCOL_ID, self._handle_hop_stream)
 
             self.host.set_stream_handler(STOP_PROTOCOL_ID, self._handle_stop_stream)
-            print("Stream handlers registered successfully")
+            logger.debug("Stream handlers registered successfully")
 
             # Signal that we're ready
             self.event_started.set()
@@ -297,6 +316,21 @@ class CircuitV2Protocol(Service):
             # Try to get peer ID first
             logger.debug("Handling hop stream from %s", remote_id)
 
+            # Spec: implementations should not accept reservations or
+            # connection initiations over already relayed connections.
+            if _is_relayed_stream(stream):
+                logger.warning(
+                    "Refusing HOP request from %s over relayed connection",
+                    remote_id,
+                )
+                response = HopMessage(
+                    type=HopMessage.STATUS,
+                    status=to_proto_status(StatusCode.PERMISSION_DENIED),
+                )
+                await write_delimited_msg(stream, response)
+                await self._close_stream(stream)
+                return
+
             # Handle multiple messages on the same stream with proper timeout handling
             while True:
                 # First, handle the read timeout gracefully
@@ -380,10 +414,8 @@ class CircuitV2Protocol(Service):
                 await self._close_stream(stream)
                 return
 
-            # Get the destination peer's SPR to send to source
-            dst_peer_id = stream.muxed_conn.peer_id
-            _ = self.host.get_peerstore().get_peer_record(dst_peer_id)
-
+            # The stop peer field carries the connection initiator per spec;
+            # nothing to validate target-side before accepting.
             await self._send_stop_status(
                 stream,
                 StatusCode.OK,
@@ -508,71 +540,46 @@ class CircuitV2Protocol(Service):
             if not reservation_obj:
                 raise ValueError(f"Failed to create reservation for peer {peer_id}")
 
-            # Get the peer's addresses from the peerstore if available
-            raw_addrs: list[bytes] = []
-            try:
-                # Try to get peer addresses from the host's peerstore
-                # Most host implementations have a peerstore attribute
-                peer_addrs = self.host.get_peerstore().addrs(peer_id)
-                # Convert addresses to bytes for the protocol buffer
-                raw_addrs = [addr.to_bytes() for addr in peer_addrs]
-                logger.debug(
-                    "Including %d addresses for peer %s in reservation response",
-                    len(raw_addrs),
-                    peer_id,
-                )
-            except AttributeError:
-                # Host does not have peerstore or peerstore doesn't have addrs method
-                logger.debug("Host peerstore not available for address lookup")
-            except Exception as e:
-                logger.warning("Error getting peer addresses: %s", str(e))
-
-            # Add addresses to the reservation object before serializing.
-            # Send bare addresses (no /p2p/ suffix): strict implementations
-            # reject non-canonical suffixed encodings, and the peer ID is
-            # already known from the reservation context.
+            # Spec: reservation.addrs carries the RELAY's public addresses
+            # (including our peer ID, without any p2p-circuit suffix) so
+            # the client can construct its own circuit addrs for
+            # advertising. Wildcard listens are skipped (undialable).
+            relay_id = self.host.get_id()
             bare_addrs: list[bytes] = []
-            for addr in raw_addrs:
+            try:
+                listen_addrs = list(self.host.get_addrs() or [])
+            except Exception:
+                listen_addrs = []
+            for addr in listen_addrs:
                 try:
-                    if isinstance(addr, multiaddr.Multiaddr):
-                        ma = addr
-                    else:
-                        ma = multiaddr.Multiaddr(addr)
+                    ma = (
+                        addr
+                        if isinstance(addr, multiaddr.Multiaddr)
+                        else multiaddr.Multiaddr(addr)
+                    )
+                    if "/p2p-circuit" in str(ma):
+                        continue
                     try:
                         p2p_value = ma.value_for_protocol("p2p")
                     except Exception:
                         p2p_value = None
                     if p2p_value:
                         ma = ma.decapsulate(multiaddr.Multiaddr(f"/p2p/{p2p_value}"))
-                    bare_addrs.append(ma.to_bytes())
+                    try:
+                        ip = ma.value_for_protocol("ip4")
+                    except Exception:
+                        try:
+                            ip = ma.value_for_protocol("ip6")
+                        except Exception:
+                            continue
+                    if ip in ("0.0.0.0", "::"):
+                        continue
+                    full = ma.encapsulate(
+                        multiaddr.Multiaddr(f"/p2p/{relay_id.to_base58()}")
+                    )
+                    bare_addrs.append(full.to_bytes())
                 except Exception:
                     continue
-            if not bare_addrs:
-                # Peerstore may hold no addresses (e.g. identify only
-                # reported filtered addresses). Fall back to the address
-                # the peer is currently connected from so the reservation
-                # still carries a usable address.
-                # IMuxedConn exposes no remote-address accessor; both bundled
-                # muxers stash the secured session, which does. Guard with
-                # getattr (the codebase idiom for optional capabilities).
-                try:
-                    secured = getattr(stream.muxed_conn, "secured_conn", None)
-                    get_remote = getattr(secured, "get_remote_address", None)
-                    remote: tuple[str, int] | None = None
-                    if callable(get_remote):
-                        maybe_remote = get_remote()
-                        if isinstance(maybe_remote, tuple) and len(maybe_remote) == 2:
-                            remote = maybe_remote
-                    if remote:
-                        host, port = remote[0], int(remote[1])
-                        ip_proto = "ip6" if ":" in host else "ip4"
-                        bare_addrs.append(
-                            multiaddr.Multiaddr(
-                                f"/{ip_proto}/{host}/tcp/{port}"
-                            ).to_bytes()
-                        )
-                except Exception:
-                    pass
             reservation_obj.addrs = bare_addrs
 
             # Create the protobuf reservation with voucher and signature
@@ -675,10 +682,15 @@ class CircuitV2Protocol(Service):
 
                 logger.debug("Connected to destination peer %s", peer_id)
 
-                # Send STOP CONNECT message
+                # Send STOP CONNECT message (spec carries the limits so
+                # the target knows the caps applied to the circuit).
                 stop_msg = StopMessage(
                     type=StopMessage.CONNECT,
                     peer=CircuitPeerId(id=source_addr.to_bytes()),
+                    limit=Limit(
+                        duration=self.limits.duration,
+                        data=self.limits.data,
+                    ),
                 )
 
                 await write_delimited_msg(dst_stream, stop_msg)
@@ -727,12 +739,32 @@ class CircuitV2Protocol(Service):
                 stream,
                 StatusCode.OK,
                 "Connection established",
+                limit=Limit(
+                    duration=self.limits.duration,
+                    data=self.limits.data,
+                ),
             )
 
-            # Start relaying data
+            # Start relaying data. The duration cap (0 = unlimited per
+            # spec) becomes a shared deadline checked by both directions.
+            circuit_deadline: float | None = None
+            if self.limits.duration > 0:
+                circuit_deadline = time.monotonic() + self.limits.duration
             async with trio.open_nursery() as nursery:
-                nursery.start_soon(self._relay_data, stream, dst_stream, source_addr)
-                nursery.start_soon(self._relay_data, dst_stream, stream, peer_id)
+                nursery.start_soon(
+                    self._relay_data,
+                    stream,
+                    dst_stream,
+                    source_addr,
+                    circuit_deadline,
+                )
+                nursery.start_soon(
+                    self._relay_data,
+                    dst_stream,
+                    stream,
+                    peer_id,
+                    circuit_deadline,
+                )
 
         except (trio.TooSlowError, ConnectionError) as e:
             logger.error("Error establishing relay connection: %s", str(e))
@@ -761,6 +793,7 @@ class CircuitV2Protocol(Service):
         src_stream: INetStream,
         dst_stream: INetStream,
         peer_id: ID,
+        deadline: float | None = None,
     ) -> None:
         """
         Relay data between two streams.
@@ -773,6 +806,10 @@ class CircuitV2Protocol(Service):
             The destination stream
         peer_id : ID
             The peer ID for the reservation
+        deadline : float | None
+            Monotonic timestamp at which the circuit duration cap lapses
+            (None = unlimited). Checked per iteration; on lapse both
+            streams reset per spec.
 
         """
         try:
@@ -781,6 +818,18 @@ class CircuitV2Protocol(Service):
             total_bytes = 0
 
             while True:
+                if deadline is not None and time.monotonic() > deadline:
+                    logger.warning(
+                        "Circuit duration limit exceeded for peer %s", peer_id
+                    )
+                    await self._send_status(
+                        src_stream,
+                        StatusCode.RESOURCE_LIMIT_EXCEEDED,
+                        "Circuit duration limit exceeded",
+                    )
+                    await src_stream.reset()
+                    await dst_stream.reset()
+                    return
                 # Read data with retries
                 data = await self._read_stream_with_retry(src_stream)
                 if not data:
@@ -840,6 +889,7 @@ class CircuitV2Protocol(Service):
         stream: ReadWriteCloser,
         code: StatusCode,
         message: str,
+        limit: Limit | None = None,
     ) -> None:
         """Send a status message."""
         try:
@@ -849,6 +899,8 @@ class CircuitV2Protocol(Service):
                     type=HopMessage.STATUS,
                     status=to_proto_status(code),
                 )
+                if limit is not None:
+                    status_msg.limit.CopyFrom(limit)
 
                 await write_delimited_msg(stream, status_msg)
                 logger.debug("Status message sent successfully")

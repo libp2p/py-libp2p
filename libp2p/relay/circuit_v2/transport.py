@@ -37,7 +37,6 @@ from libp2p.peer.id import (
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
-from libp2p.peer.peerstore import env_to_send_in_RPC
 from libp2p.tools.anyio_service import (
     Service,
 )
@@ -64,6 +63,7 @@ from .performance_tracker import (
 )
 from .protocol import (
     PROTOCOL_ID,
+    STOP_PROTOCOL_ID,
     STREAM_READ_TIMEOUT,
     CircuitV2Protocol,
     INetStreamWithExtras,
@@ -199,6 +199,7 @@ class CircuitV2Transport(ITransport):
         self._reservations: dict[ID, float] = {}
         self._reservation_proofs: dict[ID, Reservation] = {}
         self._refreshing = False
+        self._refresh_lock = trio.Lock()
         self.dht: KadDHT | None = None
         if config.enable_dht_discovery:
             self.dht = KadDHT(host, DHTMode.CLIENT)
@@ -409,9 +410,6 @@ class CircuitV2Transport(ITransport):
                     raise ConnectionError(
                         f"Could not open stream to relay {relay_peer_id} for CONNECT"
                     )
-            # Create signed peer record to send with the HOP message
-            envelope_bytes, _ = env_to_send_in_RPC(self.host)
-
             # Send HOP CONNECT message
             connect_msg = HopMessage(
                 type=HopMessage.CONNECT,
@@ -788,10 +786,12 @@ class CircuitV2Transport(ITransport):
         if not success:
             return False
 
-        # Start refresher if this is the first reservation
-        if not self._refreshing:
-            self._refreshing = True
-            nursery.start_soon(self._refresh_reservations_worker)
+        # Start refresher if this is the first reservation (guarded:
+        # concurrent reserve() calls must not spawn duplicate workers).
+        async with self._refresh_lock:
+            if not self._refreshing:
+                self._refreshing = True
+                nursery.start_soon(self._refresh_reservations_worker)
         return True
 
     async def _make_reservation(
@@ -816,9 +816,7 @@ class CircuitV2Transport(ITransport):
 
         """
         try:
-            # Create signed envelope for the reservation request to relay
-            envelope_bytes, _ = env_to_send_in_RPC(self.host)
-            # Send reservation request
+            # Send reservation request (spec RESERVE carries no fields)
             reserve_msg = HopMessage(
                 type=HopMessage.RESERVE,
                 peer=CircuitPeerId(id=self.host.get_id().to_bytes()),
@@ -1085,7 +1083,7 @@ class CircuitV2Listener(Service, IListener):
                 )
                 await stream.close()
 
-        self.host.set_stream_handler(PROTOCOL_ID, stream_handler)
+        self.host.set_stream_handler(STOP_PROTOCOL_ID, stream_handler)
         try:
             await self.manager.wait_finished()
         finally:

@@ -1448,10 +1448,10 @@ async def test_run_registers_stream_handler():
         mock_manager.wait_finished = AsyncMock(return_value=None)
         await listener.run()
 
-    # Assert that host.set_stream_handler was called with PROTOCOL_ID
+    # The listener serves inbound STOP streams (relay -> target leg).
     host.set_stream_handler.assert_called_once()
     protocol_arg, func_arg = host.set_stream_handler.call_args[0]
-    assert protocol_arg == PROTOCOL_ID
+    assert protocol_arg == STOP_PROTOCOL_ID
     assert callable(func_arg)
 
 
@@ -1731,11 +1731,7 @@ async def test_dial_peer_info_includes_reservation_proof(protocol):
         expire=reservation_expiry,
     )
 
-    with patch(
-        "libp2p.relay.circuit_v2.transport.env_to_send_in_RPC",
-        return_value=(b"", None),
-    ):
-        await transport.dial_peer_info(dest_info)
+    await transport.dial_peer_info(dest_info)
 
     outbound_bytes = relay_stream.write.await_args_list[0].args[0]
     outbound_hop = HopMessage()
@@ -1794,11 +1790,7 @@ async def test_dial_peer_info_opens_new_stream_after_reserve(protocol):
     transport._select_relay = AsyncMock(return_value=relay_peer_id)
     transport._make_reservation = AsyncMock(return_value=True)
 
-    with patch(
-        "libp2p.relay.circuit_v2.transport.env_to_send_in_RPC",
-        return_value=(b"", None),
-    ):
-        conn = await transport.dial_peer_info(dest_info)
+    conn = await transport.dial_peer_info(dest_info)
 
     assert mock_host.new_stream.await_count == 2
     reserve_stream.close.assert_awaited_once()
@@ -1855,11 +1847,7 @@ async def test_dial_peer_info_reuses_stream_when_client_disabled(protocol):
     transport._select_relay = AsyncMock(return_value=relay_peer_id)
     transport._make_reservation = AsyncMock(return_value=True)
 
-    with patch(
-        "libp2p.relay.circuit_v2.transport.env_to_send_in_RPC",
-        return_value=(b"", None),
-    ):
-        await transport.dial_peer_info(dest_info)
+    await transport.dial_peer_info(dest_info)
 
     assert mock_host.new_stream.await_count == 1
     transport._make_reservation.assert_not_awaited()

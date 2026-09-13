@@ -8,9 +8,6 @@ to make them easier to work with in type-checked code.
 from enum import (
     IntEnum,
 )
-from typing import (
-    cast,
-)
 
 from .pb.circuit_pb2 import (
     Status,
@@ -32,14 +29,15 @@ class StatusCode(IntEnum):
     UNEXPECTED_MESSAGE = 401
 
 
-def to_proto_status(code: StatusCode) -> Status:
+def to_proto_status(code: StatusCode) -> Status.ValueType:
     """
-    Convert a ``StatusCode`` to the generated protobuf ``Status`` enum.
+    Convert a ``StatusCode`` to the wire value for protobuf ``Status`` fields.
 
-    The generated ``EnumTypeWrapper`` is not callable, so the wire value
-    (identical integers) is passed through with a cast.
+    The generated stubs type ``status`` as ``Status.ValueType`` (a NewType
+    over int, callable at runtime), and the runtime ``EnumTypeWrapper`` is
+    not callable — so the identical integer value is wrapped explicitly.
     """
-    return cast(Status, int(code))
+    return Status.ValueType(int(code))
 
 
 def create_status(code: int = StatusCode.OK) -> StatusCode:

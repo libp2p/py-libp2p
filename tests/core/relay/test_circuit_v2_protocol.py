@@ -106,9 +106,12 @@ def test_circuit_v2_verify_reservation(limits, peer_id, key_pair):
     # Create a mock host with the key pair
     from unittest.mock import Mock
 
+    from libp2p.peer.id import ID as PeerID
+
     mock_host = Mock()
     mock_host.get_private_key.return_value = key_pair.private_key
     mock_host.get_public_key.return_value = key_pair.public_key
+    mock_host.get_id.return_value = PeerID.from_pubkey(key_pair.public_key)
 
     # Create manager with the mock host
     manager = RelayResourceManager(limits, mock_host)
@@ -119,6 +122,9 @@ def test_circuit_v2_verify_reservation(limits, peer_id, key_pair):
     # Get the proper signed protobuf reservation from the reservation object
     proto_res = reservation.to_proto()
 
+    # A real signed envelope voucher is attached
+    assert bytes(proto_res.voucher) != b""
+
     # This should pass since it's properly signed
     assert manager.verify_reservation(peer_id, proto_res) is True
 
@@ -127,6 +133,23 @@ def test_circuit_v2_verify_reservation(limits, peer_id, key_pair):
         expire=int(reservation.expires_at) + 100,
     )
     assert manager.verify_reservation(peer_id, invalid_proto) is False
+
+    # Tampered voucher bytes must fail
+    tampered = PbReservation(
+        expire=int(reservation.expires_at),
+        voucher=bytes(proto_res.voucher)[:-4] + b"\x00\x00\x00\x00",
+    )
+    assert manager.verify_reservation(peer_id, tampered) is False
+
+    # Voucher presented for a different peer must fail (peer needs its
+    # own reservation record for the lookup to proceed to voucher check)
+    other_id = PeerID.from_pubkey(create_new_key_pair().public_key)
+    manager.create_reservation(other_id)
+    assert manager.verify_reservation(other_id, proto_res) is False
+
+    # Absent voucher stays accepted (spec: vouchers are advisory)
+    bare = PbReservation(expire=int(reservation.expires_at))
+    assert manager.verify_reservation(peer_id, bare) is True
 
 
 async def assert_stream_response(
@@ -421,8 +444,7 @@ async def test_circuit_v2_voucher_verification_complete():
         # Ensure the reservation has the host reference
         assert reservation.host is not None, "Reservation should have host reference"
 
-        # Convert to protobuf (no voucher is sent on the wire, matching
-        # spec relays like rust-libp2p)
+        # Convert to protobuf (carries the signed envelope voucher)
         pb_reservation = reservation.to_proto()
 
         # Verify the reservation with matching expiry

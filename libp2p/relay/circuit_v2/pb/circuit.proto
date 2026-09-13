@@ -47,6 +47,15 @@ message Reservation {
   optional bytes voucher = 3; // reservation voucher
 }
 
+// Reservation voucher payload (spec: Reservation Vouchers). Carried
+// inside a Signed Envelope with domain "libp2p-relay-rsvp" and
+// multicodec 0x0302; fields serialized in field-id order.
+message Voucher {
+  optional bytes relay = 1;      // relay peer ID
+  optional bytes peer = 2;       // reserving peer ID
+  optional uint64 expiration = 3; // Unix expiration time (UTC)
+}
+
 message Limit {
   optional uint32 duration = 1; // seconds
   optional uint64 data = 2;     // bytes

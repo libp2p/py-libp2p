@@ -9,27 +9,36 @@ from dataclasses import (
     dataclass,
 )
 from enum import Enum, auto
-import hashlib
 import logging
-import os
 import time
 
 from libp2p.abc import (
     IHost,
+)
+from libp2p.peer.envelope import (
+    Envelope,
+    make_unsigned,
+    unmarshal_envelope,
 )
 from libp2p.peer.id import (
     ID,
 )
 
 # Import the protobuf definitions
-from .pb.circuit_pb2 import Reservation as PbReservation
+from .pb.circuit_pb2 import (
+    Reservation as PbReservation,
+    Voucher as PbVoucher,
+)
 
 logger = logging.getLogger(__name__)
 
-# Prefix for data to be signed, helps prevent signature reuse attacks
+# Spec: Reservation Vouchers — Signed Envelope domain and multicodec code.
+# Payload type uses raw bytes (NOT varint), matching go-libp2p wire format.
+RELAY_RSVP_DOMAIN = "libp2p-relay-rsvp"
+VOUCHER_PAYLOAD_TYPE = bytes([0x03, 0x02])
 
-RANDOM_BYTES_LENGTH = 16  # 128 bits of randomness
-TIMESTAMP_MULTIPLIER = 1000000  # To convert seconds to microseconds
+
+# Reservation status enum
 
 
 # Reservation status enum
@@ -49,6 +58,8 @@ class RelayLimits:
     data: int  # Maximum data transfer allowed in bytes
     max_circuit_conns: int  # Maximum number of concurrent circuit connections
     max_reservations: int  # Maximum number of active reservations
+    reservation_ttl: int = 3600  # Reservation validity in seconds (spec:
+    # independent of the per-connection duration cap)
 
 
 @dataclass
@@ -90,39 +101,44 @@ class Reservation:
         self.limits = limits
         self.host = host
         self.created_at = time.time()
-        self.expires_at = int(self.created_at + limits.duration)
+        self.expires_at = int(self.created_at + limits.reservation_ttl)
         self.data_used = 0
         self.active_connections = 0
-        self.voucher = self._generate_voucher()
+        self.voucher = self._sign_voucher()
         self.voucher_obj: ReservationVoucher | None = None
         self.addrs: list[bytes] = []  # List of addresses for this reservation
 
-    def _generate_voucher(self) -> bytes:
+    def _sign_voucher(self) -> bytes:
         """
-        Generate a unique cryptographically secure voucher for this reservation.
+        Sign a spec reservation voucher for this reservation.
 
-        Returns
-        -------
-        bytes
-            A secure voucher token
-
+        Returns the marshalled Signed Envelope (domain
+        ``libp2p-relay-rsvp``, multicodec ``0x0302``) over
+        ``Voucher{relay, peer, expiration}``, or ``b""`` when the host
+        key is unavailable (vouchers are advisory per spec).
         """
-        # Create a random token using a combination of:
-        # - Random bytes for unpredictability
-        # - Peer ID to bind it to the specific peer
-        # - Timestamp for uniqueness
-        # - Hash everything for a fixed size output
-        random_bytes = os.urandom(RANDOM_BYTES_LENGTH)
-        timestamp = str(int(self.created_at * TIMESTAMP_MULTIPLIER)).encode()
-        peer_bytes = self.peer_id.to_bytes()
-
-        # Combine all elements and hash them
-        h = hashlib.sha256()
-        h.update(random_bytes)
-        h.update(timestamp)
-        h.update(peer_bytes)
-
-        return h.digest()
+        try:
+            if self.host is None:
+                return b""
+            relay_id = self.host.get_id()
+            payload = PbVoucher(
+                relay=relay_id.to_bytes(),
+                peer=self.peer_id.to_bytes(),
+                expiration=int(self.expires_at),
+            ).SerializeToString()
+            private_key = self.host.get_private_key()
+            unsigned = make_unsigned(RELAY_RSVP_DOMAIN, VOUCHER_PAYLOAD_TYPE, payload)
+            signature = private_key.sign(unsigned)
+            env = Envelope(
+                public_key=private_key.get_public_key(),
+                payload_type=VOUCHER_PAYLOAD_TYPE,
+                raw_payload=payload,
+                signature=signature,
+            )
+            return env.marshal_envelope()
+        except Exception as e:
+            logger.debug("Failed to sign reservation voucher: %s", e)
+            return b""
 
     def is_expired(self) -> bool:
         """Check if the reservation has expired."""
@@ -186,6 +202,7 @@ class Reservation:
         return PbReservation(
             expire=int(self.expires_at),
             addrs=self.addrs,
+            voucher=self.voucher,
         )
 
 
@@ -299,17 +316,38 @@ class RelayResourceManager:
             )
             return False
 
-        # Check the voucher only when the peer presents one. Relays
-        # following the spec (e.g. rust-libp2p) omit vouchers; requiring
-        # them would break interop. A presented voucher must match.
-        if proto_res.voucher and proto_res.voucher != reservation.voucher:
-            logger.debug(
-                "Voucher mismatch for peer %s",
-                peer_id,
-            )
-            return False
+        # Verify a presented voucher: it must be a valid Signed Envelope
+        # from us (domain libp2p-relay-rsvp) binding this peer and a
+        # matching expiration. Relays following the spec (e.g.
+        # rust-libp2p) omit vouchers; requiring them would break interop,
+        # so absence is accepted.
+        if proto_res.voucher:
+            if not self._verify_voucher(peer_id, bytes(proto_res.voucher)):
+                logger.debug("Voucher mismatch for peer %s", peer_id)
+                return False
 
         return True
+
+    def _verify_voucher(self, peer_id: ID, voucher: bytes) -> bool:
+        """Validate a presented reservation voucher envelope."""
+        try:
+            env = unmarshal_envelope(voucher)
+            env.validate(RELAY_RSVP_DOMAIN)
+            if bytes(env.payload_type) != VOUCHER_PAYLOAD_TYPE:
+                return False
+            payload = PbVoucher()
+            payload.ParseFromString(bytes(env.raw_payload))
+            if ID(payload.peer) != peer_id:
+                return False
+            if self.host is not None and ID(payload.relay) != self.host.get_id():
+                return False
+            expected = int(self._reservations[peer_id].expires_at)
+            if abs(int(payload.expiration) - expected) > 1:
+                return False
+            return True
+        except Exception as e:
+            logger.debug("Voucher verification failed for %s: %s", peer_id, e)
+            return False
 
     def can_accept_connection(self, peer_id: ID) -> bool:
         """
@@ -389,7 +427,7 @@ class RelayResourceManager:
 
         # Create new reservation
         self.create_reservation(peer_id)
-        return self.limits.duration
+        return self.limits.reservation_ttl
 
     def has_reservation(self, peer_id: ID) -> bool:
         """
@@ -408,15 +446,35 @@ class RelayResourceManager:
         """
         existing = self._reservations.get(peer_id)
         if existing and not existing.is_expired():
-            return True
+            return self._is_peer_connected(peer_id)
         return False
 
     def refresh_reservation(self, peer_id: ID) -> int:
-        if self.has_reservation(peer_id):
-            self.create_reservation(peer_id)
-            return self.limits.duration
+        existing = self._reservations.get(peer_id)
+        if existing and not existing.is_expired():
+            # Extend validity in place: replacing the object would wipe
+            # data_used/active_connections and let peers reset quotas.
+            existing.expires_at = int(time.time() + self.limits.reservation_ttl)
+            return self.limits.reservation_ttl
 
         return 0
+
+    def _is_peer_connected(self, peer_id: ID) -> bool:
+        """
+        Return True if the peer currently has a live connection.
+
+        Spec: a reservation is only valid while the peer holds an active
+        connection to the relay. Fail-open when the host is unavailable
+        (e.g. unit tests) to preserve prior behavior there.
+        """
+        if self.host is None:
+            return True
+        try:
+            network = self.host.get_network()
+            conns = (getattr(network, "connections", {}) or {}).get(peer_id)
+            return bool(conns)
+        except Exception:
+            return True
 
     def get_reservation(self, peer_id: ID) -> Reservation | None:
         """
@@ -435,5 +493,6 @@ class RelayResourceManager:
         """
         reservation = self._reservations.get(peer_id)
         if reservation and not reservation.is_expired():
-            return reservation
+            if self._is_peer_connected(peer_id):
+                return reservation
         return None
