@@ -3,7 +3,7 @@ import json
 import logging
 import random
 import time
-from typing import TYPE_CHECKING, Any, Callable, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from libp2p.metrics.swarm import SwarmEvent
 from libp2p.rcmgr import Direction
@@ -1120,15 +1120,9 @@ class Swarm(Service, INetworkService):
             if not existing_p2p:
                 addr = Multiaddr(f"{addr}/p2p/{peer_id}")
 
-            dial_with_source: Callable[..., Any] | None = getattr(
-                transport, "dial_with_source", None
-            )
-            if (
-                source is not None
-                and dial_with_source is not None
-                and callable(dial_with_source)
-            ):
-                raw_conn = await dial_with_source(addr, source)
+            dial_with_source = getattr(transport, "dial_with_source", None)
+            if source is not None and callable(dial_with_source):
+                raw_conn = await cast(Any, dial_with_source)(addr, source)
             else:
                 raw_conn = await transport.dial(addr)
 
@@ -1447,16 +1441,10 @@ class Swarm(Service, INetworkService):
         if not existing_p2p:
             addr = Multiaddr(f"{addr}/p2p/{peer_id}")
 
-        dial_with_source: Callable[..., Any] | None = getattr(
-            transport, "dial_with_source", None
-        )
+        dial_with_source = getattr(transport, "dial_with_source", None)
         try:
-            if (
-                source is not None
-                and dial_with_source is not None
-                and callable(dial_with_source)
-            ):
-                raw_conn = await dial_with_source(addr, source)
+            if source is not None and callable(dial_with_source):
+                raw_conn = await cast(Any, dial_with_source)(addr, source)
             else:
                 raw_conn = await transport.dial(addr)
             if self.psk is not None:
