@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-import autonat_pb2 as autonat__pb2
+from . import autonat_pb2 as autonat__pb2
 
 GRPC_GENERATED_VERSION = '1.74.0'
 GRPC_VERSION = grpc.__version__
