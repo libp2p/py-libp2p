@@ -195,7 +195,7 @@ class AutoNATService:
         """
         candidates: list[bytes] = list(addrs)
         try:
-            candidates.extend(self.peerstore.addrs(peer_id))
+            candidates.extend(a.to_bytes() for a in self.peerstore.addrs(peer_id))
         except Exception:
             pass
         for addr in candidates:

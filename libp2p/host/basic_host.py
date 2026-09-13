@@ -155,7 +155,7 @@ def _is_relayed_connection(conn: Any) -> bool:
         get_addrs = getattr(conn, "get_transport_addresses", None)
         if not callable(get_addrs):
             return False
-        addrs = get_addrs() or []
+        addrs: Any = get_addrs() or []
     except Exception:
         return False
     return any("/p2p-circuit" in str(a) for a in addrs)

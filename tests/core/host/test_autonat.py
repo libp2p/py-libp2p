@@ -17,6 +17,7 @@ from libp2p.host.autonat.pb.autonat_pb2 import (
     Status,
     Type,
 )
+from libp2p.io.abc import Reader
 from libp2p.network.stream.exceptions import (
     StreamError,
 )
@@ -249,7 +250,7 @@ async def test_handle_stream():
         mock_stream.close.assert_called_once()
 
 
-class _BytesReader:
+class _BytesReader(Reader):
     """Minimal async reader over bytes for delimited framing helpers."""
 
     def __init__(self, data: bytes):

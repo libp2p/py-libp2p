@@ -33,7 +33,10 @@ from libp2p.relay.circuit_v2.protocol import (
     STOP_PROTOCOL_ID,
     CircuitV2Protocol,
 )
-from libp2p.relay.circuit_v2.protocol_buffer import StatusCode
+from libp2p.relay.circuit_v2.protocol_buffer import (
+    StatusCode,
+    to_proto_status,
+)
 from libp2p.relay.circuit_v2.resources import (
     RelayLimits,
     RelayResourceManager,
@@ -572,7 +575,7 @@ async def test_circuit_v2_reservation_basic():
                     # Create a valid response
                     response = proto.HopMessage(
                         type=proto.HopMessage.RESERVE,
-                        status=StatusCode.OK,
+                        status=to_proto_status(StatusCode.OK),
                         reservation=proto.Reservation(
                             expire=int(time.time()) + 3600,  # 1 hour from now
                         ),
@@ -717,7 +720,9 @@ async def test_circuit_v2_reservation_limit():
                                 logger.warning("Invalid senderRecord from %s", peer_id)
                                 response = proto.HopMessage(
                                     type=proto.HopMessage.RESERVE,
-                                    status=StatusCode.PERMISSION_DENIED,
+                                    status=to_proto_status(
+                                        StatusCode.PERMISSION_DENIED
+                                    ),
                                 )
                                 await write_delimited_msg(stream, response)
                                 return
@@ -727,7 +732,7 @@ async def test_circuit_v2_reservation_limit():
                             )
                             response = proto.HopMessage(
                                 type=proto.HopMessage.RESERVE,
-                                status=StatusCode.PERMISSION_DENIED,
+                                status=to_proto_status(StatusCode.PERMISSION_DENIED),
                             )
                             await write_delimited_msg(stream, response)
                             return
@@ -738,7 +743,7 @@ async def test_circuit_v2_reservation_limit():
                         )
                         response = proto.HopMessage(
                             type=proto.HopMessage.RESERVE,
-                            status=StatusCode.PERMISSION_DENIED,
+                            status=to_proto_status(StatusCode.PERMISSION_DENIED),
                         )
                         await write_delimited_msg(stream, response)
                         return
@@ -755,7 +760,7 @@ async def test_circuit_v2_reservation_limit():
                         # Create a success response
                         response = proto.HopMessage(
                             type=proto.HopMessage.RESERVE,
-                            status=StatusCode.OK,
+                            status=to_proto_status(StatusCode.OK),
                             reservation=proto.Reservation(
                                 expire=int(time.time()) + 3600,  # 1 hour from now
                             ),
@@ -771,7 +776,7 @@ async def test_circuit_v2_reservation_limit():
                         # Reject the reservation due to limits
                         response = proto.HopMessage(
                             type=proto.HopMessage.RESERVE,
-                            status=StatusCode.RESOURCE_LIMIT_EXCEEDED,
+                            status=to_proto_status(StatusCode.RESOURCE_LIMIT_EXCEEDED),
                         )
                         logger.info(
                             "Mock handler rejecting reservation for %s due to limit",
@@ -953,7 +958,7 @@ async def test_circuit_v2_fails_with_invalid_SPR():
 
                     response = proto.HopMessage(
                         type=proto.HopMessage.RESERVE,
-                        status=status_code,
+                        status=to_proto_status(status_code),
                     )
                     await write_delimited_msg(stream, response)
                     await trio.sleep(2)  # Brief wait for client to read
@@ -963,7 +968,7 @@ async def test_circuit_v2_fails_with_invalid_SPR():
                 try:
                     error_response = proto.HopMessage(
                         type=proto.HopMessage.RESERVE,
-                        status=StatusCode.MALFORMED_MESSAGE,
+                        status=to_proto_status(StatusCode.MALFORMED_MESSAGE),
                     )
                     await write_delimited_msg(stream, error_response)
                 except Exception:

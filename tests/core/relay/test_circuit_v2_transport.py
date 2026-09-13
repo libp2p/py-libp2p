@@ -37,7 +37,11 @@ from libp2p.relay.circuit_v2.protocol import (
     CircuitV2Protocol,
     RelayLimits,
 )
-from libp2p.relay.circuit_v2.protocol_buffer import StatusCode, create_status
+from libp2p.relay.circuit_v2.protocol_buffer import (
+    StatusCode,
+    create_status,
+    to_proto_status,
+)
 from libp2p.relay.circuit_v2.transport import (
     ID,
     PROTOCOL_ID,
@@ -1668,7 +1672,7 @@ async def test_dial_peer_info_creates_and_stores_circuit(protocol):
     peerstore.addrs.return_value = [relay_addr]
 
     status = create_status(code=StatusCode.OK)
-    hop_resp = HopMessage(type=HopMessage.STATUS, status=status)
+    hop_resp = HopMessage(type=HopMessage.STATUS, status=to_proto_status(status))
     relay_stream.read.return_value = hop_resp.SerializeToString()
     relay_stream.write = AsyncMock()
 
@@ -1707,7 +1711,7 @@ async def test_dial_peer_info_includes_reservation_proof(protocol):
     framed = encode_varint_prefixed(
         HopMessage(
             type=HopMessage.STATUS,
-            status=create_status(code=StatusCode.OK),
+            status=to_proto_status(create_status(code=StatusCode.OK)),
         ).SerializeToString()
     )
     relay_stream.read = AsyncMock(
@@ -1774,7 +1778,7 @@ async def test_dial_peer_info_opens_new_stream_after_reserve(protocol):
     framed = encode_varint_prefixed(
         HopMessage(
             type=HopMessage.STATUS,
-            status=create_status(code=StatusCode.OK),
+            status=to_proto_status(create_status(code=StatusCode.OK)),
         ).SerializeToString()
     )
     connect_stream.read = AsyncMock(
@@ -1838,7 +1842,7 @@ async def test_dial_peer_info_reuses_stream_when_client_disabled(protocol):
     relay_stream.read = AsyncMock(
         return_value=HopMessage(
             type=HopMessage.STATUS,
-            status=create_status(code=StatusCode.OK),
+            status=to_proto_status(create_status(code=StatusCode.OK)),
         ).SerializeToString()
     )
     mock_host.new_stream = AsyncMock(return_value=relay_stream)

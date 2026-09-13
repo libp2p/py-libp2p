@@ -14,7 +14,10 @@ from libp2p.relay.circuit_v2.protocol import (
     PROTOCOL_ID,
     STOP_PROTOCOL_ID,
 )
-from libp2p.relay.circuit_v2.protocol_buffer import StatusCode
+from libp2p.relay.circuit_v2.protocol_buffer import (
+    StatusCode,
+    to_proto_status,
+)
 from libp2p.relay.circuit_v2.utils import (
     read_delimited_msg,
     write_delimited_msg,
@@ -53,7 +56,7 @@ async def simple_stream_handler(stream):
             # Create a valid response
             response = proto.HopMessage(
                 type=proto.HopMessage.STATUS,
-                status=StatusCode.OK,
+                status=to_proto_status(StatusCode.OK),
                 reservation=proto.Reservation(
                     expire=int(time.time()) + 3600,  # 1 hour from now
                 ),

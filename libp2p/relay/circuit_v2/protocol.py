@@ -585,7 +585,11 @@ class CircuitV2Protocol(Service):
                 try:
                     secured = getattr(stream.muxed_conn, "secured_conn", None)
                     get_remote = getattr(secured, "get_remote_address", None)
-                    remote = get_remote() if callable(get_remote) else None
+                    remote: tuple[str, int] | None = None
+                    if callable(get_remote):
+                        maybe_remote = get_remote()
+                        if isinstance(maybe_remote, tuple) and len(maybe_remote) == 2:
+                            remote = maybe_remote
                     if remote:
                         host, port = remote[0], int(remote[1])
                         ip_proto = "ip6" if ":" in host else "ip4"
@@ -880,21 +884,8 @@ class CircuitV2Protocol(Service):
                     logger.error("Error writing to destination stream: %s", str(e))
                     break
 
-                # Update resource usage
-                reservation = self.resource_manager.get_reservation(peer_id)
-                if reservation:
-                    reservation.data_used += len(data)
-                    if reservation.data_used >= reservation.limits.data:
-                        logger.warning("Data limit exceeded for peer %s", peer_id)
-                        await self._send_status(
-                            src_stream,
-                            StatusCode.RESOURCE_LIMIT_EXCEEDED,
-                            "Resource limit exceeded",
-                        )
-                        break
-
         except Exception as e:
-            logger.error(f"Error relaying data: {e}")
+            logger.error("Error relaying data: %s", e)
         finally:
             # Clean up streams and remove from active relays
             # Only reset streams once to avoid double-reset issues
@@ -915,7 +906,9 @@ class CircuitV2Protocol(Service):
         try:
             logger.debug("Sending status message with code %s: %s", code, message)
             with trio.fail_after(STREAM_WRITE_TIMEOUT):
-                # Send destination records to source in case of HOP status OK message
+                # NOTE: `envelope` is accepted for future use (e.g. attaching
+                # the destination's signed record) but intentionally not sent:
+                # STATUS responses carry only type + status on the wire.
                 status_msg = HopMessage(
                     type=HopMessage.STATUS,
                     status=to_proto_status(code),
