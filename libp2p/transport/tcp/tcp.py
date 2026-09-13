@@ -473,14 +473,12 @@ class TCP(ITransport):
             )
 
         try:
-            logger.debug("=== OPENING TCP STREAM ===")
-            logger.debug("Host: %s", host_str)
-            logger.debug("Port: %d", port_int)
+            logger.debug("dial tcp %s:%d", host_str, port_int)
             if source is None:
                 stream = await trio.open_tcp_stream(host_str, port_int)
             else:
                 stream = await _open_tcp_stream_from(host_str, port_int, source)
-            logger.debug("Successfully opened TCP stream")
+            logger.debug("tcp stream opened to %s:%d", host_str, port_int)
         except OSError as error:
             logger.error("Failed to open TCP stream: %s", error)
             raise OpenConnectionError(

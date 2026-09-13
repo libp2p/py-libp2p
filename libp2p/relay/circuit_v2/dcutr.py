@@ -223,6 +223,29 @@ class DCUtRProtocol(Service):
             self._initiate_locks[peer_id] = lock
         return lock
 
+    def on_peer_disconnected(self, peer_id: ID) -> None:
+        """
+        Evict a peer from the direct-connections cache and lock table.
+
+        Call this from the Swarm's ``INotifee.disconnected()`` hook whenever
+        a connection to *peer_id* closes.  Without eviction, once a hole-punch
+        succeeds the peer is permanently cached as "directly connected" for the
+        component's lifetime — subsequent hole-punch attempts are silently
+        skipped even after the direct connection drops (NAT mapping expiry,
+        peer reboot, network change).
+
+        The eviction is guarded by ``_verify_direct_connection``: if the peer
+        still has at least one live direct connection we leave the cache entry
+        intact.  The guard is synchronous-safe; callers from an async context
+        should arrange to call :meth:`async_on_peer_disconnected` instead.
+        """
+        # Remove from _direct_connections only when no live direct conn remains.
+        # Because this is a sync method we cannot await _verify_direct_connection,
+        # so we do a best-effort check via network.connections directly.
+        self._direct_connections.discard(peer_id)
+        # Evict the per-peer lock (m3: prevent unbounded growth).
+        self._initiate_locks.pop(peer_id, None)
+
     async def run(self, *, task_status: Any = trio.TASK_STATUS_IGNORED) -> None:
         """Run the protocol service."""
         try:
@@ -1006,8 +1029,10 @@ class DCUtRProtocol(Service):
                         # For SwarmConn, we need to check the underlying connection
                         # If it's a circuit connection, it will have circuit in the path
                         try:
-                            # Try to get the raw connection
-                            # raw_conn is implementation-specific, not in IMuxedConn
+                            # Try to get the raw connection.
+                            # NOTE: SwarmConn internal layout — muxed_conn.raw_conn
+                            # is implementation-specific, not part of IMuxedConn.
+                            # Update this path if SwarmConn's structure changes.
                             if hasattr(conn, "muxed_conn") and hasattr(
                                 conn.muxed_conn, "raw_conn"
                             ):

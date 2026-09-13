@@ -157,7 +157,12 @@ def _prefer_circuit_addr(
     try:
         network = host.get_network()
         conns = (getattr(network, "connections", {}) or {}).get(peer_id, [])
-    except Exception:
+    except Exception as exc:
+        logger.debug(
+            "_prefer_circuit_addr: failed to read connections for %s: %s",
+            peer_id,
+            exc,
+        )
         return fallback
     if not isinstance(conns, list):
         conns = [conns]

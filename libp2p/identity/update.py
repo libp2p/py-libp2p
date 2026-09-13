@@ -82,12 +82,14 @@ async def update_peerstore_from_identify(
                     addrs.append(ma)
 
             # Store all advertised listen addresses, including private ones.
-            # Filtering happens at dial time, not storage time (matching
-            # go-libp2p). Dropping private addresses here breaks hole
-            # punching: NAT'd peers can only be reached via the private
-            # addresses their relayed/observed connections reveal, and
-            # relay reservations must report usable addresses for strict
-            # implementations to accept them.
+            # Intentional: filtering happens at dial time, not storage time
+            # (matching go-libp2p). Dropping private addresses here breaks
+            # hole punching: NAT'd peers are only reachable via private
+            # addresses their relayed/observed connections reveal, and relay
+            # reservations must report usable addresses for strict
+            # implementations to accept them. Public-only peers will never
+            # be dialed at private addresses because the Swarm's transport
+            # manager skips addresses that the transport cannot reach.
             # Replace old addresses (peer is authoritative source for its own addrs)
             try:
                 peerstore.clear_addrs(peer_id)

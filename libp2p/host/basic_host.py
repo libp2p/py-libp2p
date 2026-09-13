@@ -158,7 +158,18 @@ def _is_relayed_connection(conn: Any) -> bool:
         addrs: Any = get_addrs() or []
     except Exception:
         return False
-    return any("/p2p-circuit" in str(a) for a in addrs)
+    # Use protocol-code inspection rather than string repr: the repr format is
+    # an implementation detail of python-multiaddr and could change silently.
+    for a in addrs:
+        try:
+            if any(p.name == "p2p-circuit" for p in a.protocols()):
+                return True
+        except Exception:
+            # Fall back to string check if Multiaddr.protocols() is unavailable
+            # (e.g. raw bytes or a mock in tests).
+            if "/p2p-circuit" in str(a):
+                return True
+    return False
 
 
 class _IdentifyNotifee(INotifee):
