@@ -358,6 +358,62 @@ class TestQUICConnection:
         assert int(stream.stream_id) not in quic_connection._streams
         # Note: Count updates is async, so we can't test it directly here
 
+    @pytest.mark.trio
+    async def test_late_inbound_fin_does_not_requeue_accept(
+        self,
+        mock_quic_connection: Mock,
+        mock_quic_transport: Mock,
+        mock_resource_scope: MockResourceScope,
+    ):
+        """Late FIN-only on a removed inbound stream must not starve accept_stream."""
+        from aioquic.quic.events import StreamDataReceived
+
+        private_key = create_new_key_pair().private_key
+        peer_id = ID.from_pubkey(private_key.get_public_key())
+        server = QUICConnection(
+            quic_connection=mock_quic_connection,
+            remote_addr=("127.0.0.1", 4001),
+            remote_peer_id=peer_id,
+            local_peer_id=peer_id,
+            is_initiator=False,
+            maddr=Multiaddr("/ip4/127.0.0.1/udp/4001/quic"),
+            transport=mock_quic_transport,
+            resource_scope=mock_resource_scope,
+        )
+        server._started = True
+
+        await server._handle_stream_data(
+            StreamDataReceived(data=b"hello", end_stream=True, stream_id=0)
+        )
+        assert len(server._stream_accept_queue) == 1
+        assert 0 in server._streams
+        inbound_after_create = server._inbound_stream_count
+
+        accepted = server._stream_accept_queue.pop(0)
+        server._stream_accept_event = trio.Event()
+        server._remove_stream(int(accepted.stream_id))
+        assert 0 not in server._streams
+        assert len(server._stream_accept_queue) == 0
+
+        await server._handle_stream_data(
+            StreamDataReceived(data=b"", end_stream=True, stream_id=0)
+        )
+        assert len(server._stream_accept_queue) == 0
+        assert 0 not in server._streams
+        assert server._inbound_stream_count == inbound_after_create
+
+        await server._handle_stream_data_batch(
+            [StreamDataReceived(data=b"", end_stream=True, stream_id=0)]
+        )
+        assert len(server._stream_accept_queue) == 0
+        assert 0 not in server._streams
+
+        await server._handle_stream_data(
+            StreamDataReceived(data=b"new", end_stream=False, stream_id=4)
+        )
+        assert 4 in server._streams
+        assert len(server._stream_accept_queue) == 1
+
     # Error handling tests
 
     @pytest.mark.trio

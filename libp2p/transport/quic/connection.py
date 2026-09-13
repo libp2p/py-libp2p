@@ -1101,6 +1101,26 @@ class QUICConnection(IRawConnection, IMuxedConn):
             stream = self._get_stream_fast(stream_id)  # Use fast lookup
 
             if not stream:
+                # After _remove_stream(), late FIN-only events must not recreate
+                # wrappers (inbound ghosts starve accept_stream under load).
+                if self._is_fin_only_events(stream_events):
+                    direction = (
+                        "inbound" if self._is_incoming_stream(stream_id) else "outbound"
+                    )
+                    logger.debug(
+                        "Ignoring late FIN on closed %s stream %s "
+                        "(is_initiator=%s, quic.is_client=%s)",
+                        direction,
+                        stream_id,
+                        self._is_initiator,
+                        getattr(
+                            getattr(self._quic, "configuration", None),
+                            "is_client",
+                            None,
+                        ),
+                    )
+                    continue
+
                 if self._is_incoming_stream(stream_id):
                     try:
                         stream = await self._create_inbound_stream(stream_id)
@@ -1110,28 +1130,6 @@ class QUICConnection(IRawConnection, IMuxedConn):
                         await self._transmit()
                         continue
                 else:
-                    # Common benign case: we closed and removed a locally-initiated
-                    # stream wrapper, then received a late FIN-only event.
-                    fin_only = True
-                    for e in stream_events:
-                        data = getattr(e, "data", b"")
-                        end_stream = getattr(e, "end_stream", False)
-                        if data or not end_stream:
-                            fin_only = False
-                            break
-                    if fin_only:
-                        logger.debug(
-                            "Ignoring late FIN on closed outbound stream %s "
-                            "(is_initiator=%s, quic.is_client=%s)",
-                            stream_id,
-                            self._is_initiator,
-                            getattr(
-                                getattr(self._quic, "configuration", None),
-                                "is_client",
-                                None,
-                            ),
-                        )
-                        continue
                     is_client = getattr(
                         getattr(self._quic, "configuration", None), "is_client", None
                     )
@@ -1504,23 +1502,30 @@ class QUICConnection(IRawConnection, IMuxedConn):
             stream = self._get_stream_fast(stream_id)
 
             if not stream:
+                # After _remove_stream(), late FIN-only events must not recreate
+                # wrappers (inbound ghosts starve accept_stream under load).
+                if self._is_fin_only_event(event):
+                    direction = (
+                        "inbound" if self._is_incoming_stream(stream_id) else "outbound"
+                    )
+                    logger.debug(
+                        "Ignoring late FIN on closed %s stream %s "
+                        "(is_initiator=%s, quic.is_client=%s)",
+                        direction,
+                        stream_id,
+                        self._is_initiator,
+                        getattr(
+                            getattr(self._quic, "configuration", None),
+                            "is_client",
+                            None,
+                        ),
+                    )
+                    return
+
                 if self._is_incoming_stream(stream_id):
                     logger.debug(f"Creating new incoming stream {stream_id}")
                     stream = await self._create_inbound_stream(stream_id)
                 else:
-                    if not event.data and event.end_stream:
-                        logger.debug(
-                            "Ignoring late FIN on closed outbound stream %s "
-                            "(is_initiator=%s, quic.is_client=%s)",
-                            stream_id,
-                            self._is_initiator,
-                            getattr(
-                                getattr(self._quic, "configuration", None),
-                                "is_client",
-                                None,
-                            ),
-                        )
-                        return
                     is_client = getattr(
                         getattr(self._quic, "configuration", None), "is_client", None
                     )
@@ -1557,6 +1562,23 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         # Create new inbound stream
         return await self._create_inbound_stream(stream_id)
+
+    @staticmethod
+    def _is_fin_only_event(event: events.StreamDataReceived) -> bool:
+        """Return True when the event is an empty end-of-stream (FIN-only)."""
+        return (not event.data) and bool(event.end_stream)
+
+    @staticmethod
+    def _is_fin_only_events(events_list: list[QuicEvent]) -> bool:
+        """Return True when every event in the batch is FIN-only."""
+        if not events_list:
+            return False
+        for event in events_list:
+            data = getattr(event, "data", b"")
+            end_stream = getattr(event, "end_stream", False)
+            if data or not end_stream:
+                return False
+        return True
 
     def _is_incoming_stream(self, stream_id: int) -> bool:
         """

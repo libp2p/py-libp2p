@@ -1,0 +1,1 @@
+Ignore late FIN-only events on already-closed inbound QUIC streams so they no longer starve ``accept_stream()`` under concurrent load.

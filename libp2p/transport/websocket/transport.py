@@ -920,7 +920,7 @@ class WebsocketTransport(ITransport):
         ):
             self._background_nursery.start_soon(self._initialize_autotls)
 
-        return WebsocketListener(
+        listener = WebsocketListener(
             handler,
             self._upgrader,
             WebsocketListenerConfig(
@@ -937,6 +937,8 @@ class WebsocketTransport(ITransport):
             ),
             peer_id=self._peer_id,
         )
+        self._active_listeners.add(listener)
+        return listener
 
     async def get_connections(self) -> dict[str, P2PWebSocketConnection]:
         """Get all active connections."""
@@ -957,6 +959,29 @@ class WebsocketTransport(ITransport):
             "proxy_connections": self._proxy_connections,
             "has_proxy_config": bool(self._config.proxy_url),
         }
+
+    async def close(self) -> None:
+        """
+        Close all tracked WebSocket connections and listeners.
+
+        Invoked from ``Swarm.close()`` / ``Swarm.run()`` shutdown via
+        ``TransportManager.close_all()`` so dialed/accepted sockets are released
+        (#1498).
+        """
+        async with self._connection_lock:
+            connections = list(self._connections.values())
+            self._connections.clear()
+            self._current_connections = 0
+        listeners = list(self._active_listeners)
+        self._active_listeners.clear()
+
+        async with trio.open_nursery() as nursery:
+            for connection in connections:
+                nursery.start_soon(connection.close)
+            for listener in listeners:
+                nursery.start_soon(listener.close)
+
+        logger.debug("WebSocket transport closed")
 
     def resolve(self, maddr: Multiaddr) -> list[Multiaddr]:
         """

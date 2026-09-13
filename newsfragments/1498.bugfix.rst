@@ -1,0 +1,4 @@
+Clear residual unclosed-socket / event-loop ``ResourceWarning`` leaks across the
+core test suite and enable ``filterwarnings = ["error::ResourceWarning"]`` so
+new socket leaks fail CI. Completes the deferred guard from #1485 / #1486 and
+closes #1498.

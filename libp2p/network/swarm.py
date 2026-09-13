@@ -457,6 +457,14 @@ class Swarm(Service, INetworkService):
                     except Exception as e:
                         logger.debug("Error closing listener during shutdown: %s", e)
 
+                # Close transports (QUIC/WebSocket/WebTransport) so UDP sockets
+                # and session state are released on the manager-stop path too.
+                # Swarm.close() already does this; keep parity here (#1498).
+                try:
+                    await self.transport_manager.close_all()
+                except Exception as e:
+                    logger.warning("Error closing transports during shutdown: %s", e)
+
                 # Cancel the background nursery (transport / auto-connector).
                 nursery.cancel_scope.cancel()
                 self.background_nursery = None

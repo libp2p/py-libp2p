@@ -338,45 +338,50 @@ async def test_identify_multi_transport_host_addresses(security_protocol):
         background_trio_service(host_a.get_network()),
         background_trio_service(host_b.get_network()),
     ):
-        await host_a.get_network().listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
-        await host_a.get_network().listen(Multiaddr("/ip4/127.0.0.1/tcp/0/ws"))
-        await host_b.get_network().listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
+        try:
+            await host_a.get_network().listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
+            await host_a.get_network().listen(Multiaddr("/ip4/127.0.0.1/tcp/0/ws"))
+            await host_b.get_network().listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
 
-        await wait_for_host_addrs(host_a, min_count=2)
+            await wait_for_host_addrs(host_a, min_count=2)
 
-        # host_b dials host_a using one of its addresses
-        host_a.set_stream_handler(ID, identify_handler_for(host_a))
+            # host_b dials host_a using one of its addresses
+            host_a.set_stream_handler(ID, identify_handler_for(host_a))
 
-        host_a_addrs = host_a.get_addrs()
-        assert len(host_a_addrs) == 2, "host_a should have 2 listen addresses"
+            host_a_addrs = host_a.get_addrs()
+            assert len(host_a_addrs) == 2, "host_a should have 2 listen addresses"
 
-        # We dial using the first address
-        maddr = host_a_addrs[0].encapsulate(
-            Multiaddr(f"/p2p/{host_a.get_id().to_base58()}")
-        )
-        info = info_from_p2p_addr(maddr)
-
-        # Connect
-        await host_b.connect(info)
-
-        if hasattr(host_b, "_identify_inflight"):
-            from libp2p.host.basic_host import BasicHost
-
-            assert isinstance(host_b, BasicHost)
-            deadline = trio.current_time() + 10.0
-            while (
-                host_a.get_id() in host_b._identify_inflight
-                and trio.current_time() < deadline
-            ):
-                await trio.sleep(0.01)
-
-        # Make identify request
-        stream = await host_b.new_stream(host_a.get_id(), (ID,))
-        result = await read_and_parse_identify(stream, use_varint_format=True)
-        await stream.close()
-
-        # Verify response contains all addresses
-        for addr in host_a_addrs:
-            assert _multiaddr_to_bytes(addr) in result.listen_addrs, (
-                f"Address {addr} not advertised by host_a"
+            # We dial using the first address
+            maddr = host_a_addrs[0].encapsulate(
+                Multiaddr(f"/p2p/{host_a.get_id().to_base58()}")
             )
+            info = info_from_p2p_addr(maddr)
+
+            # Connect
+            await host_b.connect(info)
+
+            if hasattr(host_b, "_identify_inflight"):
+                from libp2p.host.basic_host import BasicHost
+
+                assert isinstance(host_b, BasicHost)
+                deadline = trio.current_time() + 10.0
+                while (
+                    host_a.get_id() in host_b._identify_inflight
+                    and trio.current_time() < deadline
+                ):
+                    await trio.sleep(0.01)
+
+            # Make identify request
+            stream = await host_b.new_stream(host_a.get_id(), (ID,))
+            result = await read_and_parse_identify(stream, use_varint_format=True)
+            await stream.close()
+
+            # Verify response contains all addresses
+            for addr in host_a_addrs:
+                assert _multiaddr_to_bytes(addr) in result.listen_addrs, (
+                    f"Address {addr} not advertised by host_a"
+                )
+        finally:
+            # Close while services are still running (matches HostFactory).
+            await host_a.close()
+            await host_b.close()
