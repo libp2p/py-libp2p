@@ -64,23 +64,32 @@ async def test_health_monitor_updates_rtt_on_real_network() -> None:
     host_a = BasicHost(swarm_a)
     host_b = BasicHost(swarm_b)
 
-    async with background_trio_service(swarm_a):
-        async with background_trio_service(swarm_b):
-            await swarm_a.listen(bind_a)
-            await swarm_b.listen(bind_b)
-            await connect(host_a, host_b)
+    try:
+        async with background_trio_service(swarm_a):
+            async with background_trio_service(swarm_b):
+                try:
+                    await swarm_a.listen(bind_a)
+                    await swarm_b.listen(bind_b)
+                    await connect(host_a, host_b)
 
-            peer_a = host_a.get_id()
-            conn = cast(SwarmConn, swarm_b.get_connections(peer_a)[0])
-            swarm_b.initialize_connection_health(peer_a, conn)
+                    peer_a = host_a.get_id()
+                    conn = cast(SwarmConn, swarm_b.get_connections(peer_a)[0])
+                    swarm_b.initialize_connection_health(peer_a, conn)
 
-            monitor = swarm_b._health_monitor
-            assert monitor is not None
-            await monitor._check_connection_health(peer_a, conn)
+                    monitor = swarm_b._health_monitor
+                    assert monitor is not None
+                    await monitor._check_connection_health(peer_a, conn)
 
-            summary = host_b.get_connection_health(peer_a)
-            assert summary["average_latency_ms"] >= 0
-            assert summary["average_health_score"] > 0
+                    summary = host_b.get_connection_health(peer_a)
+                    assert summary["average_latency_ms"] >= 0
+                    assert summary["average_health_score"] > 0
+                finally:
+                    await host_a.close()
+                    await host_b.close()
+    except Exception:
+        await host_a.close()
+        await host_b.close()
+        raise
 
 
 @pytest.mark.trio
@@ -105,27 +114,36 @@ async def test_health_monitor_detects_failed_ping_on_real_network() -> None:
     host_a = BasicHost(swarm_a)
     host_b = BasicHost(swarm_b)
 
-    async with background_trio_service(swarm_a):
-        async with background_trio_service(swarm_b):
-            await swarm_a.listen(bind_a)
-            await swarm_b.listen(bind_b)
-            await connect(host_a, host_b)
+    try:
+        async with background_trio_service(swarm_a):
+            async with background_trio_service(swarm_b):
+                try:
+                    await swarm_a.listen(bind_a)
+                    await swarm_b.listen(bind_b)
+                    await connect(host_a, host_b)
 
-            peer_a = host_a.get_id()
-            conn = cast(SwarmConn, swarm_b.get_connections(peer_a)[0])
-            swarm_b.initialize_connection_health(peer_a, conn)
+                    peer_a = host_a.get_id()
+                    conn = cast(SwarmConn, swarm_b.get_connections(peer_a)[0])
+                    swarm_b.initialize_connection_health(peer_a, conn)
 
-            monitor = swarm_b._health_monitor
-            assert monitor is not None
+                    monitor = swarm_b._health_monitor
+                    assert monitor is not None
 
-            await monitor._check_connection_health(peer_a, conn)
-            health = swarm_b.health_data[peer_a][conn]
-            assert health.ping_success_rate > 0.5
+                    await monitor._check_connection_health(peer_a, conn)
+                    health = swarm_b.health_data[peer_a][conn]
+                    assert health.ping_success_rate > 0.5
 
-            await conn.close()
-            await trio.sleep(0.05)
+                    await conn.close()
+                    await trio.sleep(0.05)
 
-            result = await monitor._ping_connection(conn)
-            assert result.success is False
-            health.update_ping_metrics(0.0, False)
-            assert health.ping_success_rate < 1.0
+                    result = await monitor._ping_connection(conn)
+                    assert result.success is False
+                    health.update_ping_metrics(0.0, False)
+                    assert health.ping_success_rate < 1.0
+                finally:
+                    await host_a.close()
+                    await host_b.close()
+    except Exception:
+        await host_a.close()
+        await host_b.close()
+        raise
