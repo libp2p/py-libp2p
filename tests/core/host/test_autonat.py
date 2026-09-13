@@ -157,7 +157,9 @@ async def test_filter_by_observed_ip():
 
 def test_is_relayed_stream():
     """Streams over p2p-circuit connections are detected as relayed."""
-    assert _is_relayed_stream(object()) is False
+    from unittest.mock import MagicMock
+
+    assert _is_relayed_stream(MagicMock(muxed_conn=None)) is False
 
 
 def _dial_request(peer_id: ID, addrs: list[bytes]) -> Message:

@@ -25,7 +25,7 @@ if _version_not_supported:
     )
 
 
-class AutoNATStub(object):
+class AutoNATStub:
     """AutoNAT service definition (libp2p/specs autonat-v1, Recommendation).
     """
 
@@ -42,7 +42,7 @@ class AutoNATStub(object):
                 _registered_method=True)
 
 
-class AutoNATServicer(object):
+class AutoNATServicer:
     """AutoNAT service definition (libp2p/specs autonat-v1, Recommendation).
     """
 
@@ -68,7 +68,7 @@ def add_AutoNATServicer_to_server(servicer, server):
 
 
  # This class is part of an EXPERIMENTAL API.
-class AutoNAT(object):
+class AutoNAT:
     """AutoNAT service definition (libp2p/specs autonat-v1, Recommendation).
     """
 
