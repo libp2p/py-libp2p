@@ -109,6 +109,30 @@ async def test_update_status_needs_more_than_three_confirmations():
 
 
 @pytest.mark.trio
+async def test_try_dial():
+    """_try_dial returns the first dialable address, None if all fail."""
+    async with HostFactory.create_batch_and_listen(2) as hosts:
+        host1, host2 = hosts
+        service = AutoNATService(host1, serve=False)
+        peer_id = host2.get_id()
+        addr = b"/ip4/127.0.0.1/tcp/4001"
+
+        with patch.object(host1, "connect", new_callable=AsyncMock) as mock_connect:
+            result = await service._try_dial(peer_id, [addr])
+
+            assert result == addr
+            mock_connect.assert_called_once()
+            assert service.dial_results == {}
+
+        with patch.object(host1, "connect", new_callable=AsyncMock) as mock_connect:
+            mock_connect.side_effect = Exception("Connection failed")
+
+            result = await service._try_dial(peer_id, [addr])
+
+            assert result is None
+
+
+@pytest.mark.trio
 async def test_filter_by_observed_ip():
     """Only addresses based on the observed IP may be dialed."""
     async with HostFactory.create_batch_and_listen(1) as hosts:
