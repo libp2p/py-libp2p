@@ -1,4 +1,7 @@
 import logging
+from typing import (
+    Any,
+)
 
 from multiaddr import (
     Multiaddr,
@@ -82,14 +85,13 @@ def _addr_ip(addr: Multiaddr) -> str | None:
             p2p_val = None
         if p2p_val:
             addr = addr.decapsulate(Multiaddr(f"/p2p/{p2p_val}"))
-        try:
-            return _normalize_ip(addr.value_for_protocol("ip4"))
-        except ProtocolLookupError:
-            pass
-        try:
-            return _normalize_ip(addr.value_for_protocol("ip6"))
-        except ProtocolLookupError:
-            pass
+        for proto in ("ip4", "ip6"):
+            try:
+                val = addr.value_for_protocol(proto)
+            except ProtocolLookupError:
+                continue
+            if val is not None:
+                return _normalize_ip(str(val))
     except Exception:
         pass
     return None
@@ -107,7 +109,7 @@ def _is_relayed_stream(stream: INetStream) -> bool:
         get_addrs = getattr(muxed_conn, "get_transport_addresses", None)
         if not callable(get_addrs):
             return False
-        addrs = get_addrs() or []
+        addrs: Any = get_addrs() or []
     except Exception:
         return False
     return any("/p2p-circuit" in str(a) for a in addrs)
