@@ -6,16 +6,19 @@ from multiaddr import (
 )
 import trio
 
+from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.identity.identify.identify import (
     AGENT_VERSION,
     ID,
     PROTOCOL_VERSION,
     _mk_identify_protobuf,
     _multiaddr_to_bytes,
+    _strip_p2p_suffix,
     parse_identify_response,
 )
 from libp2p.network.stream.exceptions import StreamEOF
 from libp2p.peer.envelope import Envelope, consume_envelope, unmarshal_envelope
+from libp2p.peer.id import ID as PeerID
 from libp2p.peer.peer_record import unmarshal_record
 from tests.utils.factories import (
     host_pair_factory,
@@ -25,6 +28,28 @@ from tests.utils.identify_test_helpers import (
 )
 
 logger = logging.getLogger("libp2p.identity.identify-test")
+
+
+def test_strip_p2p_suffix():
+    """_strip_p2p_suffix removes the trailing /p2p peer-id, per the Identify spec."""
+    peer = PeerID.from_pubkey(create_new_key_pair().public_key).to_base58()
+    relay = PeerID.from_pubkey(create_new_key_pair().public_key).to_base58()
+
+    # No /p2p suffix: returned unchanged.
+    plain = Multiaddr("/ip4/1.2.3.4/tcp/4001")
+    assert _strip_p2p_suffix(plain) == plain
+
+    # Single /p2p suffix (ip4 and ip6): stripped down to the transport addr.
+    assert _strip_p2p_suffix(Multiaddr(f"/ip4/1.2.3.4/tcp/4001/p2p/{peer}")) == plain
+    assert _strip_p2p_suffix(Multiaddr(f"/ip6/::1/tcp/9/p2p/{peer}")) == Multiaddr(
+        "/ip6/::1/tcp/9"
+    )
+
+    # Relay/circuit addr: strip ONLY the trailing peer id, keep the relay path.
+    circuit = Multiaddr(f"/ip4/1.2.3.4/tcp/4001/p2p/{relay}/p2p-circuit/p2p/{peer}")
+    assert _strip_p2p_suffix(circuit) == Multiaddr(
+        f"/ip4/1.2.3.4/tcp/4001/p2p/{relay}/p2p-circuit"
+    )
 
 
 @pytest.mark.trio

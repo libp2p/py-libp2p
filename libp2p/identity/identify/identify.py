@@ -4,6 +4,9 @@ import traceback
 from multiaddr import (
     Multiaddr,
 )
+from multiaddr.protocols import (
+    P_P2P,
+)
 import trio
 
 from libp2p.abc import (
@@ -39,16 +42,17 @@ AGENT_VERSION = get_agent_version()
 
 def _strip_p2p_suffix(maddr: Multiaddr) -> Multiaddr:
     """
-    Strip /p2p/{peer_id} suffix from a multiaddr if present.
+    Strip the trailing /p2p/{peer_id} suffix from a multiaddr if present.
 
-    The Identify spec requires listenAddrs to be plain multiaddresses
-    without a /p2p suffix.
+    The Identify spec requires listenAddrs to be plain transport
+    multiaddresses without a /p2p peer-id suffix. Removing the component by
+    protocol code with ``decapsulate_code(P_P2P)`` is value-independent and a
+    no-op when /p2p is absent, so it replaces reconstructing the exact
+    ``/p2p/<value>`` string. For a relay/circuit address it strips only the
+    trailing peer id, preserving the ``/p2p/<relay>/p2p-circuit`` path rather
+    than truncating at the first /p2p.
     """
-    try:
-        p2p_value = maddr.value_for_protocol("p2p")
-    except Exception:
-        return maddr
-    return maddr.decapsulate(Multiaddr(f"/p2p/{p2p_value}"))
+    return maddr.decapsulate_code(P_P2P)
 
 
 def _multiaddr_to_bytes(maddr: Multiaddr) -> bytes:
