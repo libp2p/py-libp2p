@@ -426,26 +426,22 @@ class RelayDiscovery(Service):
                     # Check if reservation was successful. Spec-compliant
                     # relays accept by returning STATUS carrying a
                     # reservation, omitting the (implied OK) status field.
+                    # NOTE: `response.status` is a plain int enum value (no
+                    # `.code` attribute) — compare via StatusCode directly,
+                    # otherwise refusals read as OK.
                     if response.type == HopMessage.STATUS and (
                         response.HasField("reservation")
-                        or getattr(response.status, "code", StatusCode.OK)
-                        == StatusCode.OK
+                        or StatusCode(response.status) == StatusCode.OK
                     ):
                         if response.HasField("status"):
-                            # Access status code directly from protobuf object
-                            status_code = getattr(
-                                response.status, "code", StatusCode.OK
-                            )
+                            status_code = StatusCode(response.status)
 
                             if status_code != StatusCode.OK:
                                 # Reservation failed
-                                error_message = getattr(
-                                    response.status, "message", "Unknown error"
-                                )
                                 logger.warning(
                                     "Reservation request rejected by relay %s: %s",
                                     peer_id,
-                                    error_message,
+                                    status_code,
                                 )
                                 return False
 
@@ -469,8 +465,7 @@ class RelayDiscovery(Service):
                     # Reservation failed
                     error_message = "Unknown error"
                     if response.HasField("status"):
-                        # Access message directly from protobuf object
-                        error_message = getattr(response.status, "message", "")
+                        error_message = str(StatusCode(response.status))
 
                     logger.warning(
                         "Reservation request rejected by relay %s: %s",

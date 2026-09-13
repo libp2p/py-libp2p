@@ -3,7 +3,7 @@
 import logging
 import time
 from typing import Any
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 import trio
@@ -508,20 +508,7 @@ async def test_handle_reserve_returns_signed_reservation_payload():
     reserve_msg = proto.HopMessage(type=proto.HopMessage.RESERVE)
     reserve_msg.peer.id = client_peer_id.to_bytes()
 
-    fake_envelope = Mock()
-    fake_envelope.marshal_envelope.return_value = b"signed-relay-record"
-
-    with (
-        patch(
-            "libp2p.relay.circuit_v2.protocol.env_to_send_in_RPC",
-            return_value=(b"relay-record", None),
-        ),
-        patch(
-            "libp2p.relay.circuit_v2.protocol.unmarshal_envelope",
-            return_value=fake_envelope,
-        ),
-    ):
-        await protocol._handle_reserve(stream, reserve_msg)
+    await protocol._handle_reserve(stream, reserve_msg)
 
     assert stream.write.await_count == 1
     await_args = stream.write.await_args
