@@ -1123,7 +1123,11 @@ class Swarm(Service, INetworkService):
             dial_with_source: Callable[..., Any] | None = getattr(
                 transport, "dial_with_source", None
             )
-            if source is not None and callable(dial_with_source):
+            if (
+                source is not None
+                and dial_with_source is not None
+                and callable(dial_with_source)
+            ):
                 raw_conn = await dial_with_source(addr, source)
             else:
                 raw_conn = await transport.dial(addr)
@@ -1447,7 +1451,11 @@ class Swarm(Service, INetworkService):
             transport, "dial_with_source", None
         )
         try:
-            if source is not None and callable(dial_with_source):
+            if (
+                source is not None
+                and dial_with_source is not None
+                and callable(dial_with_source)
+            ):
                 raw_conn = await dial_with_source(addr, source)
             else:
                 raw_conn = await transport.dial(addr)

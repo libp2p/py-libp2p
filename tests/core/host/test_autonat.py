@@ -257,7 +257,7 @@ class _BytesReader(Reader):
         self._data = data
         self._pos = 0
 
-    async def read(self, n: int = -1) -> bytes:
+    async def read(self, n: int | None = None) -> bytes:
         if n is None or n < 0:
             n = len(self._data) - self._pos
         chunk = self._data[self._pos : self._pos + n]
