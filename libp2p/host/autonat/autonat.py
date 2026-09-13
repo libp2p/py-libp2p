@@ -8,6 +8,9 @@ from multiaddr.exceptions import (
 )
 import trio
 
+from libp2p.abc import (
+    INetStream,
+)
 from libp2p.custom_types import (
     TProtocol,
 )
@@ -16,9 +19,6 @@ from libp2p.host.autonat.pb.autonat_pb2 import (
 )
 from libp2p.host.basic_host import (
     BasicHost,
-)
-from libp2p.network.stream.net_stream import (
-    NetStream,
 )
 from libp2p.peer.id import (
     ID,
@@ -95,7 +95,7 @@ def _addr_ip(addr: Multiaddr) -> str | None:
     return None
 
 
-def _is_relayed_stream(stream: NetStream) -> bool:
+def _is_relayed_stream(stream: INetStream) -> bool:
     """
     Return True if the stream runs over a relayed (p2p-circuit) connection.
 
@@ -162,13 +162,13 @@ class AutoNATService:
     # Server side
     # ------------------------------------------------------------------
 
-    async def handle_stream(self, stream: NetStream) -> None:
+    async def handle_stream(self, stream: INetStream) -> None:
         """
         Process an incoming AutoNAT stream.
 
         Parameters
         ----------
-        stream : NetStream
+        stream : INetStream
             The network stream to handle for AutoNAT protocol communication.
 
         """
@@ -187,7 +187,7 @@ class AutoNATService:
             await stream.close()
 
     @staticmethod
-    def _observed_ip(stream: NetStream) -> str | None:
+    def _observed_ip(stream: INetStream) -> str | None:
         """Return the requester's observed IP, or None if unavailable."""
         try:
             remote = stream.get_remote_address()
@@ -382,8 +382,8 @@ class AutoNATService:
         request = Message()
         request.type = Message.DIAL
         request.dial.peer.id = self.host.get_id().to_bytes()
-        for addr in addrs:
-            request.dial.peer.addrs.append(addr)
+        for raw in addrs:
+            request.dial.peer.addrs.append(raw)
 
         stream = None
         try:
