@@ -131,3 +131,7 @@ async def test_write_msg_stream_reset():
                         # Without StreamReset handling in Pubsub.write_msg, this will
                         # raise an exception
                         await pubsub_a.publish("test", b"crash test")
+
+                        # Close while host.run() is still active (#1498).
+                        await host_b.close()
+                        await host_a.close()

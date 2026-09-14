@@ -592,6 +592,8 @@ async def test_yamux_stress_ping():
                 with trio.fail_after(120):  # Safety timeout
                     await completion_event.wait()
 
+            await client_host.close()
+
         # === Result Summary ===
         logger.info("Ping Stress Test Summary")
         logger.info(f"Total Streams Launched: {STREAM_COUNT}")
@@ -665,6 +667,8 @@ async def test_yamux_stress_ping():
         avg_latency = sum(latencies) / len(latencies)
         logger.info(f"Average Latency: {avg_latency:.2f} ms")
         assert avg_latency < 1000
+
+        await server_host.close()
 
 
 # ============================================================================
