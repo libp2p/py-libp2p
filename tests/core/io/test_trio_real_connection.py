@@ -67,29 +67,34 @@ async def test_read_after_abrupt_reset_raises_error() -> None:
 
         transport = TCP()
         listener = transport.create_listener(on_accept)
-        await listener.listen(LISTEN_MADDR)
-        local_conn = await transport.dial(listener.get_addrs()[0])
-        await ready.wait()
+        try:
+            await listener.listen(LISTEN_MADDR)
+            local_conn = await transport.dial(listener.get_addrs()[0])
+            await ready.wait()
 
-        assert local_conn is not None and remote_conn is not None
+            assert local_conn is not None and remote_conn is not None
 
-        # Force the remote end to send RST on close (not graceful FIN)
-        _force_reset(remote_conn)
-        await remote_conn.close()
+            # Force the remote end to send RST on close (not graceful FIN)
+            _force_reset(remote_conn)
+            await remote_conn.close()
 
-        # Give the OS a moment to deliver the RST
-        await trio.sleep(0.05)
+            # Give the OS a moment to deliver the RST
+            await trio.sleep(0.05)
 
-        # Reading from the local side should raise, not return b""
-        with pytest.raises(ConnectionClosedError) as exc_info:
-            await local_conn.read(1024)
+            # Reading from the local side should raise, not return b""
+            with pytest.raises(ConnectionClosedError) as exc_info:
+                await local_conn.read(1024)
 
-        exc = exc_info.value
-        assert exc.transport == "tcp"
-        logger.info("read() raised ConnectionClosedError on RST: %s", exc)
-
-        await listener.close()
-        nursery.cancel_scope.cancel()
+            exc = exc_info.value
+            assert exc.transport == "tcp"
+            logger.info("read() raised ConnectionClosedError on RST: %s", exc)
+        finally:
+            if local_conn is not None:
+                await local_conn.close()
+            if remote_conn is not None:
+                await remote_conn.close()
+            await listener.close()
+            nursery.cancel_scope.cancel()
 
 
 @pytest.mark.trio
@@ -111,33 +116,38 @@ async def test_write_after_abrupt_reset_raises_error() -> None:
 
         transport = TCP()
         listener = transport.create_listener(on_accept)
-        await listener.listen(LISTEN_MADDR)
-        local_conn = await transport.dial(listener.get_addrs()[0])
-        await ready.wait()
+        try:
+            await listener.listen(LISTEN_MADDR)
+            local_conn = await transport.dial(listener.get_addrs()[0])
+            await ready.wait()
 
-        assert local_conn is not None and remote_conn is not None
+            assert local_conn is not None and remote_conn is not None
 
-        # Force the remote end to send RST on close
-        _force_reset(remote_conn)
-        await remote_conn.close()
+            # Force the remote end to send RST on close
+            _force_reset(remote_conn)
+            await remote_conn.close()
 
-        # Give the OS a moment to deliver the RST
-        await trio.sleep(0.05)
+            # Give the OS a moment to deliver the RST
+            await trio.sleep(0.05)
 
-        # Write until the broken-pipe / reset is detected.
-        # The first write may succeed (kernel buffers it), but subsequent
-        # writes will fail because the peer sent RST.
-        with pytest.raises(ConnectionClosedError) as exc_info:
-            for _ in range(100):
-                await local_conn.write(b"x" * 4096)
-                await trio.sleep(0.01)
+            # Write until the broken-pipe / reset is detected.
+            # The first write may succeed (kernel buffers it), but subsequent
+            # writes will fail because the peer sent RST.
+            with pytest.raises(ConnectionClosedError) as exc_info:
+                for _ in range(100):
+                    await local_conn.write(b"x" * 4096)
+                    await trio.sleep(0.01)
 
-        exc = exc_info.value
-        assert exc.transport == "tcp"
-        logger.info("write() raised ConnectionClosedError on RST: %s", exc)
-
-        await listener.close()
-        nursery.cancel_scope.cancel()
+            exc = exc_info.value
+            assert exc.transport == "tcp"
+            logger.info("write() raised ConnectionClosedError on RST: %s", exc)
+        finally:
+            if local_conn is not None:
+                await local_conn.close()
+            if remote_conn is not None:
+                await remote_conn.close()
+            await listener.close()
+            nursery.cancel_scope.cancel()
 
 
 @pytest.mark.trio
@@ -159,23 +169,28 @@ async def test_graceful_close_read_returns_eof() -> None:
 
         transport = TCP()
         listener = transport.create_listener(on_accept)
-        await listener.listen(LISTEN_MADDR)
-        local_conn = await transport.dial(listener.get_addrs()[0])
-        await ready.wait()
+        try:
+            await listener.listen(LISTEN_MADDR)
+            local_conn = await transport.dial(listener.get_addrs()[0])
+            await ready.wait()
 
-        assert local_conn is not None and remote_conn is not None
+            assert local_conn is not None and remote_conn is not None
 
-        # Graceful close (no SO_LINGER hack) — sends FIN
-        await remote_conn.close()
-        await trio.sleep(0.05)
+            # Graceful close (no SO_LINGER hack) — sends FIN
+            await remote_conn.close()
+            await trio.sleep(0.05)
 
-        # Should return empty bytes (EOF), NOT raise
-        data = await local_conn.read(1024)
-        assert data == b""
-        logger.info("Graceful close correctly returned EOF (b'')")
-
-        await listener.close()
-        nursery.cancel_scope.cancel()
+            # Should return empty bytes (EOF), NOT raise
+            data = await local_conn.read(1024)
+            assert data == b""
+            logger.info("Graceful close correctly returned EOF (b'')")
+        finally:
+            if local_conn is not None:
+                await local_conn.close()
+            if remote_conn is not None:
+                await remote_conn.close()
+            await listener.close()
+            nursery.cancel_scope.cancel()
 
 
 @pytest.mark.trio
@@ -197,22 +212,27 @@ async def test_normal_data_transfer_works() -> None:
 
         transport = TCP()
         listener = transport.create_listener(on_accept)
-        await listener.listen(LISTEN_MADDR)
-        local_conn = await transport.dial(listener.get_addrs()[0])
-        await ready.wait()
+        try:
+            await listener.listen(LISTEN_MADDR)
+            local_conn = await transport.dial(listener.get_addrs()[0])
+            await ready.wait()
 
-        assert local_conn is not None and remote_conn is not None
+            assert local_conn is not None and remote_conn is not None
 
-        # Normal round-trip
-        await local_conn.write(b"hello from dialer")
-        data = await remote_conn.read(1024)
-        assert data == b"hello from dialer"
+            # Normal round-trip
+            await local_conn.write(b"hello from dialer")
+            data = await remote_conn.read(1024)
+            assert data == b"hello from dialer"
 
-        await remote_conn.write(b"hello from listener")
-        data = await local_conn.read(1024)
-        assert data == b"hello from listener"
+            await remote_conn.write(b"hello from listener")
+            data = await local_conn.read(1024)
+            assert data == b"hello from listener"
 
-        logger.info("Normal data transfer works as expected")
-
-        await listener.close()
-        nursery.cancel_scope.cancel()
+            logger.info("Normal data transfer works as expected")
+        finally:
+            if local_conn is not None:
+                await local_conn.close()
+            if remote_conn is not None:
+                await remote_conn.close()
+            await listener.close()
+            nursery.cancel_scope.cancel()
