@@ -51,6 +51,14 @@ What each script shows
 * **compare_versions.py** — side-by-side metrics for ``normal`` / ``spam`` /
   ``churn`` scenarios (optional ``--json``).
 
+The ``churn`` scenario disconnects half the nodes midway through the run and
+pauses their publishing while the remaining nodes continue. After a quarter of
+the run duration (capped at one second), it reconnects them using the shared
+mesh wiring and resumes their publishing. It requires at least two nodes.
+
+The comparison's ``delivery_ratio`` is total received divided by total sent
+across all subscribers, so it can exceed 1.0.
+
 Shared helpers
 --------------
 

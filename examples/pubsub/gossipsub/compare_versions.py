@@ -8,7 +8,7 @@ prints a metrics table (sent / received / delivery ratio). Optional JSON output.
 Scenarios:
   normal — honest publishers only
   spam   — one flooding peer
-  churn  — disconnect/reconnect a subset mid-run
+  churn  — disconnect half the nodes mid-run, then reconnect after up to 1 second
 
 Usage (from repository root):
     python examples/pubsub/gossipsub/compare_versions.py --nodes 4 --duration 8
@@ -170,10 +170,25 @@ async def _run_one_version(
     ) -> None:
         deadline = trio.current_time() + dur
         counter = 0
-        churn_done = False
+        paused: set[DemoNode] = set()
+
+        async def churn_once() -> None:
+            await trio.sleep(dur / 2)
+            paused.update(ctrl.nodes[: len(ctrl.nodes) // 2])
+            for node in paused:
+                if node.host is not None:
+                    for peer_id in node.host.get_connected_peers():
+                        await node.host.disconnect(peer_id)
+            logger.info("[%s] churn: disconnected %s nodes", version, len(paused))
+            await trio.sleep(min(1.0, dur / 4))
+            await ctrl.connect_ring_chord()
+            logger.info("[%s] churn: reconnected %s nodes", version, len(paused))
+            paused.clear()
+
+        if scenario == "churn":
+            nursery.start_soon(churn_once)
         while trio.current_time() < deadline:
-            elapsed = dur - (deadline - trio.current_time())
-            honest = [n for n in ctrl.nodes if n.role == "honest"]
+            honest = [n for n in ctrl.nodes if n.role == "honest" and n not in paused]
             if honest:
                 await random.choice(honest).publish_message(f"{version}_msg_{counter}")
                 counter += 1
@@ -182,11 +197,6 @@ async def _run_one_version(
                     for _ in range(3):
                         await spammer.publish_message(f"{version}_spam_{counter}")
                         counter += 1
-            if scenario == "churn" and not churn_done and elapsed >= dur / 2:
-                # Soft churn: briefly pause publishing from half the nodes.
-                churn_done = True
-                logger.info("[%s] churn: pausing half the publishers", version)
-                await trio.sleep(1.0)
             await trio.sleep(1.0)
 
     await controller.run(
@@ -215,6 +225,7 @@ async def _run_one_version(
 def _print_table(rows: list[dict[str, Any]]) -> None:
     print("\n" + "=" * 72)
     print("COMPARISON TABLE")
+    print("Ratio = total received / total sent across all subscribers; may exceed 1.0.")
     print("=" * 72)
     print(f"{'Version':<8} {'Protocol':<18} {'Sent':>6} {'Recv':>6} {'Ratio':>8}")
     print("-" * 72)
@@ -243,6 +254,10 @@ async def main() -> None:
     parser.add_argument("--json", action="store_true", help="Also print JSON")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
+    if args.nodes < 1 or args.duration < 1:
+        parser.error("--nodes and --duration must be positive")
+    if args.scenario == "churn" and args.nodes < 2:
+        parser.error("churn requires at least 2 nodes")
     configure_logging("gossipsub-compare", args.verbose)
 
     wanted = {v.strip() for v in args.versions.split(",") if v.strip()}
