@@ -1,5 +1,5 @@
 """
-Live two-node demo: Noise XXhfs (X-Wing KEM) over TCP.
+Live two-node demo: Noise XXhfs (ML-KEM-768) over TCP.
 
 Starts a listener and a dialer in the same process using a trio nursery,
 connects them over loopback TCP, performs the PQ Noise handshake, and
@@ -103,7 +103,7 @@ async def run() -> None:
 
     print()
     print("=" * 55)
-    print("  PQ Noise XXhfs (X-Wing KEM) -- live node integration")
+    print("  PQ Noise XXhfs (ML-KEM-768) -- live node integration")
     print("=" * 55)
     print(f"  Handshake + connect : {connect_ms:6.1f} ms")
     print(f"  Total (start->ack)  : {total_ms:6.1f} ms")

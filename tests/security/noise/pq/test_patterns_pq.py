@@ -1,5 +1,5 @@
 """
-Tests for PatternXXhfs: the Noise XXhfs handshake with X-Wing KEM.
+Tests for PatternXXhfs: the Noise XXhfs handshake with ML-KEM-768.
 
 Follows TDD: these tests are written before the implementation and initially fail.
 """
