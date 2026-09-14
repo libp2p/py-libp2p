@@ -466,54 +466,76 @@ async def test_swarm_listen_multiple_addresses_connectivity(security_protocol):
     # Create a swarm and listen on multiple addresses
     swarm1 = SwarmFactory.build(security_protocol=security_protocol)
     async with background_trio_service(swarm1):
-        # Listen on all addresses
-        success = await swarm1.listen(*listen_addrs)
-        assert success, "Should successfully listen on at least one address"
+        try:
+            # Listen on all addresses
+            success = await swarm1.listen(*listen_addrs)
+            assert success, "Should successfully listen on at least one address"
 
-        # Verify all available interfaces are listening
-        assert len(swarm1.listeners) == len(listen_addrs), (
-            f"All {len(listen_addrs)} interfaces should be listening, "
-            f"but only {len(swarm1.listeners)} are"
-        )
+            # Verify all available interfaces are listening
+            assert len(swarm1.listeners) == len(listen_addrs), (
+                f"All {len(listen_addrs)} interfaces should be listening, "
+                f"but only {len(swarm1.listeners)} are"
+            )
 
-        # Create a second swarm to test connections
-        swarm2 = SwarmFactory.build(security_protocol=security_protocol)
-        async with background_trio_service(swarm2):
-            # Test connectivity to each listening address using real libp2p connections
-            for addr_str, listener in swarm1.listeners.items():
-                listener_addrs = listener.get_addrs()
-                for listener_addr in listener_addrs:
-                    # Create a full multiaddr with peer ID for libp2p connection
-                    peer_id = swarm1.get_peer_id()
-                    full_addr = listener_addr.encapsulate(f"/p2p/{peer_id}")
+            # Create a second swarm to test connections
+            swarm2 = SwarmFactory.build(security_protocol=security_protocol)
+            async with background_trio_service(swarm2):
+                try:
+                    # Test connectivity to each listening address using real
+                    # libp2p connections
+                    for addr_str, listener in swarm1.listeners.items():
+                        listener_addrs = listener.get_addrs()
+                        for listener_addr in listener_addrs:
+                            # Create a full multiaddr with peer ID for libp2p
+                            # connection
+                            peer_id = swarm1.get_peer_id()
+                            full_addr = listener_addr.encapsulate(f"/p2p/{peer_id}")
 
-                    # Test real libp2p connection
-                    try:
-                        peer_info = info_from_p2p_addr(full_addr)
+                            # Test real libp2p connection
+                            try:
+                                peer_info = info_from_p2p_addr(full_addr)
 
-                        # Add the peer info to swarm2's peerstore so it knows where to connect  # noqa: E501
-                        swarm2.peerstore.add_addrs(
-                            peer_info.peer_id, [listener_addr], 10000
-                        )
+                                # Add the peer info to swarm2's peerstore so it
+                                # knows where to connect
+                                swarm2.peerstore.add_addrs(
+                                    peer_info.peer_id, [listener_addr], 10000
+                                )
 
-                        await swarm2.dial_peer(peer_info.peer_id)
+                                await swarm2.dial_peer(peer_info.peer_id)
 
-                        # Verify connection was established
-                        assert peer_info.peer_id in swarm2.connections, (
-                            f"Connection to {full_addr} should be established"
-                        )
-                        assert swarm2.get_peer_id() in swarm1.connections, (
-                            f"Connection from {full_addr} should be established"
-                        )
+                                # Verify connection was established
+                                assert peer_info.peer_id in swarm2.connections, (
+                                    f"Connection to {full_addr} should be established"
+                                )
+                                assert swarm2.get_peer_id() in swarm1.connections, (
+                                    f"Connection from {full_addr} should be established"
+                                )
 
-                        # Clean up connection for next interface test
-                        await swarm2.close_peer(peer_info.peer_id)
-                        await trio.sleep(0.05)
+                                # Clean up both sides before the next interface dial
+                                # so accept/dial sockets are not left half-open (#1498).
+                                local_id = swarm2.get_peer_id()
+                                await swarm2.close_peer(peer_info.peer_id)
+                                if local_id in swarm1.connections:
+                                    await swarm1.close_peer(local_id)
+                                await wait_all_tasks_blocked()
+                                await trio.sleep(0.05)
 
-                    except Exception as e:
-                        pytest.fail(
-                            f"Failed to establish libp2p connection to {full_addr}: {e}"
-                        )
+                            except Exception as e:
+                                pytest.fail(
+                                    "Failed to establish libp2p connection to "
+                                    f"{full_addr}: {e}"
+                                )
+                finally:
+                    # Close while the service is still running (HostFactory pattern).
+                    for peer_id in list(swarm2.connections):
+                        await swarm2.close_peer(peer_id)
+                    await wait_all_tasks_blocked()
+                    await swarm2.close()
+        finally:
+            for peer_id in list(swarm1.connections):
+                await swarm1.close_peer(peer_id)
+            await wait_all_tasks_blocked()
+            await swarm1.close()
 
 
 @pytest.mark.trio
