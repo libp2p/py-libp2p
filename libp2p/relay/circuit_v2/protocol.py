@@ -759,9 +759,7 @@ class CircuitV2Protocol(Service):
             # coroutines can share a circuit-wide remaining-bytes counter
             # without a lock (trio nursery serialises the GIL releases, and
             # we only need monotonic decrease, not atomic CAS).
-            circuit_data_limit = (
-                [self.limits.data] if self.limits.data > 0 else None
-            )
+            circuit_data_limit = [self.limits.data] if self.limits.data > 0 else None
             try:
                 async with trio.open_nursery() as nursery:
                     nursery.start_soon(
@@ -785,9 +783,7 @@ class CircuitV2Protocol(Service):
                 # is restored for future circuits.
                 if connection_tracked:
                     self.resource_manager.release_connection(peer_id)
-                    logger.debug(
-                        "Released active connection slot for peer %s", peer_id
-                    )
+                    logger.debug("Released active connection slot for peer %s", peer_id)
 
         except (trio.TooSlowError, ConnectionError) as e:
             logger.error("Error establishing relay connection: %s", str(e))
