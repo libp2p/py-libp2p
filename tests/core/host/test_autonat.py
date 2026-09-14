@@ -159,7 +159,22 @@ def test_is_relayed_stream():
     """Streams over p2p-circuit connections are detected as relayed."""
     from unittest.mock import MagicMock
 
-    assert _is_relayed_stream(MagicMock(muxed_conn=None)) is False
+    # muxed_conn=None: cannot determine relayedness → fail closed (True).
+    assert _is_relayed_stream(MagicMock(muxed_conn=None)) is True
+
+    # Non-relayed direct stream: get_transport_addresses returns a direct addr.
+    direct_muxed = MagicMock()
+    direct_muxed.get_transport_addresses.return_value = [
+        Multiaddr("/ip4/1.2.3.4/tcp/4001")
+    ]
+    assert _is_relayed_stream(MagicMock(muxed_conn=direct_muxed)) is False
+
+    # Relayed stream: get_transport_addresses includes /p2p-circuit.
+    relayed_muxed = MagicMock()
+    relayed_muxed.get_transport_addresses.return_value = [
+        Multiaddr("/ip4/1.2.3.4/tcp/4001/p2p-circuit")
+    ]
+    assert _is_relayed_stream(MagicMock(muxed_conn=relayed_muxed)) is True
 
 
 def _dial_request(peer_id: ID, addrs: list[bytes]) -> Message:

@@ -1390,6 +1390,14 @@ class BasicHost(IHost):
         self._identify_inflight.discard(peer_id)
         if self._observed_addr_manager is not None:
             self._observed_addr_manager.remove_conn(conn)
+        # C2: notify DCUtR so it evicts stale _direct_connections /
+        # _initiate_locks entries for this peer on disconnect.
+        dcutr = getattr(self, "_dcutr_protocol", None)
+        if dcutr is not None and hasattr(dcutr, "on_peer_disconnected"):
+            try:
+                dcutr.on_peer_disconnected(peer_id)
+            except Exception:
+                pass  # non-fatal; eviction is best-effort
 
     def _get_first_connection(self, peer_id: ID) -> INetConn | None:
         connections = self._network.get_connections(peer_id)

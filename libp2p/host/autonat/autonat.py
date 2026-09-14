@@ -1,3 +1,4 @@
+import ipaddress
 import logging
 from typing import (
     Any,
@@ -34,8 +35,13 @@ from libp2p.peer.peerstore import (
 )
 from libp2p.utils.varint import (
     encode_varint_prefixed,
-    read_varint_prefixed_bytes,
+    read_varint_prefixed_bytes_limited,
 )
+
+# AutoNAT messages are small control messages (peer-id + addrs + status).
+# 64 KiB is plenty for a valid request/response while defending against
+# memory exhaustion from untrusted peers.
+_MAX_AUTONAT_MSG_SIZE = 64 * 1024
 
 AUTONAT_PROTOCOL_ID = TProtocol("/libp2p/autonat/1.0.0")
 
@@ -64,11 +70,26 @@ class AutoNATStatus:
 
 
 def _normalize_ip(ip: str) -> str:
-    """Strip IPv4-mapped IPv6 prefix so comparisons work across families."""
+    """
+    Normalize an IP address string for comparison.
+
+    Handles:
+    - IPv4-mapped IPv6 addresses (``::ffff:a.b.c.d``)
+    - Compressed vs. expanded IPv6 representations (e.g. ``::1`` vs
+      ``0:0:0:0:0:0:0:1``)
+
+    Uses ``ipaddress.ip_address`` so any valid representation of the same
+    address compares equal after normalization.
+    """
     lowered = ip.lower()
+    # Strip IPv4-mapped IPv6 prefix first so the bare IPv4 form is parsed.
     if lowered.startswith("::ffff:"):
-        return lowered[7:]
-    return lowered
+        lowered = lowered[7:]
+    try:
+        return str(ipaddress.ip_address(lowered))
+    except ValueError:
+        # Not a valid IP (e.g. a hostname); return lowercased as-is.
+        return lowered
 
 
 def _addr_ip(addr: Multiaddr) -> str | None:
@@ -103,15 +124,37 @@ def _is_relayed_stream(stream: INetStream) -> bool:
 
     The spec forbids serving dial requests received via relayed connections:
     the requester's IP cannot be validated there.
+
+    Fails **closed** (returns True) when transport addresses are not
+    obtainable — if we cannot confirm the connection is direct we cannot
+    safely validate the requester's observed IP, so we refuse the request
+    rather than risk acting as an amplification relay.
     """
     try:
         muxed_conn = getattr(stream, "muxed_conn", None)
         get_addrs = getattr(muxed_conn, "get_transport_addresses", None)
         if not callable(get_addrs):
-            return False
-        addrs: Any = get_addrs() or []
-    except Exception:
-        return False
+            # Cannot determine connection type — fail closed.
+            logger.debug(
+                "_is_relayed_stream: get_transport_addresses unavailable, "
+                "treating as relayed (fail-closed)"
+            )
+            return True
+        addrs: Any = get_addrs()
+        if addrs is None:
+            # No addresses returned — fail closed.
+            logger.debug(
+                "_is_relayed_stream: no transport addresses returned, "
+                "treating as relayed (fail-closed)"
+            )
+            return True
+    except Exception as exc:
+        logger.debug(
+            "_is_relayed_stream: exception reading addresses: %s, "
+            "treating as relayed (fail-closed)",
+            exc,
+        )
+        return True
     return any("/p2p-circuit" in str(a) for a in addrs)
 
 
@@ -154,7 +197,11 @@ class AutoNATService:
         self.host = host
         self.peerstore: IPeerStore = host.get_peerstore()
         self.status = AutoNATStatus.UNKNOWN
-        self.confirmations = confirmations or CONFIRMATIONS_REQUIRED
+        # A1: explicit None check so confirmations=0 (maximally strict) is
+        # honoured rather than silently falling back to CONFIRMATIONS_REQUIRED.
+        self.confirmations = (
+            CONFIRMATIONS_REQUIRED if confirmations is None else confirmations
+        )
         # Server verdicts about us, keyed by reporting server.
         self.dial_results: dict[ID, bool] = {}
         if serve:
@@ -175,7 +222,9 @@ class AutoNATService:
 
         """
         try:
-            request_bytes = await read_varint_prefixed_bytes(stream)
+            request_bytes = await read_varint_prefixed_bytes_limited(
+                stream, _MAX_AUTONAT_MSG_SIZE
+            )
             request = Message()
             request.ParseFromString(request_bytes)
             observed_ip = self._observed_ip(stream)
@@ -392,7 +441,9 @@ class AutoNATService:
             with trio.fail_after(timeout):
                 stream = await self.host.new_stream(server_id, [AUTONAT_PROTOCOL_ID])
                 await stream.write(encode_varint_prefixed(request.SerializeToString()))
-                response_bytes = await read_varint_prefixed_bytes(stream)
+                response_bytes = await read_varint_prefixed_bytes_limited(
+                    stream, _MAX_AUTONAT_MSG_SIZE
+                )
         finally:
             if stream is not None:
                 await stream.close()

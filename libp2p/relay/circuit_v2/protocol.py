@@ -722,10 +722,12 @@ class CircuitV2Protocol(Service):
             self._active_relays[peer_id] = (stream, dst_stream)
             logger.debug("Connection established for peer %s", peer_id)
 
-            # Update reservation connection count
+            # Update reservation connection count (C1: released in finally)
             reservation = self.resource_manager.get_reservation(peer_id)
+            connection_tracked = False
             if reservation:
                 reservation.active_connections += 1
+                connection_tracked = True
                 logger.debug(
                     "Updated active connections for peer %s: %d/%d",
                     peer_id,
@@ -747,24 +749,45 @@ class CircuitV2Protocol(Service):
 
             # Start relaying data. The duration cap (0 = unlimited per
             # spec) becomes a shared deadline checked by both directions.
+            # C3: share a single data budget across both directions so the
+            # per-reservation data limit applies circuit-wide (matching
+            # go/rust behaviour) rather than per-direction.
             circuit_deadline: float | None = None
             if self.limits.duration > 0:
                 circuit_deadline = time.monotonic() + self.limits.duration
-            async with trio.open_nursery() as nursery:
-                nursery.start_soon(
-                    self._relay_data,
-                    stream,
-                    dst_stream,
-                    source_addr,
-                    circuit_deadline,
-                )
-                nursery.start_soon(
-                    self._relay_data,
-                    dst_stream,
-                    stream,
-                    peer_id,
-                    circuit_deadline,
-                )
+            # Use a one-element list as a mutable reference so both relay
+            # coroutines can share a circuit-wide remaining-bytes counter
+            # without a lock (trio nursery serialises the GIL releases, and
+            # we only need monotonic decrease, not atomic CAS).
+            circuit_data_limit = (
+                [self.limits.data] if self.limits.data > 0 else None
+            )
+            try:
+                async with trio.open_nursery() as nursery:
+                    nursery.start_soon(
+                        self._relay_data,
+                        stream,
+                        dst_stream,
+                        source_addr,
+                        circuit_deadline,
+                        circuit_data_limit,
+                    )
+                    nursery.start_soon(
+                        self._relay_data,
+                        dst_stream,
+                        stream,
+                        peer_id,
+                        circuit_deadline,
+                        circuit_data_limit,
+                    )
+            finally:
+                # C1: always release the connection slot so the peer's quota
+                # is restored for future circuits.
+                if connection_tracked:
+                    self.resource_manager.release_connection(peer_id)
+                    logger.debug(
+                        "Released active connection slot for peer %s", peer_id
+                    )
 
         except (trio.TooSlowError, ConnectionError) as e:
             logger.error("Error establishing relay connection: %s", str(e))
@@ -794,6 +817,7 @@ class CircuitV2Protocol(Service):
         dst_stream: INetStream,
         peer_id: ID,
         deadline: float | None = None,
+        circuit_data_limit: list[int] | None = None,
     ) -> None:
         """
         Relay data between two streams.
@@ -810,6 +834,12 @@ class CircuitV2Protocol(Service):
             Monotonic timestamp at which the circuit duration cap lapses
             (None = unlimited). Checked per iteration; on lapse both
             streams reset per spec.
+        circuit_data_limit : list[int] | None
+            One-element list holding the remaining circuit-wide byte budget
+            (None = unlimited). Shared by both relay directions so the data
+            cap is circuit-wide rather than per-direction (C3 fix).  Mutated
+            in place; caller must not read it concurrently outside this pair
+            of coroutines.
 
         """
         try:
@@ -840,10 +870,31 @@ class CircuitV2Protocol(Service):
                 bytes_transferred = len(data)
                 total_bytes += bytes_transferred
 
-                # Track data and check limits
-                if reservation and not self.resource_manager.track_data_transfer(
+                # C3: check the shared circuit-wide budget first.
+                if circuit_data_limit is not None:
+                    remaining = circuit_data_limit[0]
+                    if remaining <= 0 or bytes_transferred > remaining:
+                        logger.warning(
+                            "Circuit-wide data limit exceeded for peer %s: "
+                            "remaining=%d, attempted=%d",
+                            peer_id,
+                            circuit_data_limit[0],
+                            bytes_transferred,
+                        )
+                        await self._send_status(
+                            src_stream,
+                            StatusCode.RESOURCE_LIMIT_EXCEEDED,
+                            "Data transfer limit exceeded",
+                        )
+                        await src_stream.reset()
+                        await dst_stream.reset()
+                        return
+                    circuit_data_limit[0] -= bytes_transferred
+                elif reservation and not self.resource_manager.track_data_transfer(
                     peer_id, bytes_transferred
                 ):
+                    # Fallback to per-direction reservation tracking when no
+                    # shared budget was provided (e.g. older callers / tests).
                     logger.warning(
                         "Data transfer limit exceeded for peer %s: "
                         "current=%d, attempted=%d, limit=%d",

@@ -214,6 +214,11 @@ class DCUtRProtocol(Service):
         # connection"), so at most one outbound session may exist.
         self._initiate_locks: dict[ID, trio.Lock] = {}
         self._nursery: trio.Nursery | None = None
+        # C2: register on the host so BasicHost._on_notifee_disconnected
+        # can call on_peer_disconnected() without external wiring.
+        # Uses a plain attribute so existing hosts without DCUtR are unaffected
+        # (getattr default = None in the notifee hook).
+        host._dcutr_protocol = self  # type: ignore[attr-defined]
 
     def _initiate_lock_for(self, peer_id: ID) -> trio.Lock:
         """Return (creating if needed) the initiation lock for a peer."""
@@ -227,24 +232,29 @@ class DCUtRProtocol(Service):
         """
         Evict a peer from the direct-connections cache and lock table.
 
-        Call this from the Swarm's ``INotifee.disconnected()`` hook whenever
-        a connection to *peer_id* closes.  Without eviction, once a hole-punch
-        succeeds the peer is permanently cached as "directly connected" for the
-        component's lifetime — subsequent hole-punch attempts are silently
-        skipped even after the direct connection drops (NAT mapping expiry,
-        peer reboot, network change).
+        Called from ``BasicHost._on_notifee_disconnected`` whenever a
+        connection to *peer_id* closes.  Without eviction, once a hole-punch
+        succeeds the peer is permanently cached as "directly connected" for
+        the service's lifetime — subsequent auto-drive iterations silently
+        skip the peer even after the direct connection drops (NAT mapping
+        expiry, peer reboot, network change).
 
-        The eviction is guarded by ``_verify_direct_connection``: if the peer
-        still has at least one live direct connection we leave the cache entry
-        intact.  The guard is synchronous-safe; callers from an async context
-        should arrange to call :meth:`async_on_peer_disconnected` instead.
+        This method is synchronous (cannot ``await``) so it cannot call
+        ``_verify_direct_connection``.  It unconditionally discards the
+        cache entry; a false-negative (evicting a peer that still has a
+        live direct conn) is harmless — ``_have_direct_connection`` will
+        reconfirm and re-add it on the next check.
+
+        Also resets ``_hole_punch_attempts`` so a peer that reconnects can
+        be re-punched rather than hitting a stale exhausted-budget entry.
         """
-        # Remove from _direct_connections only when no live direct conn remains.
-        # Because this is a sync method we cannot await _verify_direct_connection,
-        # so we do a best-effort check via network.connections directly.
+        # Unconditional discard — sync context, cannot verify live conn.
         self._direct_connections.discard(peer_id)
         # Evict the per-peer lock (m3: prevent unbounded growth).
         self._initiate_locks.pop(peer_id, None)
+        # Reset attempt budget so the peer can be hole-punched again after
+        # reconnecting (e.g. after NAT mapping expiry / peer reboot).
+        self._hole_punch_attempts.pop(peer_id, None)
 
     async def run(self, *, task_status: Any = trio.TASK_STATUS_IGNORED) -> None:
         """Run the protocol service."""

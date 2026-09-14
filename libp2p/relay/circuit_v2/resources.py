@@ -449,12 +449,30 @@ class RelayResourceManager:
             return self._is_peer_connected(peer_id)
         return False
 
+    def release_connection(self, peer_id: ID) -> None:
+        """
+        Decrement the active connection counter when a circuit tears down.
+
+        Must be paired with every successful ``active_connections += 1``
+        in the CONNECT handler.  Without this, ``can_accept_connection()``
+        returns False permanently after ``max_circuit_conns`` circuits have
+        been established, effectively DoS-ing the reservation for that peer.
+        """
+        reservation = self._reservations.get(peer_id)
+        if reservation is not None and reservation.active_connections > 0:
+            reservation.active_connections -= 1
+
     def refresh_reservation(self, peer_id: ID) -> int:
         existing = self._reservations.get(peer_id)
         if existing and not existing.is_expired():
             # Extend validity in place: replacing the object would wipe
             # data_used/active_connections and let peers reset quotas.
             existing.expires_at = int(time.time() + self.limits.reservation_ttl)
+            # C4: re-sign the voucher so the new expiry is covered by a
+            # fresh signature.  Clients that stored the old voucher will
+            # receive the updated one on the next RESERVE response.
+            # Vouchers are advisory per spec, so sign failure is non-fatal.
+            existing.voucher = existing._sign_voucher()
             return self.limits.reservation_ttl
 
         return 0

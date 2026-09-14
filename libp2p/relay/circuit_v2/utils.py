@@ -14,7 +14,7 @@ from libp2p.peer.id import (
 )
 from libp2p.utils.varint import (
     encode_varint_prefixed,
-    read_varint_prefixed_bytes,
+    read_varint_prefixed_bytes_limited,
 )
 
 from .pb.circuit_pb2 import HopMessage
@@ -22,6 +22,13 @@ from .pb.circuit_pb2 import HopMessage
 logger = logging.getLogger(__name__)
 
 MsgT = TypeVar("MsgT", bound=Message)
+
+# HOP/STOP spec does not define an explicit max message size, but the
+# payload is a small control message (peer-id + limit + status fields).
+# 64 KiB is generous enough for any valid relay message while still
+# preventing a remote peer from forcing us to allocate unbounded memory
+# (matches go-libp2p's MaxMessageSize for circuit/relay streams).
+_MAX_RELAY_MSG_SIZE = 64 * 1024
 
 
 async def write_delimited_msg(stream: Any, msg: Any) -> None:
@@ -38,8 +45,13 @@ async def write_delimited_msg(stream: Any, msg: Any) -> None:
 async def read_delimited_msg(stream: Any, msg_cls: type[MsgT]) -> MsgT:
     """
     Read one unsigned-varint length-prefixed protobuf message from a stream.
+
+    Enforces a 64 KiB cap on the payload length to prevent a remote peer
+    from causing unbounded memory allocation (memory DoS).  DCUtR already
+    uses a 4 KiB cap; we use 64 KiB here because relay messages can
+    include address lists.
     """
-    data = await read_varint_prefixed_bytes(stream)
+    data = await read_varint_prefixed_bytes_limited(stream, _MAX_RELAY_MSG_SIZE)
     msg = msg_cls()
     msg.ParseFromString(data)
     return msg
