@@ -63,7 +63,7 @@ classifiers = [
 Homepage = "https://github.com/libp2p/py-libp2p"
 
 [project.optional-dependencies]
-webrtc = ["aiortc>=1.15,<2.0"]
+webrtc = ["aiortc>=1.15,<2.0", "aioice>=0.10.0,<0.11"]
 health-demo = ["rich>=13.0"]
 
 [project.scripts]

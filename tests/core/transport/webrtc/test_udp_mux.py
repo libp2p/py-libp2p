@@ -608,15 +608,15 @@ class TestIceLite:
         asyncio.run(self._stays_controlled())
 
     async def _stays_controlled(self) -> None:
-        from libp2p.transport.webrtc._udp_mux import make_connection_ice_lite
-
         mux, _ = await UdpMux.create("127.0.0.1", 0)
         try:
             conn = mux.add_ice_connection(
-                "liteufr1", "litepassword1234567890ab", host="127.0.0.1"
+                "liteufr1",
+                "litepassword1234567890ab",
+                host="127.0.0.1",
+                ice_lite=True,
             )
             assert conn.ice_controlling is False
-            make_connection_ice_lite(conn)
             # RFC 8445 §6.1.1: a Lite agent is always controlled and never
             # switches, even if a peer sends an ICE-CONTROLLED attribute (which
             # aioice's request_received would otherwise honour).

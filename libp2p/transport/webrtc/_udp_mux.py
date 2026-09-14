@@ -342,6 +342,7 @@ class UdpMux(asyncio.DatagramProtocol):
         local_password: str,
         *,
         host: str,
+        ice_lite: bool = False,
     ) -> _ice.Connection:
         """
         Create an ``aioice.Connection`` backed by this mux (no own UDP socket).
@@ -352,6 +353,11 @@ class UdpMux(asyncio.DatagramProtocol):
         shared port is injected as the connection's local candidate, so the
         caller must **not** call ``conn.gather_candidates()`` — doing so binds
         additional UDP sockets and defeats the shared-port design.
+
+        Pass ``ice_lite=True`` for the WebRTC-Direct listener path so the
+        connection is a true ICE-Lite agent (respond-only, always controlled);
+        see :func:`make_connection_ice_lite`. Default ``False`` keeps a full
+        controlled agent for tests and non-listener callers.
 
         The caller must:
         1. For each of the dialer's candidates, ``await conn.add_remote_candidate(c)``,
@@ -415,6 +421,8 @@ class UdpMux(asyncio.DatagramProtocol):
         conn._local_candidates_start = True
         conn._local_candidates_end = True
         self.register(local_username, protocol)  # type: ignore[arg-type]
+        if ice_lite:
+            make_connection_ice_lite(conn)
         return conn
 
     # ------------------------------------------------------------------
@@ -472,6 +480,9 @@ def make_connection_ice_lite(conn: _ice.Connection) -> None:
     Touches aioice 0.10.x internals; the asserts fail loudly on a bump that
     renames a slot rather than silently reverting to a full checking agent.
     """
+    assert not conn.ice_controlling, (
+        "ICE-Lite requires a controlled agent (ice_controlling=False)"
+    )
     assert hasattr(conn, "check_start"), "aioice Connection has no check_start"
     assert hasattr(conn, "switch_role"), "aioice Connection has no switch_role"
     _succeeded = _ice.CandidatePair.State.SUCCEEDED
