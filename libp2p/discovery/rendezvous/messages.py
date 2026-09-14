@@ -3,7 +3,7 @@ Message construction helpers for rendezvous protocol.
 """
 
 from multiaddr import Multiaddr
-from multiaddr.exceptions import ProtocolLookupError
+from multiaddr.protocols import P_P2P
 
 from libp2p.peer.id import ID as PeerID
 
@@ -24,12 +24,7 @@ def create_register_message(
         # Advertise bare transport addresses: strict servers reject (or fail
         # to dial back) addresses carrying a `/p2p/<peer-id>` suffix, and the
         # peer ID is already conveyed in `peer_info.id`.
-        try:
-            p2p_val = addr.value_for_protocol("p2p")
-        except ProtocolLookupError:
-            p2p_val = None
-        if p2p_val:
-            addr = addr.decapsulate(Multiaddr(f"/p2p/{p2p_val}"))
+        addr = addr.decapsulate_code(P_P2P)
         peer_info.addrs.append(addr.to_bytes())
 
     msg.register.ns = namespace
