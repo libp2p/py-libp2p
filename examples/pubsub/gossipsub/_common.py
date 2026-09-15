@@ -127,21 +127,26 @@ class DemoNode:
         self.pubsub = Pubsub(self.host, self.gossipsub)
         listen_addrs = [multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{self.port}")]
 
-        async with self.host.run(listen_addrs=listen_addrs):
-            async with background_trio_service(self.pubsub):
-                async with background_trio_service(self.gossipsub):
-                    await self.pubsub.wait_until_ready()
-                    await self.after_ready()
-                    if self.subscribe:
-                        self.subscription = await self.pubsub.subscribe(self.topic)
-                    logger.info(
-                        "Node %s (role=%s fanout_only=%s) started on port %s",
-                        self.node_id,
-                        self.role,
-                        self.fanout_only,
-                        self.port,
-                    )
-                    await trio.sleep_forever()
+        try:
+            async with self.host.run(listen_addrs=listen_addrs):
+                async with background_trio_service(self.pubsub):
+                    async with background_trio_service(self.gossipsub):
+                        await self.pubsub.wait_until_ready()
+                        await self.after_ready()
+                        if self.subscribe:
+                            self.subscription = await self.pubsub.subscribe(self.topic)
+                        logger.info(
+                            "Node %s (role=%s fanout_only=%s) started on port %s",
+                            self.node_id,
+                            self.role,
+                            self.fanout_only,
+                            self.port,
+                        )
+                        await trio.sleep_forever()
+        finally:
+            # Nursery cancellation must not interrupt closing the remaining sockets.
+            with trio.CancelScope(shield=True):  # type: ignore[call-arg]
+                await self.host.close()
 
     async def after_ready(self) -> None:
         """Hook for validators / observation setup after pubsub is ready."""

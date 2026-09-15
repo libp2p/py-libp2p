@@ -12,6 +12,7 @@ import pytest
 import trio
 
 from examples.pubsub.gossipsub import compare_versions
+from libp2p.io.trio import TrioTCPStream
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 GOSSIPSUB_DIR = PROJECT_ROOT / "examples" / "pubsub" / "gossipsub"
@@ -77,6 +78,12 @@ def test_compare_versions_runs() -> None:
 async def test_compare_versions_churn_disconnects_and_reconnects() -> None:
     nodes: list[compare_versions.CompareNode] = []
     samples: list[tuple[int, list[bool]]] = []
+    sockets: list[trio.socket.SocketType] = []
+    original_init = TrioTCPStream.__init__
+
+    def track_socket(self: TrioTCPStream, stream: trio.SocketStream) -> None:
+        original_init(self, stream)
+        sockets.append(stream.socket)
 
     class ObservedNode(compare_versions.CompareNode):
         def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -93,7 +100,10 @@ async def test_compare_versions_churn_disconnects_and_reconnects() -> None:
             )
 
     version, protocol, kwargs = compare_versions.VERSIONS[0]
-    with patch.object(compare_versions, "CompareNode", ObservedNode):
+    with (
+        patch.object(compare_versions, "CompareNode", ObservedNode),
+        patch.object(TrioTCPStream, "__init__", track_socket),
+    ):
         with trio.fail_after(30):
             row = await compare_versions._run_one_version(
                 version,
@@ -114,3 +124,6 @@ async def test_compare_versions_churn_disconnects_and_reconnects() -> None:
     assert any(all(connected) for _, connected in samples[: isolated[0]])
     assert any(all(connected) for _, connected in samples[isolated[-1] + 1 :]), samples
     assert row["received"] > 0
+    assert sockets and all(sock.fileno() == -1 for sock in sockets), (
+        "demo teardown must close every TCP socket, including reconnected peers"
+    )
