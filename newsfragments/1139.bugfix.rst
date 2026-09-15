@@ -1,0 +1,1 @@
+Close Gossipsub example hosts during cancellation so normal and churn demos release their TCP sockets on exit.
