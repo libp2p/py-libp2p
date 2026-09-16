@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Generate cross-implementation test vectors for
-``Noise_XXhfs_25519+ML-KEM-768_ChaChaPoly_SHA256`` (``/noise-mlkem768-hfs/0.1.0``).
+``Noise_XXhfs_25519+MLKEM768_ChaChaPoly_SHA256`` (``/noise-mlkem768-hfs/0.2.0``).
 
 The vectors pin the wire bytes of all three handshake messages plus the derived
 handshake hash and transport keys, so that Python, Rust and JS implementations can
@@ -50,8 +50,8 @@ from libp2p.crypto.x25519 import X25519PrivateKey  # noqa: E402
 from libp2p.peer.id import ID  # noqa: E402
 from libp2p.security.noise.pq.patterns_pq import PatternXXhfs  # noqa: E402
 
-PROTOCOL = "Noise_XXhfs_25519+ML-KEM-768_ChaChaPoly_SHA256"
-PROTOCOL_ID = "/noise-mlkem768-hfs/0.1.0"
+PROTOCOL = "Noise_XXhfs_25519+MLKEM768_ChaChaPoly_SHA256"
+PROTOCOL_ID = "/noise-mlkem768-hfs/0.2.0"
 
 MLKEM768_PK = 1184
 MLKEM768_CT = 1088

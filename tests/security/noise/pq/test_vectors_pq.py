@@ -1,6 +1,6 @@
 """
 Cross-implementation test vectors for
-``Noise_XXhfs_25519+ML-KEM-768_ChaChaPoly_SHA256`` (``/noise-mlkem768-hfs/0.1.0``).
+``Noise_XXhfs_25519+MLKEM768_ChaChaPoly_SHA256`` (``/noise-mlkem768-hfs/0.2.0``).
 
 Replays each vector in ``tests/fixtures/mlkem768-xxhfs-vectors.json`` through the
 real ``PatternXXhfs`` and asserts the wire bytes match byte for byte. The same
@@ -58,8 +58,8 @@ class TestFixtureShape:
 
     async def test_protocol_identifiers(self) -> None:
         doc = _load_fixture()
-        assert doc["protocol"] == "Noise_XXhfs_25519+ML-KEM-768_ChaChaPoly_SHA256"
-        assert doc["protocol_id"] == "/noise-mlkem768-hfs/0.1.0"
+        assert doc["protocol"] == "Noise_XXhfs_25519+MLKEM768_ChaChaPoly_SHA256"
+        assert doc["protocol_id"] == "/noise-mlkem768-hfs/0.2.0"
 
     async def test_has_vectors(self) -> None:
         doc = _load_fixture()

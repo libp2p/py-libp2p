@@ -1,8 +1,8 @@
 """
 ML-KEM-768 KEM for the Noise XXhfs handshake.
 
-The suite is ``Noise_XXhfs_25519+ML-KEM-768_ChaChaPoly_SHA256``
-(protocol id ``/noise-mlkem768-hfs/0.1.0``, libp2p/specs#723).
+The suite is ``Noise_XXhfs_25519+MLKEM768_ChaChaPoly_SHA256``
+(protocol id ``/noise-mlkem768-hfs/0.2.0``, libp2p/specs#723).
 
 Hybridisation happens at the protocol level, not inside the KEM: X25519 covers
 the DH tokens (ee, es, se) and ML-KEM-768 fills the HFS tokens (e1, ekem1).

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Standalone TCP listener for Noise_XXhfs_25519+ML-KEM-768_ChaChaPoly_SHA256.
+Standalone TCP listener for Noise_XXhfs_25519+MLKEM768_ChaChaPoly_SHA256.
 
 Runs the responder side of the XXhfs handshake using the updated py-libp2p
 library, then prints the initiator's peer ID and exits.
@@ -8,8 +8,8 @@ library, then prints the initiator's peer ID and exits.
 Usage:
     python scripts/interop_listen_mlkem768.py [--port N]   (default 9998)
 
-Protocol:  Noise_XXhfs_25519+ML-KEM-768_ChaChaPoly_SHA256
-Protocol ID: /noise-mlkem768-hfs/0.1.0
+Protocol:  Noise_XXhfs_25519+MLKEM768_ChaChaPoly_SHA256
+Protocol ID: /noise-mlkem768-hfs/0.2.0
 """
 
 import argparse

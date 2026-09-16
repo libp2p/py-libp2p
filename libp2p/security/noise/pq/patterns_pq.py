@@ -1,7 +1,7 @@
 """
 XXhfs Noise handshake pattern for post-quantum security.
 
-Implements Noise_XXhfs_25519+ML-KEM-768_ChaChaPoly_SHA256: a three-message
+Implements Noise_XXhfs_25519+MLKEM768_ChaChaPoly_SHA256: a three-message
 handshake that adds ML-KEM-768 KEM tokens to the classical Noise XX pattern
 for hybrid post-quantum forward secrecy.
 
@@ -63,6 +63,7 @@ from .kem import (
 )
 from .kem_backends import make_fast_kem
 from .noise_state import (
+    PROTOCOL_NAME as _NOISE_STATE_PROTOCOL_NAME,
     CipherState,
     SymmetricState,
 )
@@ -120,7 +121,8 @@ class PatternXXhfs:
     slot alongside the classical X25519 DH exchange (ee, es, se tokens).
     """
 
-    PROTOCOL_NAME = b"Noise_XXhfs_25519+ML-KEM-768_ChaChaPoly_SHA256"
+    # Single source of truth lives on noise_state; reused here to avoid drift.
+    PROTOCOL_NAME = _NOISE_STATE_PROTOCOL_NAME
 
     def __init__(
         self,
