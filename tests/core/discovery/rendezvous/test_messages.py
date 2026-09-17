@@ -57,6 +57,19 @@ class TestMessageCreation:
         assert list(message.register.peer.addrs) == expected_addrs
         assert message.register.ttl == ttl
 
+    def test_create_register_message_strips_p2p_suffix(
+        self, sample_peer_id, sample_addrs
+    ):
+        """REGISTER must advertise bare transport addrs (strict servers dial back)."""
+        suffixed = [
+            addr.encapsulate(Multiaddr(f"/p2p/{sample_peer_id.to_base58()}"))
+            for addr in sample_addrs
+        ]
+        message = create_register_message("ns", sample_peer_id, suffixed, DEFAULT_TTL)
+
+        expected = [addr.to_bytes() for addr in sample_addrs]
+        assert list(message.register.peer.addrs) == expected
+
     def test_create_register_message_empty_addrs(self, sample_peer_id):
         """Test creating register message with empty addresses."""
         namespace = "test-namespace"
