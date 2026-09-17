@@ -8,6 +8,7 @@ LOCAL/PEER/SENT/RECV/INTEROP_OK on stdout.
 
 import asyncio
 
+from libp2p.abc import ISecureConn
 from libp2p.io.abc import ReadWriteCloser
 
 IMPL = "Python"
@@ -52,12 +53,12 @@ def out(line: str) -> None:
     print(line, flush=True)
 
 
-async def send_greeting(session) -> None:
+async def send_greeting(session: ISecureConn) -> None:
     await session.write(f"{GREETING_PREFIX}{IMPL}\n".encode())
     out(f"SENT {GREETING_PREFIX}{IMPL}")
 
 
-async def read_greeting(session) -> str:
+async def read_greeting(session: ISecureConn) -> str:
     buf = b""
     while b"\n" not in buf:
         # SecureSession.read(n) blocks until *exactly* n bytes have arrived

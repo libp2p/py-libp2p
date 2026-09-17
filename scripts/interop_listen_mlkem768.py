@@ -47,7 +47,7 @@ async def main(port: int) -> None:
         kem=make_fast_kem(),
     )
     session = await pattern.handshake_inbound(cast(IRawConnection, conn))
-    out(f"PEER {session.remote_peer}")
+    out(f"PEER {session.get_remote_peer()}")
     await send_greeting(session)
     await read_greeting(session)
     out("INTEROP_OK")
