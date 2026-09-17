@@ -332,7 +332,7 @@ async def bench_throughput() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Wire-size accounting (no runtime measurement needed — pure arithmetic)
+# Wire-size accounting (no runtime measurement needed; pure arithmetic)
 # ---------------------------------------------------------------------------
 
 
@@ -344,7 +344,7 @@ def wire_sizes() -> dict:
 
     # Classical XX (Noise spec, no libp2p payload for size accounting)
     # Msg 1: e (32)
-    # Msg 2: e (32) + enc_s (48) + enc_payload (variable — use 0 here)
+    # Msg 2: e (32) + enc_s (48) + enc_payload (variable, use 0 here)
     # Msg 3: enc_s (48) + enc_payload (variable)
     classical_fixed = 32 + (32 + 48) + 48  # = 160 B fixed; payload adds ~32+ per side
 
@@ -490,7 +490,7 @@ def save_results(results: dict) -> None:
         f"| keygen | {kem['keygen_ms']:.2f} | {kem['keygen_ops']:.0f} |",
         f"| encapsulate | {kem['encap_ms']:.2f} | {kem['encap_ops']:.0f} |",
         f"| decapsulate | {kem['decap_ms']:.2f} | {kem['decap_ops']:.0f} |",
-        f"| round-trip (encap+decap) | {kem['encap_ms'] + kem['decap_ms']:.2f} | — |",
+        f"| round-trip (encap+decap) | {kem['encap_ms'] + kem['decap_ms']:.2f} | n/a |",
         "",
         "## Handshake Latency (in-memory, round-trip)",
         "",
@@ -498,7 +498,7 @@ def save_results(results: dict) -> None:
         "|---------|-------------|--------------------|",
         f"| Classical Noise XX | {hs['xx_ms']:.2f} | {hs['xx_ops']:.0f} |",
         f"| Noise XXhfs (ML-KEM-768) | {hs['xxhfs_ms']:.2f} | {hs['xxhfs_ops']:.0f} |",
-        f"| Overhead | {hs['overhead_x']:.1f}x | — |",
+        f"| Overhead | {hs['overhead_x']:.1f}x | n/a |",
         "",
         (
             f"Overhead is the median of paired per-iteration ratios"

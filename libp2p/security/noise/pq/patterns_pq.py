@@ -196,7 +196,7 @@ class PatternXXhfs:
         ss = SymmetricState()
         ss.mix_hash(
             b""
-        )  # MixHash(prologue=empty) — required by Noise spec even when empty
+        )  # MixHash(prologue=empty): required by Noise spec even when empty
         pkt = NoisePacketReadWriter(cast(ReadWriteCloser, conn))
 
         # ---- Message A: e, e1 ----------------------------------------
@@ -308,7 +308,7 @@ class PatternXXhfs:
         ss = SymmetricState()
         ss.mix_hash(
             b""
-        )  # MixHash(prologue=empty) — required by Noise spec even when empty
+        )  # MixHash(prologue=empty): required by Noise spec even when empty
         pkt = NoisePacketReadWriter(cast(ReadWriteCloser, conn))
 
         # ---- Message A: receive e, e1 --------------------------------

@@ -2,7 +2,7 @@
   "protocol": "Noise_XXhfs_25519+MLKEM768_ChaChaPoly_SHA256",
   "protocol_id": "/noise-mlkem768-hfs/0.2.0",
   "spec": "https://github.com/libp2p/specs/pull/723",
-  "description": "Deterministic test vectors for the Noise XXhfs handshake with raw ML-KEM-768. All key material is seeded for reproducibility \u2014 these keys MUST NOT be used outside testing.",
+  "description": "Deterministic test vectors for the Noise XXhfs handshake with raw ML-KEM-768. All key material is seeded for reproducibility; these keys MUST NOT be used outside testing.",
   "generated_by": "py-libp2p scripts/gen_pq_test_vectors.py",
   "kem": "ML-KEM-768 (FIPS 203), via kyber-py",
   "kem_determinism": "keygen uses FIPS 203 key_derive(d || z) with the 64-byte kem_keygen_seed; encapsulation uses _encaps_internal(ek, m) with the 32-byte kem_encap_seed",
@@ -20,7 +20,7 @@
   "vectors": [
     {
       "vector_index": 1,
-      "description": "XXhfs ML-KEM-768 vector 1 \u2014 seeds derived from base 0x10",
+      "description": "XXhfs ML-KEM-768 vector 1: seeds derived from base 0x10",
       "static_i_private": "1111111111111111111111111111111111111111111111111111111111111111",
       "static_i_public": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13",
       "static_r_private": "1212121212121212121212121212121212121212121212121212121212121212",
@@ -45,7 +45,7 @@
     },
     {
       "vector_index": 2,
-      "description": "XXhfs ML-KEM-768 vector 2 \u2014 seeds derived from base 0x20",
+      "description": "XXhfs ML-KEM-768 vector 2: seeds derived from base 0x20",
       "static_i_private": "2121212121212121212121212121212121212121212121212121212121212121",
       "static_i_public": "7d34a4815fa6b982535e60af3bd9b49556816080f1641ff81d2b7c8ae8268a44",
       "static_r_private": "2222222222222222222222222222222222222222222222222222222222222222",
@@ -70,7 +70,7 @@
     },
     {
       "vector_index": 3,
-      "description": "XXhfs ML-KEM-768 vector 3 \u2014 seeds derived from base 0x30",
+      "description": "XXhfs ML-KEM-768 vector 3: seeds derived from base 0x30",
       "static_i_private": "3131313131313131313131313131313131313131313131313131313131313131",
       "static_i_public": "04f5f29162c31a8defa18e6e742224ee806fc1718a278be859ba5620402b8f3a",
       "static_r_private": "3232323232323232323232323232323232323232323232323232323232323232",
@@ -95,7 +95,7 @@
     },
     {
       "vector_index": 4,
-      "description": "XXhfs ML-KEM-768 vector 4 \u2014 seeds derived from base 0x40",
+      "description": "XXhfs ML-KEM-768 vector 4: seeds derived from base 0x40",
       "static_i_private": "4141414141414141414141414141414141414141414141414141414141414141",
       "static_i_public": "7a1a4e709bf085ac494aba0469b9b1eda0ab1f78b16aabb79ffeda90623e8522",
       "static_r_private": "4242424242424242424242424242424242424242424242424242424242424242",
@@ -120,7 +120,7 @@
     },
     {
       "vector_index": 5,
-      "description": "XXhfs ML-KEM-768 vector 5 \u2014 seeds derived from base 0x50",
+      "description": "XXhfs ML-KEM-768 vector 5: seeds derived from base 0x50",
       "static_i_private": "5151515151515151515151515151515151515151515151515151515151515151",
       "static_i_public": "ad908a8a708aca07588cda7c4ed3e44d4966a80a9abb2f1e4bbac53c67414e34",
       "static_r_private": "5252525252525252525252525252525252525252525252525252525252525252",

@@ -10,8 +10,8 @@ what libp2p/specs#723 asks for.
 
 Method
 ------
-Rather than reimplementing the handshake here — which could silently drift from the
-implementation it is meant to pin — this drives the real ``PatternXXhfs`` over an
+Rather than reimplementing the handshake here, which could silently drift from the
+implementation it is meant to pin, this drives the real ``PatternXXhfs`` over an
 in-memory connection pair and records what it puts on the wire. Every source of
 randomness is replaced by a deterministic one for the duration:
 
@@ -305,7 +305,7 @@ async def _run_one(index: int, base: int) -> dict[str, Any]:
     return {
         "vector_index": index,
         "description": (
-            f"XXhfs ML-KEM-768 vector {index} — seeds derived from base 0x{base:02x}"
+            f"XXhfs ML-KEM-768 vector {index}: seeds derived from base 0x{base:02x}"
         ),
         "static_i_private": s_i_priv.hex(),
         "static_i_public": bytes(init_noise.get_public_key().to_bytes()).hex(),
@@ -347,7 +347,7 @@ async def _main_async(count: int, out: Path) -> None:
         "spec": "https://github.com/libp2p/specs/pull/723",
         "description": (
             "Deterministic test vectors for the Noise XXhfs handshake with raw "
-            "ML-KEM-768. All key material is seeded for reproducibility — these keys "
+            "ML-KEM-768. All key material is seeded for reproducibility; these keys "
             "MUST NOT be used outside testing."
         ),
         "generated_by": "py-libp2p scripts/gen_pq_test_vectors.py",

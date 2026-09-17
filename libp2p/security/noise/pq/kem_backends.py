@@ -75,13 +75,13 @@ class KeypairPool:
     def acquire(self) -> tuple[bytes, bytes]:
         """
         Return a pre-generated keypair. If the pool is empty, generates
-        one synchronously (fallback — should not happen in normal operation).
+        one synchronously (a fallback that should not happen in normal operation).
         Schedules an async refill if the pool drops below min_size.
         """
         if self._pool:
             kp = self._pool.popleft()
         else:
-            logger.warning("KeypairPool exhausted — generating synchronously")
+            logger.warning("KeypairPool exhausted; generating synchronously")
             kp = self._kem.keygen()
 
         if len(self._pool) < self._min_size and self._refill_task is None:
@@ -96,14 +96,14 @@ class KeypairPool:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            return  # no event loop — skip background refill
+            return  # no event loop, so skip background refill
         self._refill_task = loop.create_task(self._async_fill())
         self._refill_task.add_done_callback(self._on_refill_done)
 
     def _on_refill_done(self, task: asyncio.Task[None]) -> None:
         self._refill_task = None
         if task.cancelled():
-            return  # event loop shutting down — normal
+            return  # event loop shutting down, which is normal
         exc = task.exception()
         if exc:
             logger.error("KeypairPool refill failed: %s", exc)

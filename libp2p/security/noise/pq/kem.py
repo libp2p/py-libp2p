@@ -81,7 +81,7 @@ class MLKEM768Kem:
     The import is deferred to construction time so modules importing
     this class do not require kyber-py to be installed.
 
-    IMPORTANT: kyber-py's ``ML_KEM_768.encaps(pk)`` returns ``(ss, ct)`` —
+    IMPORTANT: kyber-py's ``ML_KEM_768.encaps(pk)`` returns ``(ss, ct)``:
     shared secret first, ciphertext second. This is reversed from the liboqs
     convention. ``encapsulate()`` corrects the order to ``(ct, ss)`` per IKem.
     """
@@ -105,7 +105,7 @@ class MLKEM768Kem:
         """
         Returns (ciphertext, shared_secret) where ct=1088 B, ss=32 B.
 
-        Note: kyber-py ML_KEM_768.encaps() returns (ss, ct) — we swap the order
+        Note: kyber-py ML_KEM_768.encaps() returns (ss, ct), so we swap the order
         to match the IKem convention of (ct, ss).
         """
         if len(pk) != MLKEM768_PK_SIZE:
