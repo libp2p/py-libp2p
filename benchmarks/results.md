@@ -24,7 +24,17 @@
 | Noise XXhfs (ML-KEM-768) | 37.15       | 27                 |
 | Overhead                 | 11.3x       | —                  |
 
-Overhead is the median of paired per-iteration ratios (range 5.9x-17.7x), sampled with the two protocols interleaved per iteration and alternating which goes first, so machine drift is common-mode and cancels in the ratio.
+Overhead is the median of paired per-iteration ratios (range 5.9x-17.7x, the spread **within
+this one pass**), sampled with the two protocols interleaved per iteration and alternating which
+goes first, so machine drift is largely common-mode and its effect on the ratio is largely (not
+fully) cancelled.
+
+**This file is regenerated from the last (5th) of 5 serial passes run on 2026-09-17.** Read
+alone, the 11.3x above is this pass's own value, which happens to be the lowest of the five. The
+figure that should be quoted for this session is the median across all 5 passes: **12.0x**
+(range 11.3x-12.4x across passes). See
+`pq-noise-artifacts/benchmarks/2026-09-17/SUMMARY.md` for the full per-pass table, the other three
+languages, and the whole-machine-slowdown caveat that applies to this run's ratios.
 
 ## Transport Throughput (post-handshake)
 

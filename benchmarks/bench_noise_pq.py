@@ -239,7 +239,8 @@ async def bench_handshakes() -> dict:
     ratios: list[float] = []
     for i in range(N_HANDSHAKES):
         # Interleave the two protocols and alternate which goes first, so
-        # machine drift is common-mode and cancels in the per-iteration ratio.
+        # machine drift is largely common-mode and its effect on the
+        # per-iteration ratio is largely (not fully) cancelled.
         if i % 2 == 0:
             c = await _one_classical_handshake(*_make_classical_pair())
             p = await _one_pq_handshake(*_make_pq_pair())
@@ -502,8 +503,9 @@ def save_results(results: dict) -> None:
             f"Overhead is the median of paired per-iteration ratios"
             f" (range {hs['overhead_min_x']:.1f}x-{hs['overhead_max_x']:.1f}x),"
             " sampled with the two protocols interleaved per iteration and"
-            " alternating which goes first, so machine drift is common-mode"
-            " and cancels in the ratio."
+            " alternating which goes first, so machine drift is largely"
+            " common-mode and its effect on the ratio is largely (not fully)"
+            " cancelled."
         ),
         "",
         "## Transport Throughput (post-handshake)",
