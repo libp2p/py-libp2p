@@ -230,34 +230,36 @@ async def _one_classical_handshake(t_l, peer_r, t_r) -> float:
 
 
 async def bench_handshakes() -> dict:
-    # --- classical XX ---
-    t_l, peer_r, t_r = _make_classical_pair()
     for _ in range(N_WARMUP):
-        await _one_classical_handshake(t_l, peer_r, t_r)
+        await _one_classical_handshake(*_make_classical_pair())
+        await _one_pq_handshake(*_make_pq_pair())
+
     samples_classical: list[float] = []
-    for _ in range(N_HANDSHAKES):
-        t_l, peer_r, t_r = _make_classical_pair()  # fresh keys each run
-        samples_classical.append(await _one_classical_handshake(t_l, peer_r, t_r))
-    xx_ms, xx_ops = _stats(samples_classical)
-
-    # --- XXhfs (PQ) ---
-    t_l, peer_r, t_r = _make_pq_pair()
-    for _ in range(N_WARMUP):
-        await _one_pq_handshake(t_l, peer_r, t_r)
     samples_pq: list[float] = []
-    for _ in range(N_HANDSHAKES):
-        t_l, peer_r, t_r = _make_pq_pair()  # fresh keys each run
-        samples_pq.append(await _one_pq_handshake(t_l, peer_r, t_r))
+    ratios: list[float] = []
+    for i in range(N_HANDSHAKES):
+        # Interleave the two protocols and alternate which goes first, so
+        # machine drift is common-mode and cancels in the per-iteration ratio.
+        if i % 2 == 0:
+            c = await _one_classical_handshake(*_make_classical_pair())
+            p = await _one_pq_handshake(*_make_pq_pair())
+        else:
+            p = await _one_pq_handshake(*_make_pq_pair())
+            c = await _one_classical_handshake(*_make_classical_pair())
+        samples_classical.append(c)
+        samples_pq.append(p)
+        ratios.append(p / c)
+
+    xx_ms, xx_ops = _stats(samples_classical)
     xxhfs_ms, xxhfs_ops = _stats(samples_pq)
-
-    overhead = xxhfs_ms / xx_ms if xx_ms > 0 else float("inf")
-
     return {
         "xx_ms": xx_ms,
         "xx_ops": xx_ops,
         "xxhfs_ms": xxhfs_ms,
         "xxhfs_ops": xxhfs_ops,
-        "overhead_x": overhead,
+        "overhead_x": statistics.median(ratios),
+        "overhead_min_x": min(ratios),
+        "overhead_max_x": max(ratios),
     }
 
 
@@ -422,7 +424,12 @@ async def run_all() -> dict:
     print_section("Handshake latency (in-memory, round-trip)")
     print(f"  Classical XX : {_fmt(handshakes['xx_ms'], handshakes['xx_ops'])}")
     print(f"  XXhfs (PQ)   : {_fmt(handshakes['xxhfs_ms'], handshakes['xxhfs_ops'])}")
-    print(f"  Overhead     : {handshakes['overhead_x']:.1f}x")
+    print(
+        f"  Overhead     : {handshakes['overhead_x']:.1f}x"
+        f" (median of paired per-iteration ratios,"
+        f" range {handshakes['overhead_min_x']:.1f}x"
+        f"-{handshakes['overhead_max_x']:.1f}x)"
+    )
 
     print_section("Transport throughput (after handshake)")
     print(f"  {'Size':>8}  {'Classical':>12}  {'XXhfs (PQ)':>12}  {'Ratio':>8}")
@@ -491,6 +498,14 @@ def save_results(results: dict) -> None:
         f"| Noise XXhfs (ML-KEM-768) | {hs['xxhfs_ms']:.2f} | {hs['xxhfs_ops']:.0f} |",
         f"| Overhead | {hs['overhead_x']:.1f}x | — |",
         "",
+        (
+            f"Overhead is the median of paired per-iteration ratios"
+            f" (range {hs['overhead_min_x']:.1f}x-{hs['overhead_max_x']:.1f}x),"
+            " sampled with the two protocols interleaved per iteration and"
+            " alternating which goes first, so machine drift is common-mode"
+            " and cancels in the ratio."
+        ),
+        "",
         "## Transport Throughput (post-handshake)",
         "",
         "| Payload | Classical (MB/s) | XXhfs (MB/s) | Ratio |",
@@ -529,13 +544,12 @@ def save_results(results: dict) -> None:
             f" (+{overhead_b / ws['classical_total_fixed']:.0f}x fixed bytes)"
         ),
         "",
-        "## Comparison with js-libp2p-noise",
-        "",
-        "| Metric | js-libp2p (XXhfs) | py-libp2p (XXhfs) |",
-        "|--------|-------------------|-------------------|",
-        f"| Handshake latency | ~44 ms | {hs['xxhfs_ms']:.1f} ms |",
-        f"| vs classical overhead | ~5x | {hs['overhead_x']:.1f}x |",
-        f"| KEM round-trip | ~20 ms | {kem['encap_ms'] + kem['decap_ms']:.1f} ms |",
+        (
+            "Cross-language comparisons (js-libp2p, Nim, Rust) live in the"
+            " pq-noise-artifacts SUMMARY, not in this per-language file, since"
+            " absolute milliseconds are not comparable across harnesses with"
+            " different transports."
+        ),
         "",
     ]
 
