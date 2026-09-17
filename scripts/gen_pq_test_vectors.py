@@ -48,6 +48,7 @@ from libp2p.connection_types import ConnectionType  # noqa: E402
 from libp2p.crypto.ed25519 import create_new_key_pair  # noqa: E402
 from libp2p.crypto.x25519 import X25519PrivateKey  # noqa: E402
 from libp2p.peer.id import ID  # noqa: E402
+from libp2p.security.noise.pq import noise_state  # noqa: E402
 from libp2p.security.noise.pq.patterns_pq import PatternXXhfs  # noqa: E402
 
 PROTOCOL = "Noise_XXhfs_25519+MLKEM768_ChaChaPoly_SHA256"
@@ -173,6 +174,61 @@ class _SeededRandom:
         return v
 
 
+class _SplitRecorder:
+    """
+    Records the handshake hash and both transport keys at ``split()``.
+
+    ``CipherState`` does not keep its key, so while ``split()`` runs the module's
+    ``CipherState`` is swapped for a subclass that records the key it is built
+    with. The recorded keys are therefore exactly the ones ``split()`` derived,
+    not a re-derivation. Both peers split, so each call is recorded and the
+    caller checks they agree.
+    """
+
+    def __init__(self) -> None:
+        self.records: list[tuple[bytes, bytes, bytes]] = []
+        self._real_split = noise_state.SymmetricState.split
+
+    def __enter__(self) -> _SplitRecorder:
+        real_split = self._real_split
+        records = self.records
+
+        def split(
+            ss: noise_state.SymmetricState,
+        ) -> tuple[noise_state.CipherState, noise_state.CipherState]:
+            real_cipher_state = noise_state.CipherState
+            keys: list[bytes] = []
+
+            class _KeyRecordingCipherState(real_cipher_state):  # type: ignore[misc, valid-type]
+                def __init__(self, key: bytes) -> None:
+                    keys.append(key)
+                    super().__init__(key)
+
+            noise_state.CipherState = _KeyRecordingCipherState  # type: ignore[misc]
+            try:
+                result = real_split(ss)
+            finally:
+                noise_state.CipherState = real_cipher_state  # type: ignore[misc]
+            if len(keys) != 2:
+                raise RuntimeError(f"split() built {len(keys)} ciphers, expected 2")
+            records.append((ss.h, keys[0], keys[1]))
+            return result
+
+        noise_state.SymmetricState.split = split  # type: ignore[assignment, method-assign]
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        noise_state.SymmetricState.split = self._real_split  # type: ignore[method-assign]
+
+    def agreed(self) -> tuple[bytes, bytes, bytes]:
+        if len(self.records) != 2 or self.records[0] != self.records[1]:
+            raise RuntimeError(
+                f"expected both peers to split identically, got {len(self.records)} "
+                "differing record(s)"
+            )
+        return self.records[0]
+
+
 def _seed(base: int, n: int) -> bytes:
     """A visibly-synthetic seed: n copies of one byte. Never use for real keys."""
     return bytes([base]) * n
@@ -217,19 +273,21 @@ async def _run_one(index: int, base: int) -> dict[str, Any]:
     nacl.utils.random = _SeededRandom([e_i_priv, e_r_priv])  # type: ignore[assignment]
 
     sessions: list[Any] = [None, None]
+    recorder = _SplitRecorder()
     try:
-        async with trio.open_nursery() as nursery:
+        with recorder:
+            async with trio.open_nursery() as nursery:
 
-            async def _out() -> None:
-                sessions[0] = await init_pat.handshake_outbound(
-                    init_cap, ID.from_pubkey(resp_ident.public_key)
-                )
+                async def _out() -> None:
+                    sessions[0] = await init_pat.handshake_outbound(
+                        init_cap, ID.from_pubkey(resp_ident.public_key)
+                    )
 
-            async def _in() -> None:
-                sessions[1] = await resp_pat.handshake_inbound(resp_cap)
+                async def _in() -> None:
+                    sessions[1] = await resp_pat.handshake_inbound(resp_cap)
 
-            nursery.start_soon(_out)
-            nursery.start_soon(_in)
+                nursery.start_soon(_out)
+                nursery.start_soon(_in)
     finally:
         nacl.utils.random = real_random  # type: ignore[assignment]
 
@@ -242,6 +300,7 @@ async def _run_one(index: int, base: int) -> dict[str, Any]:
     msg_c = body(init_cap.writes[1])
 
     ek, _ = _SeededKem([kem_seed], []).keygen()
+    handshake_hash, cs1_k, cs2_k = recorder.agreed()
 
     return {
         "vector_index": index,
@@ -266,6 +325,9 @@ async def _run_one(index: int, base: int) -> dict[str, Any]:
         "msg_a_bytes": len(msg_a),
         "msg_b_bytes": len(msg_b),
         "msg_c_bytes": len(msg_c),
+        "handshake_hash": handshake_hash.hex(),
+        "cs1_k": cs1_k.hex(),
+        "cs2_k": cs2_k.hex(),
     }
 
 

@@ -3,7 +3,8 @@ Cross-implementation test vectors for
 ``Noise_XXhfs_25519+MLKEM768_ChaChaPoly_SHA256`` (``/noise-mlkem768-hfs/0.2.0``).
 
 Replays each vector in ``tests/fixtures/mlkem768-xxhfs-vectors.json`` through the
-real ``PatternXXhfs`` and asserts the wire bytes match byte for byte. The same
+real ``PatternXXhfs`` and asserts the wire bytes, the final handshake hash and
+both transport keys match byte for byte. The same
 fixture is intended to be consumed by the Rust and JS implementations, so a change
 that alters the wire format fails here rather than during manual interop.
 
@@ -78,6 +79,15 @@ class TestFixtureShape:
             assert len(bytes.fromhex(v["msg_b"])) == v["msg_b_bytes"]
             assert len(bytes.fromhex(v["msg_c"])) == v["msg_c_bytes"]
 
+    async def test_handshake_hash_and_transport_keys_are_32_bytes(self) -> None:
+        doc = _load_fixture()
+        for v in doc["vectors"]:
+            for field in ("handshake_hash", "cs1_k", "cs2_k"):
+                assert len(bytes.fromhex(v[field])) == 32, (
+                    f"vector {v['vector_index']}: {field} should be 32 bytes"
+                )
+            assert v["cs1_k"] != v["cs2_k"]
+
     async def test_kem_public_key_is_mlkem768_sized(self) -> None:
         doc = _load_fixture()
         for v in doc["vectors"]:
@@ -117,6 +127,9 @@ class TestVectorReplay:
                 "ephemeral_dh_r_public",
                 "static_i_public",
                 "static_r_public",
+                "handshake_hash",
+                "cs1_k",
+                "cs2_k",
             ):
                 if produced[field] != v[field]:
                     mismatches.append(
