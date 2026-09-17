@@ -29,14 +29,20 @@ async def main(port: int) -> None:
     local_peer = ID.from_pubkey(identity.public_key)
     out(f"LOCAL {local_peer}")
 
-    accepted: asyncio.Queue[tuple[asyncio.StreamReader, asyncio.StreamWriter]] = (
-        asyncio.Queue(maxsize=1)
+    accepted: asyncio.Future[tuple[asyncio.StreamReader, asyncio.StreamWriter]] = (
+        asyncio.get_running_loop().create_future()
     )
-    server = await asyncio.start_server(
-        lambda r, w: accepted.put_nowait((r, w)), "127.0.0.1", port
-    )
+
+    def on_connection(r: asyncio.StreamReader, w: asyncio.StreamWriter) -> None:
+        # One connection per run: close any that arrive before server.close().
+        if accepted.done():
+            w.close()
+            return
+        accepted.set_result((r, w))
+
+    server = await asyncio.start_server(on_connection, "127.0.0.1", port)
     out(f"READY {port}")
-    reader, writer = await accepted.get()
+    reader, writer = await accepted
     server.close()
 
     conn = AsyncioTCPConn(reader, writer, is_initiator=False)
