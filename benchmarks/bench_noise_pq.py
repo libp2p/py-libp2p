@@ -431,6 +431,7 @@ async def run_all() -> dict:
         f" range {handshakes['overhead_min_x']:.1f}x"
         f"-{handshakes['overhead_max_x']:.1f}x)"
     )
+    print("                 (not the ratio of the two medians printed above)")
 
     print_section("Transport throughput (after handshake)")
     print(f"  {'Size':>8}  {'Classical':>12}  {'XXhfs (PQ)':>12}  {'Ratio':>8}")
@@ -502,7 +503,9 @@ def save_results(results: dict) -> None:
         (
             f"Overhead is the median of paired per-iteration ratios"
             f" (range {hs['overhead_min_x']:.1f}x-{hs['overhead_max_x']:.1f}x),"
-            " sampled with the two protocols interleaved per iteration and"
+            " not the ratio of the two medians in the rows above, so it need"
+            " not equal their quotient. The samples were taken"
+            " with the two protocols interleaved per iteration and"
             " alternating which goes first, so machine drift is largely"
             " common-mode and its effect on the ratio is largely (not fully)"
             " cancelled."
