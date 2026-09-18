@@ -3,32 +3,91 @@
 isort:skip_file
 """
 
-import builtins
-import google.protobuf.descriptor
-import google.protobuf.internal.enum_type_wrapper
-import google.protobuf.message
+from collections import abc as _abc
+from google.protobuf import descriptor as _descriptor
+from google.protobuf import message as _message
+from google.protobuf.internal import containers as _containers
+from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
+import builtins as _builtins
 import sys
-import typing
+import typing as _typing
 
 if sys.version_info >= (3, 10):
-    import typing as typing_extensions
+    from typing import TypeAlias as _TypeAlias
 else:
-    import typing_extensions
+    from typing_extensions import TypeAlias as _TypeAlias
 
-DESCRIPTOR: google.protobuf.descriptor.FileDescriptor
+DESCRIPTOR: _descriptor.FileDescriptor
 
-@typing.final
-class HopMessage(google.protobuf.message.Message):
-    """Circuit v2 message types"""
+class _Status:
+    ValueType = _typing.NewType("ValueType", _builtins.int)
+    V: _TypeAlias = ValueType  # noqa: Y015
 
-    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+class _StatusEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[_Status.ValueType], _builtins.type):
+    DESCRIPTOR: _descriptor.EnumDescriptor
+    UNUSED: _Status.ValueType  # 0
+    """Zero value required for proto3 compatibility; never sent on the wire."""
+    OK: _Status.ValueType  # 100
+    RESERVATION_REFUSED: _Status.ValueType  # 200
+    RESOURCE_LIMIT_EXCEEDED: _Status.ValueType  # 201
+    PERMISSION_DENIED: _Status.ValueType  # 202
+    CONNECTION_FAILED: _Status.ValueType  # 203
+    NO_RESERVATION: _Status.ValueType  # 204
+    MALFORMED_MESSAGE: _Status.ValueType  # 400
+    UNEXPECTED_MESSAGE: _Status.ValueType  # 401
+
+class Status(_Status, metaclass=_StatusEnumTypeWrapper): ...
+
+UNUSED: Status.ValueType  # 0
+"""Zero value required for proto3 compatibility; never sent on the wire."""
+OK: Status.ValueType  # 100
+RESERVATION_REFUSED: Status.ValueType  # 200
+RESOURCE_LIMIT_EXCEEDED: Status.ValueType  # 201
+PERMISSION_DENIED: Status.ValueType  # 202
+CONNECTION_FAILED: Status.ValueType  # 203
+NO_RESERVATION: Status.ValueType  # 204
+MALFORMED_MESSAGE: Status.ValueType  # 400
+UNEXPECTED_MESSAGE: Status.ValueType  # 401
+Global___Status: _TypeAlias = Status  # noqa: Y015
+
+@_typing.final
+class PeerId(_message.Message):
+    """Circuit v2 message types.
+
+    This schema mirrors the canonical circuit relay v2 protobuf definition
+    (type numbers, field numbers and Status codes). The only intentional
+    extension is HopMessage.senderRecord, which carries the client's signed
+    peer record on RESERVE; peers that do not understand it skip the field.
+    """
+
+    DESCRIPTOR: _descriptor.Descriptor
+
+    ID_FIELD_NUMBER: _builtins.int
+    ADDRS_FIELD_NUMBER: _builtins.int
+    id: _builtins.bytes
+    @_builtins.property
+    def addrs(self) -> _containers.RepeatedScalarFieldContainer[_builtins.bytes]: ...
+    def __init__(
+        self,
+        *,
+        id: _builtins.bytes = ...,
+        addrs: _abc.Iterable[_builtins.bytes] | None = ...,
+    ) -> None: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["addrs", b"addrs", "id", b"id"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+
+Global___PeerId: _TypeAlias = PeerId  # noqa: Y015
+
+@_typing.final
+class HopMessage(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
 
     class _Type:
-        ValueType = typing.NewType("ValueType", builtins.int)
-        V: typing_extensions.TypeAlias = ValueType
+        ValueType = _typing.NewType("ValueType", _builtins.int)
+        V: _TypeAlias = ValueType  # noqa: Y015
 
-    class _TypeEnumTypeWrapper(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[HopMessage._Type.ValueType], builtins.type):
-        DESCRIPTOR: google.protobuf.descriptor.EnumDescriptor
+    class _TypeEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[HopMessage._Type.ValueType], _builtins.type):
+        DESCRIPTOR: _descriptor.EnumDescriptor
         RESERVE: HopMessage._Type.ValueType  # 0
         CONNECT: HopMessage._Type.ValueType  # 1
         STATUS: HopMessage._Type.ValueType  # 2
@@ -38,48 +97,73 @@ class HopMessage(google.protobuf.message.Message):
     CONNECT: HopMessage.Type.ValueType  # 1
     STATUS: HopMessage.Type.ValueType  # 2
 
-    TYPE_FIELD_NUMBER: builtins.int
-    PEER_FIELD_NUMBER: builtins.int
-    RESERVATION_FIELD_NUMBER: builtins.int
-    LIMIT_FIELD_NUMBER: builtins.int
-    STATUS_FIELD_NUMBER: builtins.int
-    SENDERRECORD_FIELD_NUMBER: builtins.int
-    type: global___HopMessage.Type.ValueType
-    peer: builtins.bytes
-    senderRecord: builtins.bytes
+    TYPE_FIELD_NUMBER: _builtins.int
+    PEER_FIELD_NUMBER: _builtins.int
+    RESERVATION_FIELD_NUMBER: _builtins.int
+    LIMIT_FIELD_NUMBER: _builtins.int
+    STATUS_FIELD_NUMBER: _builtins.int
+    SENDERRECORD_FIELD_NUMBER: _builtins.int
+    type: Global___HopMessage.Type.ValueType
+    status: Global___Status.ValueType
+    senderRecord: _builtins.bytes
     """Envelope(PeerRecord)"""
-    @property
-    def reservation(self) -> global___Reservation: ...
-    @property
-    def limit(self) -> global___Limit: ...
-    @property
-    def status(self) -> global___Status: ...
+    @_builtins.property
+    def peer(self) -> Global___PeerId: ...
+    @_builtins.property
+    def reservation(self) -> Global___Reservation: ...
+    @_builtins.property
+    def limit(self) -> Global___Limit: ...
     def __init__(
         self,
         *,
-        type: global___HopMessage.Type.ValueType = ...,
-        peer: builtins.bytes = ...,
-        reservation: global___Reservation | None = ...,
-        limit: global___Limit | None = ...,
-        status: global___Status | None = ...,
-        senderRecord: builtins.bytes | None = ...,
+        type: Global___HopMessage.Type.ValueType | None = ...,
+        peer: Global___PeerId | None = ...,
+        reservation: Global___Reservation | None = ...,
+        limit: Global___Limit | None = ...,
+        status: Global___Status.ValueType | None = ...,
+        senderRecord: _builtins.bytes | None = ...,
     ) -> None: ...
-    def HasField(self, field_name: typing.Literal["_senderRecord", b"_senderRecord", "limit", b"limit", "reservation", b"reservation", "senderRecord", b"senderRecord", "status", b"status"]) -> builtins.bool: ...
-    def ClearField(self, field_name: typing.Literal["_senderRecord", b"_senderRecord", "limit", b"limit", "peer", b"peer", "reservation", b"reservation", "senderRecord", b"senderRecord", "status", b"status", "type", b"type"]) -> None: ...
-    def WhichOneof(self, oneof_group: typing.Literal["_senderRecord", b"_senderRecord"]) -> typing.Literal["senderRecord"] | None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["_limit", b"_limit", "_peer", b"_peer", "_reservation", b"_reservation", "_senderRecord", b"_senderRecord", "_status", b"_status", "_type", b"_type", "limit", b"limit", "peer", b"peer", "reservation", b"reservation", "senderRecord", b"senderRecord", "status", b"status", "type", b"type"]  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["_limit", b"_limit", "_peer", b"_peer", "_reservation", b"_reservation", "_senderRecord", b"_senderRecord", "_status", b"_status", "_type", b"_type", "limit", b"limit", "peer", b"peer", "reservation", b"reservation", "senderRecord", b"senderRecord", "status", b"status", "type", b"type"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    _WhichOneofReturnType__limit: _TypeAlias = _typing.Literal["limit"]  # noqa: Y015
+    _WhichOneofArgType__limit: _TypeAlias = _typing.Literal["_limit", b"_limit"]  # noqa: Y015
+    _WhichOneofReturnType__peer: _TypeAlias = _typing.Literal["peer"]  # noqa: Y015
+    _WhichOneofArgType__peer: _TypeAlias = _typing.Literal["_peer", b"_peer"]  # noqa: Y015
+    _WhichOneofReturnType__reservation: _TypeAlias = _typing.Literal["reservation"]  # noqa: Y015
+    _WhichOneofArgType__reservation: _TypeAlias = _typing.Literal["_reservation", b"_reservation"]  # noqa: Y015
+    _WhichOneofReturnType__senderRecord: _TypeAlias = _typing.Literal["senderRecord"]  # noqa: Y015
+    _WhichOneofArgType__senderRecord: _TypeAlias = _typing.Literal["_senderRecord", b"_senderRecord"]  # noqa: Y015
+    _WhichOneofReturnType__status: _TypeAlias = _typing.Literal["status"]  # noqa: Y015
+    _WhichOneofArgType__status: _TypeAlias = _typing.Literal["_status", b"_status"]  # noqa: Y015
+    _WhichOneofReturnType__type: _TypeAlias = _typing.Literal["type"]  # noqa: Y015
+    _WhichOneofArgType__type: _TypeAlias = _typing.Literal["_type", b"_type"]  # noqa: Y015
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__limit) -> _WhichOneofReturnType__limit | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__peer) -> _WhichOneofReturnType__peer | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__reservation) -> _WhichOneofReturnType__reservation | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__senderRecord) -> _WhichOneofReturnType__senderRecord | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__status) -> _WhichOneofReturnType__status | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__type) -> _WhichOneofReturnType__type | None: ...
 
-global___HopMessage = HopMessage
+Global___HopMessage: _TypeAlias = HopMessage  # noqa: Y015
 
-@typing.final
-class StopMessage(google.protobuf.message.Message):
-    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+@_typing.final
+class StopMessage(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
 
     class _Type:
-        ValueType = typing.NewType("ValueType", builtins.int)
-        V: typing_extensions.TypeAlias = ValueType
+        ValueType = _typing.NewType("ValueType", _builtins.int)
+        V: _TypeAlias = ValueType  # noqa: Y015
 
-    class _TypeEnumTypeWrapper(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[StopMessage._Type.ValueType], builtins.type):
-        DESCRIPTOR: google.protobuf.descriptor.EnumDescriptor
+    class _TypeEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[StopMessage._Type.ValueType], _builtins.type):
+        DESCRIPTOR: _descriptor.EnumDescriptor
         CONNECT: StopMessage._Type.ValueType  # 0
         STATUS: StopMessage._Type.ValueType  # 1
 
@@ -87,110 +171,155 @@ class StopMessage(google.protobuf.message.Message):
     CONNECT: StopMessage.Type.ValueType  # 0
     STATUS: StopMessage.Type.ValueType  # 1
 
-    TYPE_FIELD_NUMBER: builtins.int
-    PEER_FIELD_NUMBER: builtins.int
-    STATUS_FIELD_NUMBER: builtins.int
-    SENDERRECORD_FIELD_NUMBER: builtins.int
-    type: global___StopMessage.Type.ValueType
-    peer: builtins.bytes
-    senderRecord: builtins.bytes
-    """Envelope(PeerRecord) encoded"""
-    @property
-    def status(self) -> global___Status: ...
+    TYPE_FIELD_NUMBER: _builtins.int
+    PEER_FIELD_NUMBER: _builtins.int
+    LIMIT_FIELD_NUMBER: _builtins.int
+    STATUS_FIELD_NUMBER: _builtins.int
+    type: Global___StopMessage.Type.ValueType
+    status: Global___Status.ValueType
+    @_builtins.property
+    def peer(self) -> Global___PeerId: ...
+    @_builtins.property
+    def limit(self) -> Global___Limit: ...
     def __init__(
         self,
         *,
-        type: global___StopMessage.Type.ValueType = ...,
-        peer: builtins.bytes = ...,
-        status: global___Status | None = ...,
-        senderRecord: builtins.bytes | None = ...,
+        type: Global___StopMessage.Type.ValueType | None = ...,
+        peer: Global___PeerId | None = ...,
+        limit: Global___Limit | None = ...,
+        status: Global___Status.ValueType | None = ...,
     ) -> None: ...
-    def HasField(self, field_name: typing.Literal["_senderRecord", b"_senderRecord", "senderRecord", b"senderRecord", "status", b"status"]) -> builtins.bool: ...
-    def ClearField(self, field_name: typing.Literal["_senderRecord", b"_senderRecord", "peer", b"peer", "senderRecord", b"senderRecord", "status", b"status", "type", b"type"]) -> None: ...
-    def WhichOneof(self, oneof_group: typing.Literal["_senderRecord", b"_senderRecord"]) -> typing.Literal["senderRecord"] | None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["_limit", b"_limit", "_peer", b"_peer", "_status", b"_status", "_type", b"_type", "limit", b"limit", "peer", b"peer", "status", b"status", "type", b"type"]  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["_limit", b"_limit", "_peer", b"_peer", "_status", b"_status", "_type", b"_type", "limit", b"limit", "peer", b"peer", "status", b"status", "type", b"type"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    _WhichOneofReturnType__limit: _TypeAlias = _typing.Literal["limit"]  # noqa: Y015
+    _WhichOneofArgType__limit: _TypeAlias = _typing.Literal["_limit", b"_limit"]  # noqa: Y015
+    _WhichOneofReturnType__peer: _TypeAlias = _typing.Literal["peer"]  # noqa: Y015
+    _WhichOneofArgType__peer: _TypeAlias = _typing.Literal["_peer", b"_peer"]  # noqa: Y015
+    _WhichOneofReturnType__status: _TypeAlias = _typing.Literal["status"]  # noqa: Y015
+    _WhichOneofArgType__status: _TypeAlias = _typing.Literal["_status", b"_status"]  # noqa: Y015
+    _WhichOneofReturnType__type: _TypeAlias = _typing.Literal["type"]  # noqa: Y015
+    _WhichOneofArgType__type: _TypeAlias = _typing.Literal["_type", b"_type"]  # noqa: Y015
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__limit) -> _WhichOneofReturnType__limit | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__peer) -> _WhichOneofReturnType__peer | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__status) -> _WhichOneofReturnType__status | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__type) -> _WhichOneofReturnType__type | None: ...
 
-global___StopMessage = StopMessage
+Global___StopMessage: _TypeAlias = StopMessage  # noqa: Y015
 
-@typing.final
-class Reservation(google.protobuf.message.Message):
-    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+@_typing.final
+class Reservation(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
 
-    VOUCHER_FIELD_NUMBER: builtins.int
-    SIGNATURE_FIELD_NUMBER: builtins.int
-    EXPIRE_FIELD_NUMBER: builtins.int
-    voucher: builtins.bytes
-    signature: builtins.bytes
-    expire: builtins.int
+    EXPIRE_FIELD_NUMBER: _builtins.int
+    ADDRS_FIELD_NUMBER: _builtins.int
+    VOUCHER_FIELD_NUMBER: _builtins.int
+    expire: _builtins.int
+    """Unix expiration time (UTC)"""
+    voucher: _builtins.bytes
+    """reservation voucher"""
+    @_builtins.property
+    def addrs(self) -> _containers.RepeatedScalarFieldContainer[_builtins.bytes]:
+        """relay addrs for reserving peer"""
+
     def __init__(
         self,
         *,
-        voucher: builtins.bytes = ...,
-        signature: builtins.bytes = ...,
-        expire: builtins.int = ...,
+        expire: _builtins.int | None = ...,
+        addrs: _abc.Iterable[_builtins.bytes] | None = ...,
+        voucher: _builtins.bytes | None = ...,
     ) -> None: ...
-    def ClearField(self, field_name: typing.Literal["expire", b"expire", "signature", b"signature", "voucher", b"voucher"]) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["_expire", b"_expire", "_voucher", b"_voucher", "expire", b"expire", "voucher", b"voucher"]  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["_expire", b"_expire", "_voucher", b"_voucher", "addrs", b"addrs", "expire", b"expire", "voucher", b"voucher"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    _WhichOneofReturnType__expire: _TypeAlias = _typing.Literal["expire"]  # noqa: Y015
+    _WhichOneofArgType__expire: _TypeAlias = _typing.Literal["_expire", b"_expire"]  # noqa: Y015
+    _WhichOneofReturnType__voucher: _TypeAlias = _typing.Literal["voucher"]  # noqa: Y015
+    _WhichOneofArgType__voucher: _TypeAlias = _typing.Literal["_voucher", b"_voucher"]  # noqa: Y015
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__expire) -> _WhichOneofReturnType__expire | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__voucher) -> _WhichOneofReturnType__voucher | None: ...
 
-global___Reservation = Reservation
+Global___Reservation: _TypeAlias = Reservation  # noqa: Y015
 
-@typing.final
-class Limit(google.protobuf.message.Message):
-    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+@_typing.final
+class Voucher(_message.Message):
+    """Reservation voucher payload (spec: Reservation Vouchers). Carried
+    inside a Signed Envelope with domain "libp2p-relay-rsvp" and
+    multicodec 0x0302; fields serialized in field-id order.
+    """
 
-    DURATION_FIELD_NUMBER: builtins.int
-    DATA_FIELD_NUMBER: builtins.int
-    duration: builtins.int
-    data: builtins.int
+    DESCRIPTOR: _descriptor.Descriptor
+
+    RELAY_FIELD_NUMBER: _builtins.int
+    PEER_FIELD_NUMBER: _builtins.int
+    EXPIRATION_FIELD_NUMBER: _builtins.int
+    relay: _builtins.bytes
+    """relay peer ID"""
+    peer: _builtins.bytes
+    """reserving peer ID"""
+    expiration: _builtins.int
+    """Unix expiration time (UTC)"""
     def __init__(
         self,
         *,
-        duration: builtins.int = ...,
-        data: builtins.int = ...,
+        relay: _builtins.bytes | None = ...,
+        peer: _builtins.bytes | None = ...,
+        expiration: _builtins.int | None = ...,
     ) -> None: ...
-    def ClearField(self, field_name: typing.Literal["data", b"data", "duration", b"duration"]) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["_expiration", b"_expiration", "_peer", b"_peer", "_relay", b"_relay", "expiration", b"expiration", "peer", b"peer", "relay", b"relay"]  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["_expiration", b"_expiration", "_peer", b"_peer", "_relay", b"_relay", "expiration", b"expiration", "peer", b"peer", "relay", b"relay"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    _WhichOneofReturnType__expiration: _TypeAlias = _typing.Literal["expiration"]  # noqa: Y015
+    _WhichOneofArgType__expiration: _TypeAlias = _typing.Literal["_expiration", b"_expiration"]  # noqa: Y015
+    _WhichOneofReturnType__peer: _TypeAlias = _typing.Literal["peer"]  # noqa: Y015
+    _WhichOneofArgType__peer: _TypeAlias = _typing.Literal["_peer", b"_peer"]  # noqa: Y015
+    _WhichOneofReturnType__relay: _TypeAlias = _typing.Literal["relay"]  # noqa: Y015
+    _WhichOneofArgType__relay: _TypeAlias = _typing.Literal["_relay", b"_relay"]  # noqa: Y015
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__expiration) -> _WhichOneofReturnType__expiration | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__peer) -> _WhichOneofReturnType__peer | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__relay) -> _WhichOneofReturnType__relay | None: ...
 
-global___Limit = Limit
+Global___Voucher: _TypeAlias = Voucher  # noqa: Y015
 
-@typing.final
-class Status(google.protobuf.message.Message):
-    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+@_typing.final
+class Limit(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
 
-    class _Code:
-        ValueType = typing.NewType("ValueType", builtins.int)
-        V: typing_extensions.TypeAlias = ValueType
-
-    class _CodeEnumTypeWrapper(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[Status._Code.ValueType], builtins.type):
-        DESCRIPTOR: google.protobuf.descriptor.EnumDescriptor
-        OK: Status._Code.ValueType  # 0
-        RESERVATION_REFUSED: Status._Code.ValueType  # 100
-        RESOURCE_LIMIT_EXCEEDED: Status._Code.ValueType  # 101
-        PERMISSION_DENIED: Status._Code.ValueType  # 102
-        CONNECTION_FAILED: Status._Code.ValueType  # 200
-        DIAL_REFUSED: Status._Code.ValueType  # 201
-        NO_RESERVATION: Status._Code.ValueType  # 204
-        STOP_FAILED: Status._Code.ValueType  # 300
-        MALFORMED_MESSAGE: Status._Code.ValueType  # 400
-
-    class Code(_Code, metaclass=_CodeEnumTypeWrapper): ...
-    OK: Status.Code.ValueType  # 0
-    RESERVATION_REFUSED: Status.Code.ValueType  # 100
-    RESOURCE_LIMIT_EXCEEDED: Status.Code.ValueType  # 101
-    PERMISSION_DENIED: Status.Code.ValueType  # 102
-    CONNECTION_FAILED: Status.Code.ValueType  # 200
-    DIAL_REFUSED: Status.Code.ValueType  # 201
-    NO_RESERVATION: Status.Code.ValueType  # 204
-    STOP_FAILED: Status.Code.ValueType  # 300
-    MALFORMED_MESSAGE: Status.Code.ValueType  # 400
-
-    CODE_FIELD_NUMBER: builtins.int
-    MESSAGE_FIELD_NUMBER: builtins.int
-    code: global___Status.Code.ValueType
-    message: builtins.str
+    DURATION_FIELD_NUMBER: _builtins.int
+    DATA_FIELD_NUMBER: _builtins.int
+    duration: _builtins.int
+    """seconds"""
+    data: _builtins.int
+    """bytes"""
     def __init__(
         self,
         *,
-        code: global___Status.Code.ValueType = ...,
-        message: builtins.str = ...,
+        duration: _builtins.int | None = ...,
+        data: _builtins.int | None = ...,
     ) -> None: ...
-    def ClearField(self, field_name: typing.Literal["code", b"code", "message", b"message"]) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["_data", b"_data", "_duration", b"_duration", "data", b"data", "duration", b"duration"]  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["_data", b"_data", "_duration", b"_duration", "data", b"data", "duration", b"duration"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    _WhichOneofReturnType__data: _TypeAlias = _typing.Literal["data"]  # noqa: Y015
+    _WhichOneofArgType__data: _TypeAlias = _typing.Literal["_data", b"_data"]  # noqa: Y015
+    _WhichOneofReturnType__duration: _TypeAlias = _typing.Literal["duration"]  # noqa: Y015
+    _WhichOneofArgType__duration: _TypeAlias = _typing.Literal["_duration", b"_duration"]  # noqa: Y015
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__data) -> _WhichOneofReturnType__data | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__duration) -> _WhichOneofReturnType__duration | None: ...
 
-global___Status = Status
+Global___Limit: _TypeAlias = Limit  # noqa: Y015

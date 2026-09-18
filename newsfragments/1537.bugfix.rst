@@ -1,0 +1,1 @@
+Fixed Circuit Relay v2 spec compliance so reservations, STOP flows, and length-delimited framing interoperate with go-libp2p and rust-libp2p relays and peers.

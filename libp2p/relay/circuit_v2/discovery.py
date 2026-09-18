@@ -39,6 +39,7 @@ from .config import (
 )
 from .pb.circuit_pb2 import (
     HopMessage,
+    PeerId as CircuitPeerId,
 )
 from .protocol import (
     PROTOCOL_ID,
@@ -48,6 +49,8 @@ from .protocol_buffer import (
 )
 from .utils import (
     maybe_consume_signed_record,
+    read_delimited_msg,
+    write_delimited_msg,
 )
 
 logger = logging.getLogger(__name__)
@@ -400,22 +403,14 @@ class RelayDiscovery(Service):
                 # Create and send reservation request
                 request = HopMessage(
                     type=HopMessage.RESERVE,
-                    peer=self.host.get_id().to_bytes(),
-                    senderRecord=envelope_bytes,
+                    peer=CircuitPeerId(id=self.host.get_id().to_bytes()),
                 )
 
                 with trio.fail_after(self.stream_timeout):
-                    await stream.write(request.SerializeToString())
+                    await write_delimited_msg(stream, request)
 
                     # Wait for response
-                    response_bytes = await stream.read(1024)
-                    if not response_bytes:
-                        logger.error("No response received from relay %s", peer_id)
-                        return False
-
-                    # Parse response
-                    response = HopMessage()
-                    response.ParseFromString(response_bytes)
+                    response = await read_delimited_msg(stream, HopMessage)
 
                     # Consume the source signed_peer_record if sent
                     if response.HasField("senderRecord"):
@@ -428,36 +423,49 @@ class RelayDiscovery(Service):
                             await stream.close()
                             return False
 
-                    # Check if reservation was successful
-                    if response.type == HopMessage.STATUS and response.HasField(
-                        "status"
+                    # Check if reservation was successful. Spec-compliant
+                    # relays accept by returning STATUS carrying a
+                    # reservation, omitting the (implied OK) status field.
+                    # NOTE: `response.status` is a plain int enum value (no
+                    # `.code` attribute) — compare via StatusCode directly,
+                    # otherwise refusals read as OK.
+                    if response.type == HopMessage.STATUS and (
+                        response.HasField("reservation")
+                        or StatusCode(response.status) == StatusCode.OK
                     ):
-                        # Access status code directly from protobuf object
-                        status_code = getattr(response.status, "code", StatusCode.OK)
+                        if response.HasField("status"):
+                            status_code = StatusCode(response.status)
 
-                        if status_code == StatusCode.OK:
-                            # Update relay info with reservation details
-                            relay_info = self._discovered_relays[peer_id]
-                            relay_info.has_reservation = True
-
-                            if response.HasField("reservation") and response.HasField(
-                                "limit"
-                            ):
-                                relay_info.reservation_expires_at = (
-                                    response.reservation.expire
+                            if status_code != StatusCode.OK:
+                                # Reservation failed
+                                logger.warning(
+                                    "Reservation request rejected by relay %s: %s",
+                                    peer_id,
+                                    status_code,
                                 )
-                                relay_info.reservation_data_limit = response.limit.data
+                                return False
 
-                            logger.debug(
-                                "Successfully made reservation with relay %s", peer_id
+                        # Update relay info with reservation details
+                        relay_info = self._discovered_relays[peer_id]
+                        relay_info.has_reservation = True
+
+                        if response.HasField("reservation") and response.HasField(
+                            "limit"
+                        ):
+                            relay_info.reservation_expires_at = (
+                                response.reservation.expire
                             )
-                            return True
+                            relay_info.reservation_data_limit = response.limit.data
+
+                        logger.debug(
+                            "Successfully made reservation with relay %s", peer_id
+                        )
+                        return True
 
                     # Reservation failed
                     error_message = "Unknown error"
                     if response.HasField("status"):
-                        # Access message directly from protobuf object
-                        error_message = getattr(response.status, "message", "")
+                        error_message = str(StatusCode(response.status))
 
                     logger.warning(
                         "Reservation request rejected by relay %s: %s",

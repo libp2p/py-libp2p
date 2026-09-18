@@ -3,147 +3,137 @@
 isort:skip_file
 """
 
-import builtins
-import collections.abc
-import google.protobuf.descriptor
-import google.protobuf.internal.containers
-import google.protobuf.internal.enum_type_wrapper
-import google.protobuf.message
+from collections import abc as _abc
+from google.protobuf import descriptor as _descriptor
+from google.protobuf import message as _message
+from google.protobuf.internal import containers as _containers
+from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
+import builtins as _builtins
 import sys
-import typing
+import typing as _typing
 
 if sys.version_info >= (3, 10):
-    import typing as typing_extensions
+    from typing import TypeAlias as _TypeAlias
 else:
-    import typing_extensions
+    from typing_extensions import TypeAlias as _TypeAlias
 
-DESCRIPTOR: google.protobuf.descriptor.FileDescriptor
+DESCRIPTOR: _descriptor.FileDescriptor
 
-class _Type:
-    ValueType = typing.NewType("ValueType", builtins.int)
-    V: typing_extensions.TypeAlias = ValueType
-
-class _TypeEnumTypeWrapper(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[_Type.ValueType], builtins.type):
-    DESCRIPTOR: google.protobuf.descriptor.EnumDescriptor
-    UNKNOWN: _Type.ValueType  # 0
-    DIAL: _Type.ValueType  # 1
-    DIAL_RESPONSE: _Type.ValueType  # 2
-
-class Type(_Type, metaclass=_TypeEnumTypeWrapper):
-    """Message types"""
-
-UNKNOWN: Type.ValueType  # 0
-DIAL: Type.ValueType  # 1
-DIAL_RESPONSE: Type.ValueType  # 2
-global___Type = Type
-
-class _Status:
-    ValueType = typing.NewType("ValueType", builtins.int)
-    V: typing_extensions.TypeAlias = ValueType
-
-class _StatusEnumTypeWrapper(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[_Status.ValueType], builtins.type):
-    DESCRIPTOR: google.protobuf.descriptor.EnumDescriptor
-    OK: _Status.ValueType  # 0
-    E_DIAL_ERROR: _Status.ValueType  # 1
-    E_DIAL_REFUSED: _Status.ValueType  # 2
-    E_DIAL_FAILED: _Status.ValueType  # 3
-    E_INTERNAL_ERROR: _Status.ValueType  # 100
-
-class Status(_Status, metaclass=_StatusEnumTypeWrapper):
-    """Status codes"""
-
-OK: Status.ValueType  # 0
-E_DIAL_ERROR: Status.ValueType  # 1
-E_DIAL_REFUSED: Status.ValueType  # 2
-E_DIAL_FAILED: Status.ValueType  # 3
-E_INTERNAL_ERROR: Status.ValueType  # 100
-global___Status = Status
-
-@typing.final
-class Message(google.protobuf.message.Message):
+@_typing.final
+class Message(_message.Message):
     """Main message"""
 
-    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+    DESCRIPTOR: _descriptor.Descriptor
 
-    TYPE_FIELD_NUMBER: builtins.int
-    DIAL_FIELD_NUMBER: builtins.int
-    DIAL_RESPONSE_FIELD_NUMBER: builtins.int
-    type: global___Type.ValueType
-    @property
-    def dial(self) -> global___DialRequest: ...
-    @property
-    def dial_response(self) -> global___DialResponse: ...
+    class _MessageType:
+        ValueType = _typing.NewType("ValueType", _builtins.int)
+        V: _TypeAlias = ValueType  # noqa: Y015
+
+    class _MessageTypeEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[Message._MessageType.ValueType], _builtins.type):
+        DESCRIPTOR: _descriptor.EnumDescriptor
+        DIAL: Message._MessageType.ValueType  # 0
+        DIAL_RESPONSE: Message._MessageType.ValueType  # 1
+
+    class MessageType(_MessageType, metaclass=_MessageTypeEnumTypeWrapper): ...
+    DIAL: Message.MessageType.ValueType  # 0
+    DIAL_RESPONSE: Message.MessageType.ValueType  # 1
+
+    class _ResponseStatus:
+        ValueType = _typing.NewType("ValueType", _builtins.int)
+        V: _TypeAlias = ValueType  # noqa: Y015
+
+    class _ResponseStatusEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[Message._ResponseStatus.ValueType], _builtins.type):
+        DESCRIPTOR: _descriptor.EnumDescriptor
+        OK: Message._ResponseStatus.ValueType  # 0
+        E_DIAL_ERROR: Message._ResponseStatus.ValueType  # 100
+        E_DIAL_REFUSED: Message._ResponseStatus.ValueType  # 101
+        E_BAD_REQUEST: Message._ResponseStatus.ValueType  # 200
+        E_INTERNAL_ERROR: Message._ResponseStatus.ValueType  # 300
+
+    class ResponseStatus(_ResponseStatus, metaclass=_ResponseStatusEnumTypeWrapper): ...
+    OK: Message.ResponseStatus.ValueType  # 0
+    E_DIAL_ERROR: Message.ResponseStatus.ValueType  # 100
+    E_DIAL_REFUSED: Message.ResponseStatus.ValueType  # 101
+    E_BAD_REQUEST: Message.ResponseStatus.ValueType  # 200
+    E_INTERNAL_ERROR: Message.ResponseStatus.ValueType  # 300
+
+    @_typing.final
+    class PeerInfo(_message.Message):
+        DESCRIPTOR: _descriptor.Descriptor
+
+        ID_FIELD_NUMBER: _builtins.int
+        ADDRS_FIELD_NUMBER: _builtins.int
+        id: _builtins.bytes
+        @_builtins.property
+        def addrs(self) -> _containers.RepeatedScalarFieldContainer[_builtins.bytes]: ...
+        def __init__(
+            self,
+            *,
+            id: _builtins.bytes | None = ...,
+            addrs: _abc.Iterable[_builtins.bytes] | None = ...,
+        ) -> None: ...
+        _HasFieldArgType: _TypeAlias = _typing.Literal["id", b"id"]  # noqa: Y015
+        def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+        _ClearFieldArgType: _TypeAlias = _typing.Literal["addrs", b"addrs", "id", b"id"]  # noqa: Y015
+        def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+
+    @_typing.final
+    class Dial(_message.Message):
+        DESCRIPTOR: _descriptor.Descriptor
+
+        PEER_FIELD_NUMBER: _builtins.int
+        @_builtins.property
+        def peer(self) -> Global___Message.PeerInfo: ...
+        def __init__(
+            self,
+            *,
+            peer: Global___Message.PeerInfo | None = ...,
+        ) -> None: ...
+        _HasFieldArgType: _TypeAlias = _typing.Literal["peer", b"peer"]  # noqa: Y015
+        def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+        _ClearFieldArgType: _TypeAlias = _typing.Literal["peer", b"peer"]  # noqa: Y015
+        def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+
+    @_typing.final
+    class DialResponse(_message.Message):
+        DESCRIPTOR: _descriptor.Descriptor
+
+        STATUS_FIELD_NUMBER: _builtins.int
+        STATUSTEXT_FIELD_NUMBER: _builtins.int
+        ADDR_FIELD_NUMBER: _builtins.int
+        status: Global___Message.ResponseStatus.ValueType
+        statusText: _builtins.str
+        addr: _builtins.bytes
+        def __init__(
+            self,
+            *,
+            status: Global___Message.ResponseStatus.ValueType | None = ...,
+            statusText: _builtins.str | None = ...,
+            addr: _builtins.bytes | None = ...,
+        ) -> None: ...
+        _HasFieldArgType: _TypeAlias = _typing.Literal["addr", b"addr", "status", b"status", "statusText", b"statusText"]  # noqa: Y015
+        def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+        _ClearFieldArgType: _TypeAlias = _typing.Literal["addr", b"addr", "status", b"status", "statusText", b"statusText"]  # noqa: Y015
+        def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+
+    TYPE_FIELD_NUMBER: _builtins.int
+    DIAL_FIELD_NUMBER: _builtins.int
+    DIALRESPONSE_FIELD_NUMBER: _builtins.int
+    type: Global___Message.MessageType.ValueType
+    @_builtins.property
+    def dial(self) -> Global___Message.Dial: ...
+    @_builtins.property
+    def dialResponse(self) -> Global___Message.DialResponse: ...
     def __init__(
         self,
         *,
-        type: global___Type.ValueType = ...,
-        dial: global___DialRequest | None = ...,
-        dial_response: global___DialResponse | None = ...,
+        type: Global___Message.MessageType.ValueType | None = ...,
+        dial: Global___Message.Dial | None = ...,
+        dialResponse: Global___Message.DialResponse | None = ...,
     ) -> None: ...
-    def HasField(self, field_name: typing.Literal["dial", b"dial", "dial_response", b"dial_response"]) -> builtins.bool: ...
-    def ClearField(self, field_name: typing.Literal["dial", b"dial", "dial_response", b"dial_response", "type", b"type"]) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["dial", b"dial", "dialResponse", b"dialResponse", "type", b"type"]  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["dial", b"dial", "dialResponse", b"dialResponse", "type", b"type"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
 
-global___Message = Message
-
-@typing.final
-class DialRequest(google.protobuf.message.Message):
-    """Dial request"""
-
-    DESCRIPTOR: google.protobuf.descriptor.Descriptor
-
-    PEERS_FIELD_NUMBER: builtins.int
-    @property
-    def peers(self) -> google.protobuf.internal.containers.RepeatedCompositeFieldContainer[global___PeerInfo]: ...
-    def __init__(
-        self,
-        *,
-        peers: collections.abc.Iterable[global___PeerInfo] | None = ...,
-    ) -> None: ...
-    def ClearField(self, field_name: typing.Literal["peers", b"peers"]) -> None: ...
-
-global___DialRequest = DialRequest
-
-@typing.final
-class DialResponse(google.protobuf.message.Message):
-    """Dial response"""
-
-    DESCRIPTOR: google.protobuf.descriptor.Descriptor
-
-    STATUS_FIELD_NUMBER: builtins.int
-    PEERS_FIELD_NUMBER: builtins.int
-    status: global___Status.ValueType
-    @property
-    def peers(self) -> google.protobuf.internal.containers.RepeatedCompositeFieldContainer[global___PeerInfo]: ...
-    def __init__(
-        self,
-        *,
-        status: global___Status.ValueType = ...,
-        peers: collections.abc.Iterable[global___PeerInfo] | None = ...,
-    ) -> None: ...
-    def ClearField(self, field_name: typing.Literal["peers", b"peers", "status", b"status"]) -> None: ...
-
-global___DialResponse = DialResponse
-
-@typing.final
-class PeerInfo(google.protobuf.message.Message):
-    """Peer information"""
-
-    DESCRIPTOR: google.protobuf.descriptor.Descriptor
-
-    ID_FIELD_NUMBER: builtins.int
-    ADDRS_FIELD_NUMBER: builtins.int
-    SUCCESS_FIELD_NUMBER: builtins.int
-    id: builtins.bytes
-    success: builtins.bool
-    @property
-    def addrs(self) -> google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.bytes]: ...
-    def __init__(
-        self,
-        *,
-        id: builtins.bytes = ...,
-        addrs: collections.abc.Iterable[builtins.bytes] | None = ...,
-        success: builtins.bool = ...,
-    ) -> None: ...
-    def ClearField(self, field_name: typing.Literal["addrs", b"addrs", "id", b"id", "success", b"success"]) -> None: ...
-
-global___PeerInfo = PeerInfo
+Global___Message: _TypeAlias = Message  # noqa: Y015
