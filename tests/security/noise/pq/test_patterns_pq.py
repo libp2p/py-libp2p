@@ -4,14 +4,9 @@ Tests for PatternXXhfs: the Noise XXhfs handshake with ML-KEM-768.
 Follows TDD: these tests are written before the implementation and initially fail.
 """
 
-import math
-
 import pytest
-from multiaddr import Multiaddr
 import trio
 
-from libp2p.abc import IRawConnection
-from libp2p.connection_types import ConnectionType
 from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.crypto.x25519 import X25519PrivateKey
 from libp2p.peer.id import ID
@@ -19,107 +14,11 @@ from libp2p.security.noise.exceptions import (
     PeerIDMismatchesPubkey,
 )
 from libp2p.security.noise.pq.patterns_pq import PatternXXhfs
-
-# ---------------------------------------------------------------------------
-# In-memory connection helpers
-# ---------------------------------------------------------------------------
-
-
-class _MemoryConn(IRawConnection):
-    """
-    Async in-memory bidirectional stream backed by trio memory channels.
-
-    Implements IRawConnection for use in handshake tests.
-    """
-
-    is_initiator: bool = False
-
-    def __init__(self, send_chan, recv_chan) -> None:
-        self._send = send_chan
-        self._recv = recv_chan
-        self._buf = bytearray()
-
-    async def read(self, n: int | None = None) -> bytes:
-        while not self._buf:
-            try:
-                chunk = await self._recv.receive()
-            except trio.EndOfChannel:
-                return b""
-            self._buf.extend(chunk)
-        if n is None:
-            data = bytes(self._buf)
-            self._buf.clear()
-            return data
-        data = bytes(self._buf[:n])
-        del self._buf[:n]
-        return data
-
-    async def write(self, data: bytes) -> None:
-        await self._send.send(bytes(data))
-
-    async def close(self) -> None:
-        await self._send.aclose()
-
-    def get_remote_address(self) -> tuple[str, int] | None:
-        return None
-
-    def get_transport_addresses(self) -> list[Multiaddr]:
-        return []
-
-    def get_connection_type(self) -> ConnectionType:
-        return ConnectionType.UNKNOWN
-
-
-class _WriteCapture(IRawConnection):
-    """Wraps a connection and records every call to write()."""
-
-    is_initiator: bool = False
-
-    def __init__(self, inner: _MemoryConn) -> None:
-        self._inner = inner
-        self.writes: list[bytes] = []
-
-    async def read(self, n: int | None = None) -> bytes:
-        return await self._inner.read(n)
-
-    async def write(self, data: bytes) -> None:
-        self.writes.append(bytes(data))
-        await self._inner.write(data)
-
-    async def close(self) -> None:
-        await self._inner.close()
-
-    def get_remote_address(self) -> tuple[str, int] | None:
-        return None
-
-    def get_transport_addresses(self) -> list[Multiaddr]:
-        return []
-
-    def get_connection_type(self) -> ConnectionType:
-        return ConnectionType.UNKNOWN
-
-
-def _make_conn_pair() -> tuple[_MemoryConn, _MemoryConn]:
-    """Create a pair of in-memory connections wired together."""
-    a_to_b_send, a_to_b_recv = trio.open_memory_channel(math.inf)
-    b_to_a_send, b_to_a_recv = trio.open_memory_channel(math.inf)
-    init_conn = _MemoryConn(a_to_b_send, b_to_a_recv)
-    resp_conn = _MemoryConn(b_to_a_send, a_to_b_recv)
-    return init_conn, resp_conn
-
-
-def _make_pattern() -> tuple[PatternXXhfs, object, object, ID]:
-    """Create a fresh PatternXXhfs with newly-generated keys."""
-    kp = create_new_key_pair()
-    noise_key = X25519PrivateKey.new()
-    peer = ID.from_pubkey(kp.public_key)
-    pattern = PatternXXhfs(
-        local_peer=peer,
-        libp2p_privkey=kp.private_key,
-        noise_static_key=noise_key,
-    )
-    return pattern, kp, noise_key, peer
-
+from tests.security.noise.pq.helpers import (
+    WriteCapture as _WriteCapture,
+    make_conn_pair as _make_conn_pair,
+    make_pattern as _make_pattern,
+)
 
 # ---------------------------------------------------------------------------
 # Tests

@@ -39,6 +39,7 @@ from libp2p.abc import (
 )
 from libp2p.crypto.keys import PrivateKey
 from libp2p.crypto.x25519 import X25519PublicKey
+from libp2p.exceptions import BaseLibp2pError
 from libp2p.io.abc import (
     EncryptedMsgReadWriter,
     ReadWriteCloser,
@@ -47,6 +48,7 @@ from libp2p.peer.id import ID
 from libp2p.security.secure_session import SecureSession
 
 from ..exceptions import (
+    HandshakeMalformed,
     InvalidSignature,
     PeerIDMismatchesPubkey,
 )
@@ -75,6 +77,73 @@ _X25519_SIZE = 32
 _AEAD_TAG = 16
 _KEM_CT_ENC_SIZE = MLKEM768_CT_SIZE + _AEAD_TAG  # 1088 + 16 = 1104
 _S_ENC_SIZE = _X25519_SIZE + _AEAD_TAG  # 32   + 16 = 48
+
+# Fixed-token size of each handshake message, i.e. everything before the
+# trailing (variable-length) encrypted payload.
+_MSG_A_FIXED = _X25519_SIZE + MLKEM768_PK_SIZE  # e + e1            = 1216
+_MSG_B_FIXED = _X25519_SIZE + _KEM_CT_ENC_SIZE + _S_ENC_SIZE  # e + ekem1 + s = 1184
+_MSG_C_FIXED = _S_ENC_SIZE  # s                 =   48
+
+# Ceiling on the trailing payload. A libp2p identity payload (public key plus
+# signature, protobuf-encoded) is a few hundred bytes; frames are already
+# capped at 65535 by NoisePacketReadWriter, but that is far too generous for
+# an unauthenticated blob that gets mixed into the transcript hash.
+_MAX_HANDSHAKE_PAYLOAD = 4096
+
+_ZERO_X25519 = b"\x00" * _X25519_SIZE
+
+
+def _check_message(buf: bytes, fixed: int, what: str) -> None:
+    """
+    Reject a handshake message whose total length cannot be parsed.
+
+    Checked before any field is sliced, so a short message never reaches a
+    cryptographic primitive as a truncated operand.
+    """
+    if len(buf) < fixed:
+        raise HandshakeMalformed(f"{what}: need at least {fixed} bytes, got {len(buf)}")
+    ceiling = fixed + _MAX_HANDSHAKE_PAYLOAD
+    if len(buf) > ceiling:
+        raise HandshakeMalformed(
+            f"{what}: {len(buf)} bytes exceeds the {ceiling}-byte ceiling"
+        )
+
+
+def _take(buf: bytes, offset: int, size: int, what: str) -> tuple[bytes, int]:
+    """Slice exactly ``size`` bytes at ``offset`` or fail closed."""
+    end = offset + size
+    if len(buf) < end:
+        raise HandshakeMalformed(
+            f"{what}: need {size} bytes at offset {offset}, "
+            f"have {max(len(buf) - offset, 0)}"
+        )
+    return buf[offset:end], end
+
+
+def _dh(sk: bytes, pk: bytes, what: str) -> bytes:
+    """
+    X25519 with explicit operand validation and a contributory-behaviour check.
+
+    PyNaCl's ``crypto_scalarmult`` performs no length validation of its own: it
+    hands both buffers to libsodium, which unconditionally reads 32 bytes from
+    each. A short public key therefore causes an out-of-bounds read in native
+    code, so the length must be enforced here (audit F-001).
+
+    The all-zero result of multiplying by a low-order point is also rejected,
+    per RFC 7748 section 6.1 (audit F-005).
+    """
+    if len(sk) != _X25519_SIZE or len(pk) != _X25519_SIZE:
+        raise HandshakeMalformed(
+            f"{what}: X25519 operands must be {_X25519_SIZE} bytes, "
+            f"got secret={len(sk)} public={len(pk)}"
+        )
+    try:
+        shared = bytes(crypto_scalarmult(sk, pk))
+    except Exception as exc:
+        raise HandshakeMalformed(f"{what}: X25519 exchange failed") from exc
+    if shared == _ZERO_X25519:
+        raise HandshakeMalformed(f"{what}: X25519 produced an all-zero shared secret")
+    return shared
 
 
 class PQTransportReadWriter(EncryptedMsgReadWriter):
@@ -167,6 +236,38 @@ class PatternXXhfs:
         self, conn: IRawConnection, remote_peer: ID | None
     ) -> ISecureConn:
         """
+        Run the initiator side of the XXhfs handshake, failing closed.
+
+        Wraps :meth:`_handshake_outbound` so that no backend exception (PyNaCl,
+        ``cryptography``, ``struct``, ``kyber-py``) crosses the
+        ``ISecureTransport`` boundary as itself. py-libp2p's own errors, which
+        callers already handle, pass through unchanged.
+
+        Args:
+            conn: Raw underlying connection.
+            remote_peer: Expected responder peer ID, or ``None`` to skip check.
+
+        Returns:
+            SecureSession ready for post-handshake transport.
+
+        Raises:
+            PeerIDMismatchesPubkey: Responder peer ID mismatch (non-None only).
+            InvalidSignature: Responder identity signature is invalid.
+            HandshakeMalformed: Message B was truncated, oversized or
+                otherwise unparseable, or a primitive rejected its input.
+
+        """
+        try:
+            return await self._handshake_outbound(conn, remote_peer)
+        except BaseLibp2pError:
+            raise
+        except Exception as exc:
+            raise HandshakeMalformed("XXhfs outbound handshake failed") from exc
+
+    async def _handshake_outbound(
+        self, conn: IRawConnection, remote_peer: ID | None
+    ) -> ISecureConn:
+        """
         Run the initiator side of the XXhfs handshake.
 
         The responder's libp2p identity signature is always verified. When
@@ -191,6 +292,7 @@ class PatternXXhfs:
         Raises:
             PeerIDMismatchesPubkey: Responder peer ID mismatch (non-None only).
             InvalidSignature: Responder identity signature is invalid.
+            HandshakeMalformed: Message B failed length validation.
 
         """
         ss = SymmetricState()
@@ -218,21 +320,21 @@ class PatternXXhfs:
 
         # ---- Message B: e, ee, ekem1, s, es --------------------------
         msg_b = await pkt.read_msg()
-        offset = 0
         logger.debug("handshake_outbound: msg B received (%d B)", len(msg_b))
+        # Validate the whole message before touching any field, so a truncated
+        # or oversized message B is rejected rather than silently sliced short.
+        _check_message(msg_b, _MSG_B_FIXED, "msg B")
+        offset = 0
 
         # e: responder's ephemeral X25519 public key
-        resp_e_pk = msg_b[offset : offset + _X25519_SIZE]
-        offset += _X25519_SIZE
+        resp_e_pk, offset = _take(msg_b, offset, _X25519_SIZE, "msg B e")
         ss.mix_hash(resp_e_pk)
 
         # ee: DH(e_init, e_resp)
-        dh_ee = bytes(crypto_scalarmult(e_sk, resp_e_pk))
-        ss.mix_key(dh_ee)
+        ss.mix_key(_dh(e_sk, resp_e_pk, "msg B ee"))
 
         # ekem1: decrypt KEM ciphertext, then mix KEM shared secret
-        enc_ct = msg_b[offset : offset + _KEM_CT_ENC_SIZE]
-        offset += _KEM_CT_ENC_SIZE
+        enc_ct, offset = _take(msg_b, offset, _KEM_CT_ENC_SIZE, "msg B ekem1")
         ct = ss.decrypt_and_hash(enc_ct)  # decrypt with ee-derived key
         ss_kem = self.kem.decapsulate(ct, e1_sk)  # recover KEM shared secret
         # ekem1 uses mix_key (2-output HKDF), same as DH tokens per the XXhfs spec.
@@ -240,14 +342,12 @@ class PatternXXhfs:
         ss.mix_key(ss_kem)
 
         # s: decrypt responder's static public key
-        enc_s = msg_b[offset : offset + _S_ENC_SIZE]
-        offset += _S_ENC_SIZE
+        enc_s, offset = _take(msg_b, offset, _S_ENC_SIZE, "msg B s")
         resp_s_pk_bytes = ss.decrypt_and_hash(enc_s)
         resp_s_pk = X25519PublicKey.from_bytes(resp_s_pk_bytes)
 
         # es: DH(e_init, s_resp)
-        dh_es = bytes(crypto_scalarmult(e_sk, resp_s_pk_bytes))
-        ss.mix_key(dh_es)
+        ss.mix_key(_dh(e_sk, resp_s_pk_bytes, "msg B es"))
 
         # Decrypt responder's handshake payload
         resp_payload_bytes = ss.decrypt_and_hash(msg_b[offset:])
@@ -267,8 +367,7 @@ class PatternXXhfs:
         enc_s_c = ss.encrypt_and_hash(self._static_pk_bytes())
 
         # se: DH(s_init, e_resp)
-        dh_se = bytes(crypto_scalarmult(self._static_sk_bytes(), resp_e_pk))
-        ss.mix_key(dh_se)
+        ss.mix_key(_dh(self._static_sk_bytes(), resp_e_pk, "msg C se"))
 
         # Encrypt our handshake payload
         enc_payload_c = ss.encrypt_and_hash(self._make_payload())
@@ -293,6 +392,37 @@ class PatternXXhfs:
 
     async def handshake_inbound(self, conn: IRawConnection) -> ISecureConn:
         """
+        Run the responder side of the XXhfs handshake, failing closed.
+
+        Wraps :meth:`_handshake_inbound` so that no backend exception (PyNaCl,
+        ``cryptography``, ``struct``, ``kyber-py``) crosses the
+        ``ISecureTransport`` boundary as itself. py-libp2p's own errors, which
+        callers already handle, pass through unchanged.
+
+        This is the fully unauthenticated entry point: every byte of messages
+        A and C is attacker-chosen.
+
+        Args:
+            conn: Raw underlying connection.
+
+        Returns:
+            SecureSession ready for post-handshake transport.
+
+        Raises:
+            InvalidSignature: If the initiator's identity signature is invalid.
+            HandshakeMalformed: Message A or C was truncated, oversized or
+                otherwise unparseable, or a primitive rejected its input.
+
+        """
+        try:
+            return await self._handshake_inbound(conn)
+        except BaseLibp2pError:
+            raise
+        except Exception as exc:
+            raise HandshakeMalformed("XXhfs inbound handshake failed") from exc
+
+    async def _handshake_inbound(self, conn: IRawConnection) -> ISecureConn:
+        """
         Run the responder side of the XXhfs handshake.
 
         Args:
@@ -303,6 +433,7 @@ class PatternXXhfs:
 
         Raises:
             InvalidSignature: If the initiator's identity signature is invalid.
+            HandshakeMalformed: Message A or C failed length validation.
 
         """
         ss = SymmetricState()
@@ -314,16 +445,17 @@ class PatternXXhfs:
         # ---- Message A: receive e, e1 --------------------------------
         msg_a = await pkt.read_msg()
         logger.debug("handshake_inbound: msg A received (%d B)", len(msg_a))
+        # Pre-authentication: validate the whole message before touching any
+        # field. Every byte here is attacker-chosen.
+        _check_message(msg_a, _MSG_A_FIXED, "msg A")
         offset = 0
 
         # e: initiator's ephemeral X25519 public key
-        init_e_pk = msg_a[offset : offset + _X25519_SIZE]
-        offset += _X25519_SIZE
+        init_e_pk, offset = _take(msg_a, offset, _X25519_SIZE, "msg A e")
         ss.mix_hash(init_e_pk)
 
         # e1: initiator's ML-KEM-768 KEM public key
-        init_e1_pk = msg_a[offset : offset + MLKEM768_PK_SIZE]
-        offset += MLKEM768_PK_SIZE
+        init_e1_pk, offset = _take(msg_a, offset, MLKEM768_PK_SIZE, "msg A e1")
         ss.mix_hash(init_e1_pk)
 
         # Empty payload (no cipher key yet)
@@ -336,8 +468,7 @@ class PatternXXhfs:
         ss.mix_hash(e_pk)
 
         # ee: DH(e_resp, e_init)
-        dh_ee = bytes(crypto_scalarmult(e_sk, init_e_pk))
-        ss.mix_key(dh_ee)
+        ss.mix_key(_dh(e_sk, init_e_pk, "msg A ee"))
 
         # ekem1: encapsulate to initiator's e1, encrypt ct, then mix ss_kem
         ct, ss_kem_bytes = self.kem.encapsulate(init_e1_pk)
@@ -350,8 +481,7 @@ class PatternXXhfs:
         enc_s = ss.encrypt_and_hash(self._static_pk_bytes())
 
         # es: DH(s_resp, e_init)
-        dh_es = bytes(crypto_scalarmult(self._static_sk_bytes(), init_e_pk))
-        ss.mix_key(dh_es)
+        ss.mix_key(_dh(self._static_sk_bytes(), init_e_pk, "msg B es"))
 
         # Encrypt our handshake payload
         enc_payload_b = ss.encrypt_and_hash(self._make_payload())
@@ -362,23 +492,24 @@ class PatternXXhfs:
         # ---- Message C: receive s, se --------------------------------
         msg_c = await pkt.read_msg()
         logger.debug("handshake_inbound: msg C received (%d B)", len(msg_c))
+        _check_message(msg_c, _MSG_C_FIXED, "msg C")
         offset = 0
 
         # s: decrypt initiator's static public key
-        enc_s_c = msg_c[offset : offset + _S_ENC_SIZE]
-        offset += _S_ENC_SIZE
+        enc_s_c, offset = _take(msg_c, offset, _S_ENC_SIZE, "msg C s")
         init_s_pk_bytes = ss.decrypt_and_hash(enc_s_c)
+        # The plaintext length is peer-controlled even though the AEAD tag
+        # verified, so parse it into a key before it reaches the DH.
+        init_s_pk = X25519PublicKey.from_bytes(init_s_pk_bytes)
 
         # se: DH(e_resp, s_init)
-        dh_se = bytes(crypto_scalarmult(e_sk, init_s_pk_bytes))
-        ss.mix_key(dh_se)
+        ss.mix_key(_dh(e_sk, init_s_pk_bytes, "msg C se"))
 
         # Decrypt initiator's handshake payload
         init_payload_bytes = ss.decrypt_and_hash(msg_c[offset:])
         init_payload = NoiseHandshakePayload.deserialize(init_payload_bytes)
 
         # Verify initiator's libp2p identity signature
-        init_s_pk = X25519PublicKey.from_bytes(init_s_pk_bytes)
         if not verify_handshake_payload_sig(init_payload, init_s_pk):
             raise InvalidSignature
         init_peer_id = ID.from_pubkey(init_payload.id_pubkey)
