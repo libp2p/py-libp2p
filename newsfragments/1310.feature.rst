@@ -1,0 +1,8 @@
+Made the native ML-KEM-768 backend the default for the post-quantum Noise
+XXhfs suite. ``make_fast_kem()`` now selects ``MLKEM768NativeKem`` (built on
+``cryptography``) where the build supports it, resolves that choice once per
+process instead of once per connection, and ``TransportPQ`` resolves it at
+construction so a host with no working backend fails immediately rather than
+on its first dial. Falling back to the pure-Python kyber-py backend is now
+logged at warning level, because kyber-py is not constant time and its own
+package metadata says it must not be used for cryptographic applications.

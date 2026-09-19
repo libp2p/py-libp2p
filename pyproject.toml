@@ -25,11 +25,19 @@ dependencies = [
     "coincurve==21.0.0",
     # 17 modules already import cryptography (TLS, QUIC, WebRTC, WebTransport,
     # RSA and X25519 keys), but it was only ever pulled in transitively through
-    # aioquic. 48.0.0 is the floor: the hazmat.primitives.asymmetric.mlkem
-    # module used by the native ML-KEM-768 backend landed in 47.0.0 for AWS-LC
-    # and BoringSSL only, and 48.0.0 added OpenSSL 3.5.0+, which is what the
-    # published wheels are built against.
-    "cryptography>=48.0.0",
+    # aioquic. 42.0.0 is what that code actually needs: the newest API it uses
+    # unguarded is x509.Certificate.not_valid_before_utc / not_valid_after_utc
+    # (libp2p/transport/quic/security.py and
+    # libp2p/transport/webtransport/certificate.py), added in cryptography
+    # 42.0.0. That is also exactly the floor aioquic declares, so this adds no
+    # new constraint in practice.
+    #
+    # The native ML-KEM-768 backend needs 48.0.0, but that belongs to the
+    # 'pq' extra below rather than here: pyOpenSSL <= 25.3.0 caps cryptography
+    # below 47, so a 48 floor in the core dependencies makes those
+    # environments unresolvable for every user, including the ones who never
+    # touch the post-quantum transport.
+    "cryptography>=42.0.0",
     "exceptiongroup>=1.2.0; python_version < '3.11'",
     "fastecdsa==2.3.2; sys_platform != 'win32'",
     "grpcio>=1.41.0",
@@ -72,11 +80,16 @@ Homepage = "https://github.com/libp2p/py-libp2p"
 [project.optional-dependencies]
 webrtc = ["aiortc>=1.15,<2.0"]
 health-demo = ["rich>=13.0"]
-# The XXhfs suite prefers the native ML-KEM-768 backend built on cryptography,
-# which is a hard dependency above. kyber-py stays as the pure-Python fallback
-# for builds of cryptography without ML-KEM support, and as the second
-# implementation the cross-backend parity tests check against.
-pq = ["kyber-py>=0.9.0"]
+# The XXhfs suite prefers the native ML-KEM-768 backend, which needs
+# cryptography 48.0.0: hazmat.primitives.asymmetric.mlkem landed in 47.0.0 for
+# AWS-LC and BoringSSL only, and 48.0.0 added OpenSSL 3.5.0+, which is what
+# the published wheels are built against. The floor lives here rather than in
+# the core dependencies because pyOpenSSL <= 25.3.0 caps cryptography below
+# 47; asking for it unconditionally would make those environments
+# unresolvable. kyber-py stays as the pure-Python fallback for builds of
+# cryptography without ML-KEM support, and as the second implementation the
+# cross-backend parity tests check against.
+pq = ["cryptography>=48.0.0", "kyber-py>=0.9.0"]
 
 [project.scripts]
 chat-demo = "examples.chat.chat:main"
@@ -137,6 +150,9 @@ test = [
     "pytest-xdist>=2.4.0",
     "pytest-mock>=3.15.1",
     "pytest-rerunfailures>=12.0",
+    # Both ML-KEM-768 backends, so CI exercises the cross-backend parity and
+    # mixed-backend handshake tests instead of skipping the native half.
+    "cryptography>=48.0.0",
     "kyber-py>=0.9.0",
 ]
 a2a-demo = [
