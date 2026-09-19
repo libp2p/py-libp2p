@@ -72,6 +72,9 @@ from .common import (
     format_time_rfc3339,
     parse_time_received,
 )
+from .grid_routing_table import (
+    GridRoutingTable,
+)
 from .pb.kademlia_pb2 import (
     Message,
     Record,
@@ -199,6 +202,7 @@ class KadDHT(Service):
         enable_providers: bool = True,
         enable_values: bool = True,
         strict_validation: bool = False,
+        routing_table_type: str = "standard",
         persist_dir: str | None = None,
         max_peers_per_subnet: int | None = None,
         max_peers_per_subnet_table: int = 0,
@@ -245,6 +249,9 @@ class KadDHT(Service):
             await dht.put_value("/myapp/key", b"value")  # OK
             await dht.put_value("/pk/...", pubkey)       # OK
             await dht.put_value("plain-key", b"value")   # Raises InvalidRecordType
+        :param routing_table_type: Routing table implementation to use. "standard"
+            keeps the default dynamic k-bucket table; "grid" uses the fixed 256-bucket
+            grid topology table.
         """
         super().__init__()
 
@@ -259,6 +266,16 @@ class KadDHT(Service):
         self.enable_random_walk = enable_random_walk
 
         # Initialize the routing table
+        if routing_table_type == "standard":
+            self.routing_table = RoutingTable(self.local_peer_id, host)
+        elif routing_table_type == "grid":
+            self.routing_table = GridRoutingTable(self.local_peer_id, host)
+        else:
+            raise ValueError(
+                "routing_table_type must be either 'standard' or 'grid', "
+                f"got {routing_table_type!r}"
+            )
+            
         self.routing_table = RoutingTable(
             self.local_peer_id,
             host,
