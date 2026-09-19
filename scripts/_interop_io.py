@@ -7,12 +7,40 @@ LOCAL/PEER/SENT/RECV/INTEROP_OK on stdout.
 """
 
 import asyncio
+from collections.abc import Coroutine
+from typing import Any, TypeVar
 
 from libp2p.abc import ISecureConn
 from libp2p.io.abc import ReadWriteCloser
 
 IMPL = "Python"
 GREETING_PREFIX = "hello from "
+
+# "hello from <Impl>\n" is under 32 bytes. Anything past 1 KB is a peer that
+# is not speaking the contract, and without a cap it would grow the buffer
+# until the process is OOM-killed. Nim already behaves this way: it reads one
+# framed message and raises "truncated greeting" if it has no newline.
+MAX_GREETING_BYTES = 1024
+
+# Overall deadline for a harness run, so a peer that connects and then says
+# nothing cannot pin the process and its port indefinitely. Comfortably
+# longer than the 60 s the matrix runner allows a dialer, so a slow but
+# healthy run is never turned into a failure by this bound.
+OVERALL_TIMEOUT_SECONDS = 120.0
+
+_T = TypeVar("_T")
+
+
+async def with_deadline(
+    coro: Coroutine[Any, Any, _T],
+    what: str,
+    timeout: float = OVERALL_TIMEOUT_SECONDS,
+) -> _T:
+    """Await ``coro`` under a deadline, reporting which phase ran out of time."""
+    try:
+        return await asyncio.wait_for(coro, timeout)
+    except TimeoutError as exc:
+        raise TimeoutError(f"{what} did not finish within {timeout:g}s") from exc
 
 
 class AsyncioTCPConn(ReadWriteCloser):
@@ -71,6 +99,11 @@ async def read_greeting(session: ISecureConn) -> str:
         if not chunk:
             raise EOFError("connection closed before a greeting arrived")
         buf += chunk
+        if len(buf) > MAX_GREETING_BYTES:
+            raise ValueError(
+                f"truncated greeting: {len(buf)} bytes with no newline, "
+                f"cap is {MAX_GREETING_BYTES}"
+            )
     line = buf.split(b"\n", 1)[0].decode()
     out(f"RECV {line}")
     if not line.startswith(GREETING_PREFIX) or line == GREETING_PREFIX:

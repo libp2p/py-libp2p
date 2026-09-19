@@ -268,13 +268,18 @@ async def _run_one(index: int, base: int) -> dict[str, Any]:
     init_cap = _Capture(_MemoryConn(a_send, b_recv))
     resp_cap = _Capture(_MemoryConn(b_send, a_recv))
 
-    # Ephemerals are drawn in handshake order: initiator first, then responder.
-    real_random = nacl.utils.random
-    nacl.utils.random = _SeededRandom([e_i_priv, e_r_priv])  # type: ignore[assignment]
-
     sessions: list[Any] = [None, None]
     recorder = _SplitRecorder()
+
+    # Ephemerals are drawn in handshake order: initiator first, then responder.
+    # The patch is applied inside the try so the finally always restores it;
+    # assigning before the guard would leave nacl.utils.random seeded for the
+    # rest of the process if anything below raised (harness audit F-007).
+    real_random = nacl.utils.random
     try:
+        nacl.utils.random = _SeededRandom(  # type: ignore[assignment]
+            [e_i_priv, e_r_priv]
+        )
         with recorder:
             async with trio.open_nursery() as nursery:
 

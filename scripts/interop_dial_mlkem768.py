@@ -17,7 +17,13 @@ import asyncio
 import sys
 from typing import cast
 
-from _interop_io import AsyncioTCPConn, out, read_greeting, send_greeting
+from _interop_io import (
+    AsyncioTCPConn,
+    out,
+    read_greeting,
+    send_greeting,
+    with_deadline,
+)
 
 from libp2p.abc import IRawConnection
 from libp2p.crypto.ed25519 import create_new_key_pair as ed25519_key_pair
@@ -52,7 +58,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=9999)
     try:
-        asyncio.run(main(parser.parse_args().port))
+        # Overall deadline: a silent listener must not pin this process.
+        asyncio.run(with_deadline(main(parser.parse_args().port), "interop dialer run"))
     except Exception as exc:  # harness boundary: report and exit non-zero
         print(f"ERROR {exc!r}", file=sys.stderr, flush=True)
         sys.exit(1)
