@@ -22,6 +22,24 @@ randomness is replaced by a deterministic one for the duration:
 **The seeded keys in the output are for reproducibility only. They must never be
 used for anything real.**
 
+Why generation stays on kyber-py
+--------------------------------
+py-libp2p's default runtime backend is now the native ``MLKEM768NativeKem``, built
+on ``cryptography``, but this generator keeps using kyber-py.
+
+Keygen would port cleanly: ``MLKEM768PrivateKey.from_seed_bytes(d || z)`` was
+checked against ``ML_KEM_768.key_derive(d || z)`` on the same 64-byte seed and
+produces a byte-identical 1184-byte encapsulation key, which is pinned by
+``tests/security/noise/pq/test_kem_native.py``.
+
+Encapsulation would not. ``cryptography``'s ``MLKEM768PublicKey.encapsulate()``
+takes no randomness argument and exposes no deterministic equivalent of FIPS 203
+``_encaps_internal(ek, m)``, so there is no way to fix the encapsulation
+randomness and the vectors could not be reproduced. kyber-py therefore remains
+the generator's backend. This costs nothing in fidelity: the two backends are
+interoperable, so vectors generated with one bind the other, and the native
+backend is checked against these same fixture bytes by the test suite.
+
 Usage:
     python scripts/gen_pq_test_vectors.py [-o OUTPUT.json] [-n COUNT]
 """
