@@ -65,10 +65,12 @@ Homepage = "https://github.com/libp2p/py-libp2p"
 [project.optional-dependencies]
 webrtc = ["aiortc>=1.15,<2.0"]
 health-demo = ["rich>=13.0"]
+# The XXhfs suite uses kyber-py for ML-KEM-768. There is no native backend:
+# a "pq-fast" extra used to declare liboqs-python, but the liboqs backend was
+# removed when the suite moved to raw ML-KEM-768 and nothing has imported it
+# since, so the extra only installed an unused native dependency.
+# make_fast_kem() is kept as a factory so a native backend can be added later.
 pq = ["kyber-py>=0.9.0"]
-pq-fast = [
-    "liboqs-python>=0.12.0",
-]
 
 [project.scripts]
 chat-demo = "examples.chat.chat:main"

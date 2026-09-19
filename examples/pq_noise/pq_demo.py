@@ -80,10 +80,9 @@ async def run() -> None:
             print(f"[dialer]   PeerID : {dialer_id}")
 
             info = info_from_p2p_addr(multiaddr.Multiaddr(listener_addr))
-            # Note: liboqs-python auto-installer runs once per process on systems
-            # without a pre-built liboqs binary. After the ~7s countdown it falls
-            # back to the pure-Python kyber-py backend. The handshake itself is
-            # correct either way.
+            # Note: the KEM is kyber-py, which is pure Python. ML-KEM-768
+            # keygen costs roughly 20 ms there, so the handshake timing below
+            # is dominated by that rather than by the network.
             print("[dialer]   Connecting (XXhfs handshake starting)...")
             t_connect = time.perf_counter()
             await dialer.connect(info)
