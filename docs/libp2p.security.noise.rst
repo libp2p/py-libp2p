@@ -8,6 +8,7 @@ Subpackages
    :maxdepth: 4
 
    libp2p.security.noise.pb
+   libp2p.security.noise.pq
 
 Submodules
 ----------

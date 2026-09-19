@@ -24,3 +24,15 @@ class NoiseStateError(NoiseFailure):
 
 class PeerIDMismatchesPubkey(NoiseFailure):
     pass
+
+
+class HandshakeMalformed(NoiseFailure):
+    """
+    Raised when a handshake message is truncated, oversized or otherwise
+    malformed.
+
+    Parsing is fail-closed: the message is rejected before any field is used,
+    so no attacker-chosen slice reaches a cryptographic primitive. This also
+    keeps backend exceptions (PyNaCl, ``cryptography``, ``struct``) from
+    crossing the ``ISecureTransport`` boundary as themselves.
+    """
