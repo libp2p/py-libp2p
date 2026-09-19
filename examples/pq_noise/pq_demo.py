@@ -80,9 +80,13 @@ async def run() -> None:
             print(f"[dialer]   PeerID : {dialer_id}")
 
             info = info_from_p2p_addr(multiaddr.Multiaddr(listener_addr))
-            # Note: the KEM is kyber-py, which is pure Python. ML-KEM-768
-            # keygen costs roughly 20 ms there, so the handshake timing below
-            # is dominated by that rather than by the network.
+            # Note: the KEM backend is whatever make_fast_kem() picks, which
+            # is the native one (cryptography) wherever the build supports it
+            # and pure-Python kyber-py otherwise. The timing below therefore
+            # says more about which backend loaded than about the protocol:
+            # ML-KEM-768 keygen is around 0.3 ms natively and a few
+            # milliseconds on kyber-py. Run benchmarks/bench_noise_pq.py for
+            # a measured comparison of the two.
             print("[dialer]   Connecting (XXhfs handshake starting)...")
             t_connect = time.perf_counter()
             await dialer.connect(info)

@@ -31,6 +31,13 @@ N_HANDSHAKES = 50  # handshake latency iterations
 N_THROUGHPUT = 200  # throughput iterations per message size
 N_KEM = 200  # KEM micro-benchmark iterations
 
+# Human-readable names for the IKem implementations, so a printed number is
+# always attributable to a backend.
+_BACKEND_NAMES = {
+    "MLKEM768NativeKem": "cryptography (native)",
+    "MLKEM768Kem": "kyber-py (pure Python)",
+}
+
 # ---------------------------------------------------------------------------
 # In-memory connection (same as test helpers)
 # ---------------------------------------------------------------------------
@@ -143,10 +150,10 @@ def _stats(samples_s: list[float]) -> tuple[float, float]:
 # ---------------------------------------------------------------------------
 
 
-def _bench_one_kem(kem, n_warmup: int = None, n_iter: int = None) -> dict:
+def _bench_one_kem(kem, n_warmup: int | None = None, n_iter: int | None = None) -> dict:
     """Run keygen/encap/decap micro-benchmarks for any IKem backend."""
-    n_warmup = n_warmup or N_WARMUP
-    n_iter = n_iter or N_KEM
+    n_warmup = N_WARMUP if n_warmup is None else n_warmup
+    n_iter = N_KEM if n_iter is None else n_iter
 
     for _ in range(n_warmup):
         kem.keygen()
@@ -188,10 +195,19 @@ def _bench_one_kem(kem, n_warmup: int = None, n_iter: int = None) -> dict:
 
 
 def bench_kem() -> dict:
-    """Benchmark the backend a handshake would actually pick."""
+    """
+    Benchmark the backend a handshake would actually pick.
+
+    The result carries the backend's name under ``"backend"``: the numbers
+    are meaningless without it, since the two backends differ by more than an
+    order of magnitude on keygen.
+    """
     from libp2p.security.noise.pq.kem_backends import make_fast_kem
 
-    return _bench_one_kem(make_fast_kem())
+    kem = make_fast_kem()
+    name = _BACKEND_NAMES.get(type(kem).__name__, type(kem).__name__)
+    print(f"  Benchmarking the selected backend: {name}…")
+    return {"backend": name, **_bench_one_kem(kem)}
 
 
 def bench_kem_backends() -> dict:
@@ -207,7 +223,7 @@ def bench_kem_backends() -> dict:
     results = {}
     try:
         native = MLKEM768NativeKem()
-    except ImportError as exc:
+    except Exception as exc:
         print(f"  Skipping native backend: {exc}")
     else:
         print("  Benchmarking cryptography (native)…")
@@ -414,9 +430,6 @@ async def run_all() -> dict:
     print("  " + "-" * (len(header) - 2))
     baseline_keygen = backends["kyber-py"]["keygen_ms"]
     for name, b in backends.items():
-        if b is None:
-            print(f"  {name:<20} {'not available':>10}")
-            continue
         speedup = (
             baseline_keygen / b["keygen_ms"] if b["keygen_ms"] > 0 else float("inf")
         )
@@ -428,7 +441,7 @@ async def run_all() -> dict:
         )
 
     print_section(
-        "ML-KEM-768 KEM micro-benchmarks (the backend make_fast_kem() selects here)"
+        f"ML-KEM-768 KEM micro-benchmarks (make_fast_kem() selected: {kem['backend']})"
     )
     print(f"  keygen     : {_fmt(kem['keygen_ms'], kem['keygen_ops'])}")
     print(f"  encapsulate: {_fmt(kem['encap_ms'], kem['encap_ops'])}")
@@ -498,6 +511,9 @@ def save_results(results: dict) -> None:
         f" throughput={N_THROUGHPUT}",
         "",
         "## ML-KEM-768 KEM Micro-benchmarks",
+        "",
+        f"Backend measured: **{kem['backend']}** (what `make_fast_kem()`"
+        " selected on this machine).",
         "",
         "| Operation | Median (ms) | Throughput (ops/s) |",
         "|-----------|-------------|--------------------|",
