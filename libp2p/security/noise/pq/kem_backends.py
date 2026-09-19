@@ -7,12 +7,18 @@ pre-computes keypairs so a handshake does not pay ML-KEM keygen inline.
 The default backend is the native one, ``MLKEM768NativeKem``, built on
 ``cryptography``'s ML-KEM. kyber-py (pure Python) is the fallback when the
 native backend is unavailable: see the note on ``make_fast_kem``.
+
+The choice is a property of the build, not of the connection, so it is made
+once per process and memoised in ``_select_kem_class``. Falling back to
+kyber-py is logged at warning level, because kyber-py is not constant time
+and its own metadata says it must not be used for cryptographic applications.
 """
 
 from __future__ import annotations
 
 import asyncio
 from collections import deque
+import functools
 import logging
 from typing import TYPE_CHECKING
 
@@ -26,6 +32,60 @@ _ML_KEM_768_CT_SIZE = 1088
 _X25519_KEY_SIZE = 32
 
 
+_FALLBACK_WARNING = (
+    "post-quantum Noise is falling back to the pure-Python kyber-py "
+    "ML-KEM-768 backend, because the native one is unavailable (%s). "
+    "kyber-py's own package metadata states that it is not constant time "
+    "and must not be used for cryptographic applications, so this peer's "
+    "ML-KEM decapsulation is exposed to timing side channels and is roughly "
+    "two orders of magnitude slower. Install a build of cryptography with "
+    "ML-KEM support (cryptography>=48.0.0 on OpenSSL 3.5.0+, AWS-LC or "
+    "BoringSSL) to get the native backend back."
+)
+
+_NO_BACKEND_ERROR = (
+    "no working ML-KEM-768 backend is available, so the post-quantum Noise "
+    "suite cannot run.\n"
+    "  native (cryptography): {native}\n"
+    "  fallback (kyber-py):   {pure}\n"
+    "Install a build of cryptography with ML-KEM support "
+    "(cryptography>=48.0.0 on OpenSSL 3.5.0+, AWS-LC or BoringSSL), or "
+    "install the pure-Python fallback with: pip install 'libp2p[pq]'"
+)
+
+
+@functools.lru_cache(maxsize=1)
+def _select_kem_class() -> type[IKem]:
+    """
+    Decide once which ML-KEM-768 backend this process uses.
+
+    Selection probes ``cryptography`` for ML-KEM support, so it is memoised:
+    it is a property of the build, not of the connection, and it used to be
+    re-run for every inbound connection before the peer had authenticated
+    anything.
+
+    Tests that change the availability of a backend must call
+    ``_select_kem_class.cache_clear()``.
+    """
+    from .kem import MLKEM768Kem, MLKEM768NativeKem
+
+    try:
+        MLKEM768NativeKem()
+    except Exception as native_exc:
+        # Deliberately broader than ImportError: a renamed upstream symbol
+        # (AttributeError) or an OpenSSL-level InternalError must fall back
+        # rather than escape raw from a connection setup path.
+        logger.warning(_FALLBACK_WARNING, native_exc)
+        try:
+            MLKEM768Kem()
+        except Exception as pure_exc:
+            raise ImportError(
+                _NO_BACKEND_ERROR.format(native=native_exc, pure=pure_exc)
+            ) from pure_exc
+        return MLKEM768Kem
+    return MLKEM768NativeKem
+
+
 def make_fast_kem() -> IKem:
     """
     Return the fastest available ML-KEM-768 KEM backend.
@@ -36,14 +96,12 @@ def make_fast_kem() -> IKem:
     native one is unavailable, which happens when ``cryptography`` predates
     48.0.0 or was built without ML-KEM support. The two backends interoperate
     on the wire, so the choice is local to each peer.
-    """
-    from .kem import MLKEM768Kem, MLKEM768NativeKem
 
-    try:
-        return MLKEM768NativeKem()
-    except ImportError as exc:
-        logger.debug("native ML-KEM-768 backend unavailable, using kyber-py: %s", exc)
-        return MLKEM768Kem()
+    The choice is made once per process; only the instance is fresh. When
+    neither backend works this raises a single ``ImportError`` naming both
+    causes.
+    """
+    return _select_kem_class()()
 
 
 class KeypairPool:
@@ -51,9 +109,17 @@ class KeypairPool:
     Pre-computes KEM keypairs during idle time to eliminate keygen latency
     on the connection critical path.
 
-    With kyber-py, keygen costs ~20 ms. A pool of 3 pre-generated keypairs
-    means 3 handshakes can proceed without paying any keygen cost. Background
-    refill uses asyncio.to_thread() so the event loop is not blocked.
+    A pool of 3 pre-generated keypairs means 3 handshakes can proceed without
+    paying any keygen cost. Background refill uses ``asyncio.to_thread()`` so
+    the event loop is not blocked.
+
+    How much this is worth depends entirely on the backend, and the case for
+    it is much weaker than it was. On kyber-py, keygen costs a few
+    milliseconds and dominates the handshake, so pooling is close to
+    essential. On the native backend, which is now the default, keygen is
+    around 0.3 ms, the same order as encapsulation, so the pool removes a
+    small constant rather than the main cost. Measure before adding one: see
+    ``benchmarks/bench_noise_pq.py``, which reports both backends.
 
     Usage:
         pool = await KeypairPool.create(kem, min_size=3)

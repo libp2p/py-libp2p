@@ -16,7 +16,9 @@ from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.crypto.keys import KeyPair
 from libp2p.crypto.x25519 import X25519PrivateKey
 from libp2p.peer.id import ID
+from libp2p.security.noise.pq.kem import IKem
 from libp2p.security.noise.pq.transport_pq import PROTOCOL_ID, TransportPQ
+from tests.security.noise.pq.helpers import KEM_BACKENDS, make_kem
 
 # ---------------------------------------------------------------------------
 # Shared in-memory connection helpers (mirrors test_patterns_pq.py)
@@ -71,13 +73,14 @@ def _make_conn_pair() -> tuple[_MemoryConn, _MemoryConn]:
     )
 
 
-def _make_transport() -> tuple[TransportPQ, ID]:
+def _make_transport(kem: IKem | None = None) -> tuple[TransportPQ, ID]:
     kp = create_new_key_pair()
     noise_key = X25519PrivateKey.new()
     peer = ID.from_pubkey(kp.public_key)
     transport = TransportPQ(
         libp2p_keypair=KeyPair(kp.private_key, kp.public_key),
         noise_privkey=noise_key,
+        kem=kem,
     )
     return transport, peer
 
@@ -108,12 +111,22 @@ class TestTransportPQInit:
         assert pattern.PROTOCOL_NAME == b"Noise_XXhfs_25519+MLKEM768_ChaChaPoly_SHA256"
 
 
+@pytest.mark.parametrize("kem_backend", KEM_BACKENDS)
 class TestTransportPQHandshake:
+    """
+    Full transport-level handshakes, run once per KEM backend.
+
+    Both backends have to keep working end to end: make_fast_kem() picks
+    the native one wherever it is available, so without this
+    parametrisation kyber-py would have no handshake-level coverage at all
+    on a machine where the native backend loads.
+    """
+
     @pytest.mark.trio
-    async def test_secure_inbound_and_outbound_complete(self) -> None:
+    async def test_secure_inbound_and_outbound_complete(self, kem_backend: str) -> None:
         """secure_outbound + secure_inbound both return a SecureSession."""
-        local_transport, local_peer = _make_transport()
-        remote_transport, remote_peer = _make_transport()
+        local_transport, local_peer = _make_transport(kem=make_kem(kem_backend))
+        remote_transport, remote_peer = _make_transport(kem=make_kem(kem_backend))
         local_conn, remote_conn = _make_conn_pair()
 
         sessions: list = [None, None]
@@ -132,10 +145,10 @@ class TestTransportPQHandshake:
         assert sessions[1] is not None
 
     @pytest.mark.trio
-    async def test_data_exchange_after_secure_transport(self) -> None:
+    async def test_data_exchange_after_secure_transport(self, kem_backend: str) -> None:
         """Data written via secure_outbound is readable via secure_inbound."""
-        local_transport, _ = _make_transport()
-        remote_transport, remote_peer = _make_transport()
+        local_transport, _ = _make_transport(kem=make_kem(kem_backend))
+        remote_transport, remote_peer = _make_transport(kem=make_kem(kem_backend))
         local_conn, remote_conn = _make_conn_pair()
 
         sessions: list = [None, None]
@@ -161,10 +174,10 @@ class TestTransportPQHandshake:
         assert await outbound_sess.read(len(reply)) == reply
 
     @pytest.mark.trio
-    async def test_peer_ids_correct_after_transport(self) -> None:
+    async def test_peer_ids_correct_after_transport(self, kem_backend: str) -> None:
         """Both sides see the correct remote peer ID after the secure upgrade."""
-        local_transport, local_peer = _make_transport()
-        remote_transport, remote_peer = _make_transport()
+        local_transport, local_peer = _make_transport(kem=make_kem(kem_backend))
+        remote_transport, remote_peer = _make_transport(kem=make_kem(kem_backend))
         local_conn, remote_conn = _make_conn_pair()
 
         sessions: list = [None, None]
@@ -184,10 +197,10 @@ class TestTransportPQHandshake:
         assert inbound_sess.remote_peer == local_peer
 
     @pytest.mark.trio
-    async def test_is_initiator_flag(self) -> None:
+    async def test_is_initiator_flag(self, kem_backend: str) -> None:
         """secure_outbound returns is_initiator=True, secure_inbound returns False."""
-        local_transport, _ = _make_transport()
-        remote_transport, remote_peer = _make_transport()
+        local_transport, _ = _make_transport(kem=make_kem(kem_backend))
+        remote_transport, remote_peer = _make_transport(kem=make_kem(kem_backend))
         local_conn, remote_conn = _make_conn_pair()
 
         sessions: list = [None, None]
@@ -204,3 +217,46 @@ class TestTransportPQHandshake:
 
         assert sessions[0].is_initiator is True
         assert sessions[1].is_initiator is False
+
+
+class TestTransportPQKemSelection:
+    """The transport resolves its KEM once, and an explicit one is honoured."""
+
+    def test_get_pattern_uses_an_explicitly_supplied_kem(self) -> None:
+        kem = make_kem("kyber-py")
+        transport, _ = _make_transport(kem=kem)
+        assert transport.get_pattern().kem is kem
+
+    def test_the_kem_is_resolved_once_not_per_connection(self) -> None:
+        # get_pattern() runs on every inbound connection, before the peer has
+        # authenticated anything. Selecting a backend there charged each
+        # connection for a probe of cryptography's ML-KEM support.
+        transport, _ = _make_transport()
+        assert transport.get_pattern().kem is transport.get_pattern().kem
+
+    def test_the_kem_is_resolved_at_construction(self) -> None:
+        transport, _ = _make_transport()
+        assert isinstance(transport.kem, IKem)
+
+    def test_no_working_backend_fails_at_construction_not_on_first_connection(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A host with neither backend should refuse to be built, rather than
+        # listen happily and fail the first peer that dials it.
+        from libp2p.security.noise.pq import kem as kem_module
+        from libp2p.security.noise.pq.kem_backends import _select_kem_class
+
+        def _no_native() -> object:
+            raise ImportError("simulated: cryptography has no mlkem module")
+
+        def _no_kyber(self: object) -> None:
+            raise ImportError("simulated: kyber-py is not installed")
+
+        monkeypatch.setattr(kem_module, "_load_native_mlkem", _no_native)
+        monkeypatch.setattr(kem_module.MLKEM768Kem, "__init__", _no_kyber)
+        _select_kem_class.cache_clear()
+        try:
+            with pytest.raises(ImportError, match=r"libp2p\[pq\]"):
+                _make_transport()
+        finally:
+            _select_kem_class.cache_clear()

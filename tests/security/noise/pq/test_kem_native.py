@@ -25,7 +25,11 @@ Two asymmetries between the backends are deliberate and pinned here:
   interoperability; only ``pk`` (1184) and ``ct`` (1088) are wire formats.
 """
 
+from collections.abc import Callable
 import hashlib
+import logging
+import os
+from types import ModuleType
 
 import pytest
 
@@ -55,6 +59,74 @@ KAT_SHARED_SECRET = "0dcf4a8e1a7cfecec726bf8e23e047c2b2252ad783da06c30cb8846bf07
 KAT_IMPLICIT_REJECTION = (
     "f818137a6bb72446ed6cf5fa6fe103b579214e54145171882791fdef98a65cc7"
 )
+
+
+#: Ways of getting a wrong 1088-byte ciphertext, for the implicit-rejection
+#: parity check. Anything other than a single flipped bit exercises a
+#: different path through FIPS 203's re-encryption comparison.
+_CORRUPTIONS = [
+    pytest.param(lambda ct: bytes([ct[0] ^ 0x01]) + ct[1:], id="first-byte-low-bit"),
+    pytest.param(lambda ct: bytes([ct[0] ^ 0x80]) + ct[1:], id="first-byte-high-bit"),
+    pytest.param(lambda ct: ct[:-1] + bytes([ct[-1] ^ 0x01]), id="last-byte"),
+    pytest.param(
+        lambda ct: ct[:544] + bytes([ct[544] ^ 0xFF]) + ct[545:], id="middle-byte"
+    ),
+    pytest.param(lambda ct: bytes(1088), id="all-zero"),
+    pytest.param(lambda ct: b"\xff" * 1088, id="all-ones"),
+    pytest.param(lambda ct: bytes(b ^ 0xFF for b in ct), id="bitwise-inverse"),
+    pytest.param(lambda ct: ct[544:] + ct[:544], id="halves-swapped"),
+]
+
+
+def _load_real_mlkem() -> ModuleType:
+    """The genuine ``cryptography`` ML-KEM module, bypassing any monkeypatch."""
+    from cryptography.hazmat.primitives.asymmetric import mlkem
+
+    return mlkem
+
+
+def _unsupported_mlkem_module() -> object:
+    """
+    A stand-in for ``cryptography`` built without ML-KEM support.
+
+    Every entry point cryptography gates on its internal support check raises
+    ``UnsupportedAlgorithm``, which is what such a build really does. Fed in
+    through the ``_load_native_mlkem`` seam so the unsupported case is
+    reachable without uninstalling anything.
+    """
+    from cryptography.exceptions import UnsupportedAlgorithm
+
+    def _unsupported(*_args: object, **_kwargs: object) -> object:
+        raise UnsupportedAlgorithm("simulated: OpenSSL without ML-KEM")
+
+    class _UnsupportedPrivateKey:
+        generate = staticmethod(_unsupported)
+        from_seed_bytes = staticmethod(_unsupported)
+
+    class _UnsupportedPublicKey:
+        from_public_bytes = staticmethod(_unsupported)
+
+    class _UnsupportedModule:
+        MLKEM768PrivateKey = _UnsupportedPrivateKey
+        MLKEM768PublicKey = _UnsupportedPublicKey
+
+    return _UnsupportedModule()
+
+
+@pytest.fixture(autouse=True)
+def _clear_backend_selection_cache() -> object:
+    """
+    Reset the cached backend selection around every test in this module.
+
+    ``make_fast_kem()`` memoises which backend it picked, so a test that
+    monkeypatches the availability of a backend would otherwise either read a
+    stale answer or leave one behind for the next test.
+    """
+    from libp2p.security.noise.pq.kem_backends import _select_kem_class
+
+    _select_kem_class.cache_clear()
+    yield
+    _select_kem_class.cache_clear()
 
 
 def _matched_keypair() -> tuple[bytes, bytes, bytes]:
@@ -240,9 +312,72 @@ class TestCrossBackendInterop:
         assert pure_ss == native_ss
         assert native_ss.hex() != KAT_SHARED_SECRET
 
+    @pytest.mark.parametrize("corrupt", _CORRUPTIONS)
+    def test_implicit_rejection_agrees_for_every_kind_of_corruption(
+        self, corrupt: Callable[[bytes], bytes]
+    ) -> None:
+        # One flipped bit exercises one path through the re-encryption check.
+        # Implicit rejection has to be byte-identical across the backends for
+        # any wrong ciphertext, including ones that are not a near-miss of a
+        # real one, because the rejection secret is mixed straight into the
+        # handshake transcript: a divergence would desynchronise the two peers
+        # only under attack, which is the worst place to find it.
+        pk, native_sk, pure_sk = _matched_keypair()
+        good = _fixed_ciphertext(pk)
+        bad = corrupt(good)
+        assert len(bad) == 1088 and bad != good
+
+        native_ss = self.native.decapsulate(bad, native_sk)
+        pure_ss = self.pure.decapsulate(bad, pure_sk)
+        assert len(native_ss) == 32
+        assert native_ss == pure_ss, "implicit rejection diverged between backends"
+        assert native_ss.hex() != KAT_SHARED_SECRET, (
+            "a corrupt ciphertext must not recover the real shared secret"
+        )
+
+    @pytest.mark.parametrize(
+        ("name", "encapsulation_key", "is_valid"),
+        [
+            # Correct length, and a valid ML-KEM encoding: FIPS 203's modulus
+            # check passes, so both backends encapsulate to it.
+            ("all-zero", b"\x00" * 1184, True),
+            # Correct length but not a valid encoding: every 12-bit
+            # coefficient decodes to 4095, which fails the modulus check.
+            ("all-ones", b"\xff" * 1184, False),
+            ("random", None, False),  # os.urandom, filled in by the test
+        ],
+    )
+    def test_structurally_invalid_encapsulation_keys_agree_across_backends(
+        self, name: str, encapsulation_key: bytes | None, is_valid: bool
+    ) -> None:
+        # Length is only the outer check. A 1184-byte blob that is not a valid
+        # encapsulation key has to be treated the same way by both backends,
+        # or a peer's handshake would succeed or fail depending on which
+        # backend it happened to load.
+        ek = os.urandom(1184) if encapsulation_key is None else encapsulation_key
+
+        if is_valid:
+            native_ct, native_ss = self.native.encapsulate(ek)
+            pure_ct, pure_ss = self.pure.encapsulate(ek)
+            assert len(native_ct) == len(pure_ct) == 1088
+            assert len(native_ss) == len(pure_ss) == 32
+            return
+
+        with pytest.raises(ValueError):
+            self.native.encapsulate(ek)
+        with pytest.raises(ValueError):
+            self.pure.encapsulate(ek)
+
 
 class TestNativeKemFailsClosed:
-    """Malformed inputs must raise, not silently produce a key."""
+    """
+    Malformed inputs must raise, not silently produce a key.
+
+    Each expectation matches this wrapper's own wording rather than just the
+    size it mentions. ``cryptography`` prints "An ML-KEM-768 public key is
+    1184 bytes long" and similar, so a match on the bare number still passes
+    when our guard has been deleted and the error came from underneath.
+    """
 
     kem: MLKEM768NativeKem
 
@@ -251,20 +386,32 @@ class TestNativeKemFailsClosed:
 
     @pytest.mark.parametrize("length", [0, 32, 1183, 1185, 2400])
     def test_encapsulate_rejects_wrong_length_public_key(self, length: int) -> None:
-        with pytest.raises(ValueError, match="1184"):
+        with pytest.raises(
+            ValueError,
+            match=rf"^ML-KEM-768 public key must be 1184 bytes, got {length}$",
+        ):
             self.kem.encapsulate(b"\x00" * length)
 
     @pytest.mark.parametrize("length", [0, 32, 1087, 1089, 2400])
     def test_decapsulate_rejects_wrong_length_ciphertext(self, length: int) -> None:
         _, sk = self.kem.keygen()
-        with pytest.raises(ValueError, match="1088"):
+        with pytest.raises(
+            ValueError,
+            match=rf"^ML-KEM-768 ciphertext must be 1088 bytes, got {length}$",
+        ):
             self.kem.decapsulate(b"\x00" * length, sk)
 
     @pytest.mark.parametrize("length", [0, 32, 63, 65, 2400])
     def test_decapsulate_rejects_wrong_length_secret_key(self, length: int) -> None:
         pk, _ = self.kem.keygen()
         ct, _ = self.kem.encapsulate(pk)
-        with pytest.raises(ValueError, match="64"):
+        with pytest.raises(
+            ValueError,
+            match=(
+                r"^native ML-KEM-768 secret key must be the 64-byte "
+                rf"FIPS 203 seed, got {length}$"
+            ),
+        ):
             self.kem.decapsulate(ct, b"\x00" * length)
 
     def test_both_backends_reject_a_wrong_length_public_key(self) -> None:
@@ -334,29 +481,152 @@ class TestMakeFastKemSelection:
     ) -> None:
         # cryptography >= 48 always ships the module, but a build against
         # OpenSSL < 3.5 raises UnsupportedAlgorithm the first time a key is
-        # generated. That must fall back, not crash a handshake later.
-        from cryptography.exceptions import UnsupportedAlgorithm
-
+        # touched. That must fall back, not crash a handshake later.
+        #
+        # The second half checks the selection is not sticky across a change
+        # in the environment: it is cached, so the cache has to be cleared
+        # between the two halves the same way the fixture clears it.
         from libp2p.security.noise.pq import kem as kem_module
-        from libp2p.security.noise.pq.kem_backends import make_fast_kem
+        from libp2p.security.noise.pq.kem_backends import (
+            _select_kem_class,
+            make_fast_kem,
+        )
 
         real_loader = kem_module._load_native_mlkem
 
-        class _UnsupportedPrivateKey:
-            @staticmethod
-            def generate() -> object:
-                raise UnsupportedAlgorithm("simulated: OpenSSL without ML-KEM")
-
-        class _UnsupportedPublicKey:
-            pass
-
-        class _UnsupportedModule:
-            MLKEM768PrivateKey = _UnsupportedPrivateKey
-            MLKEM768PublicKey = _UnsupportedPublicKey
-
         monkeypatch.setattr(
-            kem_module, "_load_native_mlkem", lambda: _UnsupportedModule()
+            kem_module, "_load_native_mlkem", lambda: _unsupported_mlkem_module()
         )
         assert isinstance(make_fast_kem(), MLKEM768Kem)
+
         monkeypatch.setattr(kem_module, "_load_native_mlkem", real_loader)
+        _select_kem_class.cache_clear()
         assert isinstance(make_fast_kem(), MLKEM768NativeKem)
+
+    def test_the_probe_detects_an_unsupported_build(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Whatever the probe calls, it has to be something cryptography gates
+        # on its internal ML-KEM support check, or an unsupported build would
+        # be selected and then fail mid-handshake.
+        from libp2p.security.noise.pq import kem as kem_module
+
+        monkeypatch.setattr(
+            kem_module, "_load_native_mlkem", lambda: _unsupported_mlkem_module()
+        )
+        with pytest.raises(ImportError, match="no ML-KEM support"):
+            MLKEM768NativeKem()
+
+    def test_the_probe_does_not_generate_a_throwaway_keypair(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Generating a key to find out whether keys can be generated cost
+        # ~300 us, about three times a real encapsulation, on every call.
+        from libp2p.security.noise.pq import kem as kem_module
+
+        real = _load_real_mlkem()
+
+        class _NoKeygenPrivateKey:
+            @staticmethod
+            def generate() -> object:
+                raise AssertionError("the support probe must not generate a key")
+
+            @staticmethod
+            def from_seed_bytes(data: bytes) -> object:
+                raise AssertionError("the support probe must not expand a seed")
+
+        class _NoKeygenModule:
+            MLKEM768PrivateKey = _NoKeygenPrivateKey
+            MLKEM768PublicKey = real.MLKEM768PublicKey
+
+        monkeypatch.setattr(kem_module, "_load_native_mlkem", lambda: _NoKeygenModule())
+        MLKEM768NativeKem()  # must not raise
+
+    def test_the_backend_selection_is_cached(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # transport_pq.get_pattern() used to select a backend per connection,
+        # so an unauthenticated peer could make a listener re-probe
+        # cryptography on every dial.
+        from libp2p.security.noise.pq import kem as kem_module
+        from libp2p.security.noise.pq.kem_backends import make_fast_kem
+
+        probes = 0
+
+        def _counting_loader() -> object:
+            nonlocal probes
+            probes += 1
+            raise ImportError("simulated: cryptography has no mlkem module")
+
+        monkeypatch.setattr(kem_module, "_load_native_mlkem", _counting_loader)
+        assert isinstance(make_fast_kem(), MLKEM768Kem)
+        assert isinstance(make_fast_kem(), MLKEM768Kem)
+        assert isinstance(make_fast_kem(), MLKEM768Kem)
+        assert probes == 1, (
+            f"the backend selection must be probed once, not per call; "
+            f"probed {probes} times"
+        )
+
+    def test_a_non_import_failure_does_not_escape_raw(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A guard that only catches ImportError lets an AttributeError from a
+        # renamed upstream symbol, or an OpenSSL InternalError, propagate out
+        # of make_fast_kem() instead of falling back.
+        from libp2p.security.noise.pq import kem as kem_module
+        from libp2p.security.noise.pq.kem_backends import make_fast_kem
+
+        def _attribute_error() -> object:
+            raise AttributeError("simulated: upstream renamed MLKEM768PrivateKey")
+
+        monkeypatch.setattr(kem_module, "_load_native_mlkem", _attribute_error)
+        assert isinstance(make_fast_kem(), MLKEM768Kem)
+
+    def test_the_fallback_is_logged_as_a_warning_naming_the_consequence(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # kyber-py's own metadata says it must not be used for cryptographic
+        # applications and is not constant time, so silently dropping onto it
+        # at DEBUG hides a real change in the security properties of the node.
+        from libp2p.security.noise.pq import kem as kem_module
+        from libp2p.security.noise.pq.kem_backends import make_fast_kem
+
+        monkeypatch.setattr(
+            kem_module,
+            "_load_native_mlkem",
+            lambda: (_ for _ in ()).throw(ImportError("simulated")),
+        )
+        with caplog.at_level(
+            logging.DEBUG, logger="libp2p.security.noise.pq.kem_backends"
+        ):
+            assert isinstance(make_fast_kem(), MLKEM768Kem)
+
+        warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert warnings, "falling back to kyber-py must not be a DEBUG-level event"
+        text = " ".join(r.getMessage() for r in warnings)
+        assert "kyber-py" in text
+        assert "constant" in text, "the warning must name the consequence"
+        assert "cryptography" in text, "the warning must name the remedy"
+
+    def test_both_backends_missing_raises_one_error_naming_both(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from libp2p.security.noise.pq import kem as kem_module
+        from libp2p.security.noise.pq.kem_backends import make_fast_kem
+
+        def _no_native() -> object:
+            raise ImportError("simulated: cryptography has no mlkem module")
+
+        def _no_kyber(self: object) -> None:
+            raise ImportError("simulated: kyber-py is not installed")
+
+        monkeypatch.setattr(kem_module, "_load_native_mlkem", _no_native)
+        monkeypatch.setattr(kem_module.MLKEM768Kem, "__init__", _no_kyber)
+
+        with pytest.raises(ImportError) as excinfo:
+            make_fast_kem()
+
+        message = str(excinfo.value)
+        assert "cryptography" in message, "the error must name the native cause"
+        assert "kyber-py" in message, "the error must name the fallback cause"
+        assert "libp2p[pq]" in message, "the error must say how to fix it"

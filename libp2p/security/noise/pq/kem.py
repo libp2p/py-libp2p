@@ -29,6 +29,8 @@ one, which exposes no API for the expanded key).
 from types import ModuleType
 from typing import Protocol, runtime_checkable
 
+from cryptography.exceptions import UnsupportedAlgorithm
+
 # Key and ciphertext size constants
 _ML_KEM_PK_SIZE = 1184
 _ML_KEM_SK_SIZE = 2400
@@ -36,21 +38,47 @@ _ML_KEM_CT_SIZE = 1088
 _ML_KEM_SEED_SIZE = 64
 
 MLKEM768_PK_SIZE = _ML_KEM_PK_SIZE  # 1184
-MLKEM768_SK_SIZE = _ML_KEM_SK_SIZE  # 2400
+#: Size of the *expanded* FIPS 203 decapsulation key, which is what
+#: :class:`MLKEM768Kem` (kyber-py) returns from ``keygen()``. It is NOT the
+#: size of every backend's secret key: :class:`MLKEM768NativeKem` returns the
+#: 64-byte seed instead (``MLKEM768_SEED_SIZE``), because ``cryptography``
+#: exposes no API for the expanded form. Do not use this to validate a secret
+#: key of unknown provenance; ask the backend that produced it.
+MLKEM768_SK_SIZE = _ML_KEM_SK_SIZE  # 2400, kyber-py only
 MLKEM768_CT_SIZE = _ML_KEM_CT_SIZE  # 1088
 MLKEM768_SEED_SIZE = _ML_KEM_SEED_SIZE  # 64, the FIPS 203 (d || z) seed
+
+# A well-formed (all-zero) encapsulation key, used only to probe whether this
+# build of ``cryptography`` can run ML-KEM at all. Never used as a key.
+_ZERO_ENCAPSULATION_KEY = b"\x00" * _ML_KEM_PK_SIZE
 
 
 @runtime_checkable
 class IKem(Protocol):
-    """Backend-agnostic KEM interface for the XXhfs handshake."""
+    """
+    Backend-agnostic KEM interface for the XXhfs handshake.
+
+    The public key and the ciphertext are wire formats and are identical
+    across backends: 1184 and 1088 bytes of FIPS 203 encoding, which is what
+    makes two peers on different backends interoperable.
+
+    The secret key is **opaque** and **backend-specific**. It is whatever the
+    backend that produced it can consume, and nothing more: kyber-py returns
+    the 2400-byte expanded decapsulation key while the native backend returns
+    the 64-byte FIPS 203 seed. A secret key must therefore be passed back to
+    ``decapsulate()`` on the same backend instance (or at least the same
+    implementation) that returned it from ``keygen()``. It never goes on the
+    wire, so this costs nothing in interoperability, but a caller that caches
+    or persists one must cache the backend choice with it.
+    """
 
     def keygen(self) -> tuple[bytes, bytes]:
         """
         Generate a KEM key pair.
 
         Returns:
-            (public_key, secret_key) as raw bytes.
+            (public_key, secret_key) as raw bytes. ``secret_key`` is opaque
+            and only meaningful to this backend; see the class docstring.
 
         """
         ...
@@ -74,7 +102,8 @@ class IKem(Protocol):
 
         Args:
             ct: Ciphertext from the encapsulator.
-            sk: Local secret key.
+            sk: Local secret key, as returned by ``keygen()`` on *this*
+                backend. Its encoding is backend-specific.
 
         Returns:
             Shared secret as 32 raw bytes.
@@ -193,12 +222,19 @@ class MLKEM768NativeKem:
         self._public_key_cls = mlkem.MLKEM768PublicKey
         # A build of cryptography against OpenSSL earlier than 3.5.0 ships the
         # module but raises UnsupportedAlgorithm the first time a key is
-        # generated. Probe once here so callers can fall back to the
-        # pure-Python backend instead of failing mid-handshake.
-        from cryptography.exceptions import UnsupportedAlgorithm
-
+        # touched. Probe here so callers can fall back to the pure-Python
+        # backend instead of failing mid-handshake.
+        #
+        # The probe parses a well-formed all-zero encapsulation key rather
+        # than generating a keypair. ``cryptography`` gates ``generate()``,
+        # ``from_seed_bytes()`` and ``from_public_bytes()`` on the same
+        # internal ``backend.mlkem_supported()`` check, and parsing is the
+        # cheapest of the three by roughly a factor of eight (~35 us against
+        # ~300 us here) and allocates no key material. ``mlkem_supported()``
+        # itself is cheaper still, but it lives on the hazmat OpenSSL backend
+        # object, which is not part of cryptography's public API.
         try:
-            self._private_key_cls.generate()
+            self._public_key_cls.from_public_bytes(_ZERO_ENCAPSULATION_KEY)
         except UnsupportedAlgorithm as exc:
             raise ImportError(
                 "this cryptography build has no ML-KEM support; it needs "
