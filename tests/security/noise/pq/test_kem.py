@@ -101,10 +101,18 @@ class TestMLKEM768KemDeterminism:
 
 
 class TestMakeFastKem:
-    """Verify make_fast_kem() returns MLKEM768Kem."""
+    """Verify make_fast_kem() returns a working ML-KEM-768 backend."""
 
     def test_make_fast_kem_returns_mlkem768(self) -> None:
+        # Backend selection itself is covered in test_kem_native.py; here we
+        # only require an ML-KEM-768 KEM that round trips.
+        from libp2p.security.noise.pq.kem import MLKEM768NativeKem
         from libp2p.security.noise.pq.kem_backends import make_fast_kem
 
         kem = make_fast_kem()
-        assert isinstance(kem, MLKEM768Kem)
+        assert isinstance(kem, MLKEM768Kem | MLKEM768NativeKem)
+        pk, sk = kem.keygen()
+        ct, ss = kem.encapsulate(pk)
+        assert len(pk) == 1184
+        assert len(ct) == 1088
+        assert kem.decapsulate(ct, sk) == ss

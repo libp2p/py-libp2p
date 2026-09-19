@@ -47,10 +47,16 @@ class TestPatternXXhfsInit:
         assert pattern.PROTOCOL_NAME == b"Noise_XXhfs_25519+MLKEM768_ChaChaPoly_SHA256"
 
     def test_default_kem_is_mlkem768(self) -> None:
-        from libp2p.security.noise.pq.kem import MLKEM768Kem
+        # Either backend is acceptable here; make_fast_kem() picks the native
+        # one when available and kyber-py otherwise. What the pattern needs is
+        # an ML-KEM-768 KEM with the right wire sizes.
+        from libp2p.security.noise.pq.kem import IKem, MLKEM768Kem, MLKEM768NativeKem
 
         pattern, _, _, _ = _make_pattern()
-        assert isinstance(pattern.kem, MLKEM768Kem)
+        assert isinstance(pattern.kem, IKem)
+        assert isinstance(pattern.kem, MLKEM768Kem | MLKEM768NativeKem)
+        pk, _sk = pattern.kem.keygen()
+        assert len(pk) == 1184
 
 
 class TestPatternXXhfsHandshake:

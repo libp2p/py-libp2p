@@ -4,8 +4,9 @@ KEM helpers for the Noise XXhfs handshake.
 ``make_fast_kem()`` returns the default KEM for the suite, and ``KeypairPool``
 pre-computes keypairs so a handshake does not pay ML-KEM keygen inline.
 
-The default backend is kyber-py (pure Python). A native backend would be
-noticeably faster, but none is wired up: see the note on ``make_fast_kem``.
+The default backend is the native one, ``MLKEM768NativeKem``, built on
+``cryptography``'s ML-KEM. kyber-py (pure Python) is the fallback when the
+native backend is unavailable: see the note on ``make_fast_kem``.
 """
 
 from __future__ import annotations
@@ -27,14 +28,22 @@ _X25519_KEY_SIZE = 32
 
 def make_fast_kem() -> IKem:
     """
-    Return an ML-KEM-768 KEM backend.
+    Return the fastest available ML-KEM-768 KEM backend.
 
-    Currently always kyber-py (pure Python). Kept as a factory so a native
-    backend can be selected here later without touching call sites.
+    Prefers :class:`~libp2p.security.noise.pq.kem.MLKEM768NativeKem`, which
+    uses ``cryptography``'s native ML-KEM. Falls back to the pure-Python
+    :class:`~libp2p.security.noise.pq.kem.MLKEM768Kem` (kyber-py) when the
+    native one is unavailable, which happens when ``cryptography`` predates
+    48.0.0 or was built without ML-KEM support. The two backends interoperate
+    on the wire, so the choice is local to each peer.
     """
-    from .kem import MLKEM768Kem
+    from .kem import MLKEM768Kem, MLKEM768NativeKem
 
-    return MLKEM768Kem()
+    try:
+        return MLKEM768NativeKem()
+    except ImportError as exc:
+        logger.debug("native ML-KEM-768 backend unavailable, using kyber-py: %s", exc)
+        return MLKEM768Kem()
 
 
 class KeypairPool:

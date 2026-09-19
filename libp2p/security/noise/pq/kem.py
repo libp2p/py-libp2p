@@ -13,21 +13,32 @@ the DH tokens (ee, es, se) and ML-KEM-768 fills the HFS tokens (e1, ekem1).
 The KEM slot therefore carries raw ML-KEM-768 with no combiner.
 
   - Public key:  1184 B
-  - Secret key:  2400 B
+  - Secret key:  2400 B expanded, or the 64 B FIPS 203 (d || z) seed
   - Ciphertext:  1088 B
   - Shared secret: 32 B
+
+Two backends implement ``IKem``: :class:`MLKEM768NativeKem`, built on
+``cryptography``, and :class:`MLKEM768Kem`, pure Python via kyber-py.
+``kem_backends.make_fast_kem()`` prefers the native one. They interoperate,
+because only the public key and the ciphertext go on the wire and those are
+identical; the secret key stays local and the two backends hold it in
+different forms (2400 B expanded for kyber-py, the 64 B seed for the native
+one, which exposes no API for the expanded key).
 """
 
+from types import ModuleType
 from typing import Protocol, runtime_checkable
 
 # Key and ciphertext size constants
 _ML_KEM_PK_SIZE = 1184
 _ML_KEM_SK_SIZE = 2400
 _ML_KEM_CT_SIZE = 1088
+_ML_KEM_SEED_SIZE = 64
 
 MLKEM768_PK_SIZE = _ML_KEM_PK_SIZE  # 1184
 MLKEM768_SK_SIZE = _ML_KEM_SK_SIZE  # 2400
 MLKEM768_CT_SIZE = _ML_KEM_CT_SIZE  # 1088
+MLKEM768_SEED_SIZE = _ML_KEM_SEED_SIZE  # 64, the FIPS 203 (d || z) seed
 
 
 @runtime_checkable
@@ -126,3 +137,104 @@ class MLKEM768Kem:
                 f"ML-KEM-768 ciphertext must be {MLKEM768_CT_SIZE} bytes, got {len(ct)}"
             )
         return self._ml_kem.decaps(sk, ct)
+
+
+def _load_native_mlkem() -> ModuleType:
+    """
+    Import ``cryptography``'s ML-KEM module.
+
+    Kept as a module-level function so the unavailable case is reachable in a
+    test without uninstalling anything.
+
+    Raises:
+        ImportError: if the installed ``cryptography`` predates the module.
+
+    """
+    from cryptography.hazmat.primitives.asymmetric import mlkem
+
+    return mlkem
+
+
+class MLKEM768NativeKem:
+    """
+    Raw ML-KEM-768 KEM backed by ``cryptography``'s native implementation.
+
+    Same wire formats as :class:`MLKEM768Kem` (1184-byte encapsulation key,
+    1088-byte ciphertext, 32-byte shared secret) and the same ``IKem``
+    contract, so the two backends interoperate: a ciphertext produced by
+    either decapsulates to the same shared secret under the other.
+
+    Requires ``cryptography >= 48.0.0``, which is the first release whose
+    wheels can actually run ML-KEM. The module was added in 47.0.0 but only
+    with AWS-LC or BoringSSL underneath; 48.0.0 added OpenSSL 3.5.0+, which is
+    what the published wheels ship.
+
+    Two differences from :class:`MLKEM768Kem` are worth knowing:
+
+    * The secret key is the 64-byte FIPS 203 seed (``d || z``), not the
+      2400-byte expanded decapsulation key. ``cryptography`` exposes no API for
+      the expanded form. The secret key never goes on the wire, so this does
+      not affect interoperability, but a secret key is not portable between
+      the two backends.
+    * ``cryptography``'s ``encapsulate()`` returns ``(shared_secret,
+      ciphertext)``. ``encapsulate()`` below swaps it to the ``IKem`` order of
+      ``(ciphertext, shared_secret)``.
+    """
+
+    def __init__(self) -> None:
+        try:
+            mlkem = _load_native_mlkem()
+        except ImportError as exc:
+            raise ImportError(
+                "MLKEM768NativeKem requires cryptography>=48.0.0 with its "
+                "hazmat.primitives.asymmetric.mlkem module"
+            ) from exc
+        self._private_key_cls = mlkem.MLKEM768PrivateKey
+        self._public_key_cls = mlkem.MLKEM768PublicKey
+        # A build of cryptography against OpenSSL earlier than 3.5.0 ships the
+        # module but raises UnsupportedAlgorithm the first time a key is
+        # generated. Probe once here so callers can fall back to the
+        # pure-Python backend instead of failing mid-handshake.
+        from cryptography.exceptions import UnsupportedAlgorithm
+
+        try:
+            self._private_key_cls.generate()
+        except UnsupportedAlgorithm as exc:
+            raise ImportError(
+                "this cryptography build has no ML-KEM support; it needs "
+                "OpenSSL 3.5.0+, AWS-LC or BoringSSL underneath"
+            ) from exc
+
+    def keygen(self) -> tuple[bytes, bytes]:
+        """Returns (pk, sk) where pk=1184 B and sk is the 64 B FIPS 203 seed."""
+        key = self._private_key_cls.generate()
+        return key.public_key().public_bytes_raw(), key.private_bytes_raw()
+
+    def encapsulate(self, pk: bytes) -> tuple[bytes, bytes]:
+        """
+        Returns (ciphertext, shared_secret) where ct=1088 B, ss=32 B.
+
+        Note: cryptography's ``encapsulate()`` returns ``(ss, ct)``, so we swap
+        the order to match the IKem convention of ``(ct, ss)``.
+        """
+        if len(pk) != MLKEM768_PK_SIZE:
+            raise ValueError(
+                f"ML-KEM-768 public key must be {MLKEM768_PK_SIZE} bytes, got {len(pk)}"
+            )
+        public_key = self._public_key_cls.from_public_bytes(pk)
+        ss, ct = public_key.encapsulate()  # cryptography returns (ss, ct)
+        return ct, ss
+
+    def decapsulate(self, ct: bytes, sk: bytes) -> bytes:
+        """Returns shared_secret (32 bytes). ``sk`` is the 64-byte seed."""
+        if len(ct) != MLKEM768_CT_SIZE:
+            raise ValueError(
+                f"ML-KEM-768 ciphertext must be {MLKEM768_CT_SIZE} bytes, got {len(ct)}"
+            )
+        if len(sk) != MLKEM768_SEED_SIZE:
+            raise ValueError(
+                f"native ML-KEM-768 secret key must be the "
+                f"{MLKEM768_SEED_SIZE}-byte FIPS 203 seed, got {len(sk)}"
+            )
+        private_key = self._private_key_cls.from_seed_bytes(sk)
+        return private_key.decapsulate(ct)

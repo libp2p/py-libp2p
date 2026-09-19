@@ -4,12 +4,16 @@ Public API::
 
     from libp2p.security.noise.pq import TransportPQ, PROTOCOL_ID
 
-    # Default (pure-Python kyber-py backend):
+    # Default backend selection is make_fast_kem(): the native ML-KEM-768
+    # backend when cryptography provides it, kyber-py otherwise.
     security_options = {PROTOCOL_ID: TransportPQ(libp2p_keypair, noise_privkey)}
 
-    # The KEM directly, or a pre-computed keypair pool:
-    from libp2p.security.noise.pq import MLKEM768Kem, KeypairPool
+    # A KEM directly, or a pre-computed keypair pool:
+    from libp2p.security.noise.pq import (
+        MLKEM768Kem, MLKEM768NativeKem, KeypairPool,
+    )
 
+    kem = MLKEM768NativeKem()                        # native, via cryptography
     kem = MLKEM768Kem()                              # pure Python, via kyber-py
     pool = await KeypairPool.create(kem, min_size=3) # pre-compute keypairs
 """
@@ -19,6 +23,7 @@ __all__ = [
     "TransportPQ",
     "KeypairPool",
     "MLKEM768Kem",
+    "MLKEM768NativeKem",
     "make_fast_kem",
 ]
 
@@ -36,9 +41,10 @@ def __getattr__(name: str) -> object:
         globals()["KeypairPool"] = KeypairPool
         globals()["make_fast_kem"] = make_fast_kem
         return globals()[name]
-    if name == "MLKEM768Kem":
-        from .kem import MLKEM768Kem
+    if name in ("MLKEM768Kem", "MLKEM768NativeKem"):
+        from .kem import MLKEM768Kem, MLKEM768NativeKem
 
         globals()["MLKEM768Kem"] = MLKEM768Kem
+        globals()["MLKEM768NativeKem"] = MLKEM768NativeKem
         return globals()[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
