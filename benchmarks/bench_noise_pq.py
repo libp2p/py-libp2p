@@ -188,9 +188,10 @@ def _bench_one_kem(kem, n_warmup: int = None, n_iter: int = None) -> dict:
 
 
 def bench_kem() -> dict:
-    from libp2p.security.noise.pq.kem import MLKEM768Kem
+    """Benchmark the backend a handshake would actually pick."""
+    from libp2p.security.noise.pq.kem_backends import make_fast_kem
 
-    return _bench_one_kem(MLKEM768Kem())
+    return _bench_one_kem(make_fast_kem())
 
 
 def bench_kem_backends() -> dict:
@@ -198,12 +199,23 @@ def bench_kem_backends() -> dict:
     Compare available KEM backends.
 
     Returns a dict keyed by backend name, each value is a _bench_one_kem dict.
-    Only kyber-py is wired up; a native backend would slot in here.
+    The native backend is skipped when this build of cryptography has no
+    ML-KEM support, which is the same condition make_fast_kem() falls back on.
     """
-    from libp2p.security.noise.pq.kem import MLKEM768Kem
+    from libp2p.security.noise.pq.kem import MLKEM768Kem, MLKEM768NativeKem
+
+    results = {}
+    try:
+        native = MLKEM768NativeKem()
+    except ImportError as exc:
+        print(f"  Skipping native backend: {exc}")
+    else:
+        print("  Benchmarking cryptography (native)…")
+        results["cryptography (native)"] = _bench_one_kem(native)
 
     print("  Benchmarking kyber-py (pure Python)…")
-    return {"kyber-py": _bench_one_kem(MLKEM768Kem())}
+    results["kyber-py"] = _bench_one_kem(MLKEM768Kem())
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -415,7 +427,9 @@ async def run_all() -> dict:
             f"  {speedup:>6.1f}x"
         )
 
-    print_section("ML-KEM-768 KEM micro-benchmarks (kyber-py baseline)")
+    print_section(
+        "ML-KEM-768 KEM micro-benchmarks (the backend make_fast_kem() selects here)"
+    )
     print(f"  keygen     : {_fmt(kem['keygen_ms'], kem['keygen_ops'])}")
     print(f"  encapsulate: {_fmt(kem['encap_ms'], kem['encap_ops'])}")
     print(f"  decapsulate: {_fmt(kem['decap_ms'], kem['decap_ops'])}")
