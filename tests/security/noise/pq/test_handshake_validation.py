@@ -26,7 +26,9 @@ from libp2p.security.noise.pq.kem import MLKEM768_CT_SIZE, MLKEM768_PK_SIZE
 from libp2p.security.noise.pq.kem_backends import make_fast_kem
 from libp2p.security.noise.pq.noise_state import SymmetricState
 from tests.security.noise.pq.helpers import (
+    KEM_BACKENDS,
     make_conn_pair,
+    make_kem,
     make_pattern,
     read_frame,
     write_frame,
@@ -70,6 +72,38 @@ async def test_responder_rejects_malformed_message_a(size: int) -> None:
     # The connection pair is backed by unbounded channels, so the hostile
     # frame can simply be queued up front instead of racing in a nursery.
     await write_frame(attacker_conn, os.urandom(size))
+
+    with pytest.raises(HandshakeMalformed):
+        await resp_pat.handshake_inbound(resp_conn)
+
+
+@pytest.mark.parametrize(
+    "e1",
+    [
+        pytest.param(b"\xff" * MLKEM768_PK_SIZE, id="all-ones"),
+        pytest.param(os.urandom(MLKEM768_PK_SIZE), id="random"),
+    ],
+)
+@pytest.mark.parametrize("kem_backend", KEM_BACKENDS)
+@pytest.mark.trio
+async def test_responder_rejects_a_correct_length_but_invalid_e1(
+    e1: bytes, kem_backend: str
+) -> None:
+    """
+    Message A of the right length, carrying an unusable encapsulation key.
+
+    The length checks all pass here, so the 1184 attacker-chosen bytes reach
+    ``kem.encapsulate()`` and the backend rejects them. What must not happen
+    is that the backend's own ``ValueError`` (whose wording differs between
+    kyber-py and cryptography) escapes the ``ISecureTransport`` boundary: the
+    responder has authenticated nothing at this point, so the failure has to
+    look like every other malformed message A.
+    """
+    resp_pat, _, _, _ = make_pattern(kem=make_kem(kem_backend))
+    attacker_conn, resp_conn = make_conn_pair()
+
+    e = crypto_scalarmult_base(nacl.utils.random(_X25519_SIZE))
+    await write_frame(attacker_conn, bytes(e) + e1)
 
     with pytest.raises(HandshakeMalformed):
         await resp_pat.handshake_inbound(resp_conn)

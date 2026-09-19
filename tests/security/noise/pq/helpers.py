@@ -1,12 +1,14 @@
 """
 Shared scaffolding for the PQ (XXhfs) handshake tests.
 
-Holds the in-memory connection pair and the ``PatternXXhfs`` factory used by
-more than one test module, so the pieces are defined once.
+Holds the in-memory connection pair, the ``PatternXXhfs`` factory and the KEM
+backend parametrisation used by more than one test module, so the pieces are
+defined once.
 """
 
 import math
 
+import pytest
 from multiaddr import Multiaddr
 import trio
 
@@ -15,10 +17,59 @@ from libp2p.connection_types import ConnectionType
 from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.crypto.x25519 import X25519PrivateKey
 from libp2p.peer.id import ID
+from libp2p.security.noise.pq.kem import IKem, MLKEM768Kem, MLKEM768NativeKem
 from libp2p.security.noise.pq.patterns_pq import PatternXXhfs
 
 # 2-byte big-endian length prefix, per NoisePacketReadWriter.
 _LEN_PREFIX_BYTES = 2
+
+# ---------------------------------------------------------------------------
+# KEM backend parametrisation
+#
+# Every end-to-end test that does not say otherwise runs on whichever backend
+# make_fast_kem() picks, which is the native one wherever it is available. The
+# names below let a test run the same handshake on each backend explicitly, so
+# kyber-py keeps handshake-level coverage on a machine where the native
+# backend works.
+# ---------------------------------------------------------------------------
+
+PURE_KEM = "kyber-py"
+NATIVE_KEM = "native"
+
+
+def _native_kem_unavailable() -> str | None:
+    """Return why the native backend cannot run here, or None when it can."""
+    try:
+        MLKEM768NativeKem()
+    except Exception as exc:  # pragma: no cover - depends on the environment
+        return f"native ML-KEM-768 backend unavailable: {exc}"
+    return None
+
+
+NATIVE_KEM_SKIP_REASON = _native_kem_unavailable()
+
+#: pytest params covering both KEM backends. The native one is skipped rather
+#: than failed when this build of ``cryptography`` cannot run ML-KEM.
+KEM_BACKENDS = [
+    pytest.param(PURE_KEM, id=PURE_KEM),
+    pytest.param(
+        NATIVE_KEM,
+        id=NATIVE_KEM,
+        marks=pytest.mark.skipif(
+            NATIVE_KEM_SKIP_REASON is not None,
+            reason=NATIVE_KEM_SKIP_REASON or "",
+        ),
+    ),
+]
+
+
+def make_kem(backend: str) -> IKem:
+    """Build the named KEM backend. ``backend`` is PURE_KEM or NATIVE_KEM."""
+    if backend == NATIVE_KEM:
+        return MLKEM768NativeKem()
+    if backend == PURE_KEM:
+        return MLKEM768Kem()
+    raise ValueError(f"unknown KEM backend {backend!r}")
 
 
 class MemoryConn(IRawConnection):
@@ -112,8 +163,13 @@ def make_conn_pair() -> tuple[MemoryConn, MemoryConn]:
     return init_conn, resp_conn
 
 
-def make_pattern() -> tuple[PatternXXhfs, object, object, ID]:
-    """Create a fresh PatternXXhfs with newly-generated keys."""
+def make_pattern(kem: IKem | None = None) -> tuple[PatternXXhfs, object, object, ID]:
+    """
+    Create a fresh PatternXXhfs with newly-generated keys.
+
+    ``kem`` pins the KEM backend; the default leaves the choice to
+    ``make_fast_kem()``, which is what production does.
+    """
     kp = create_new_key_pair()
     noise_key = X25519PrivateKey.new()
     peer = ID.from_pubkey(kp.public_key)
@@ -121,6 +177,7 @@ def make_pattern() -> tuple[PatternXXhfs, object, object, ID]:
         local_peer=peer,
         libp2p_privkey=kp.private_key,
         noise_static_key=noise_key,
+        kem=kem,
     )
     return pattern, kp, noise_key, peer
 

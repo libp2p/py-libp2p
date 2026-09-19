@@ -15,8 +15,13 @@ from libp2p.security.noise.exceptions import (
 )
 from libp2p.security.noise.pq.patterns_pq import PatternXXhfs
 from tests.security.noise.pq.helpers import (
+    KEM_BACKENDS,
+    NATIVE_KEM,
+    NATIVE_KEM_SKIP_REASON,
+    PURE_KEM,
     WriteCapture as _WriteCapture,
     make_conn_pair as _make_conn_pair,
+    make_kem as _make_kem,
     make_pattern as _make_pattern,
 )
 
@@ -59,14 +64,21 @@ class TestPatternXXhfsInit:
         assert len(pk) == 1184
 
 
+@pytest.mark.parametrize("kem_backend", KEM_BACKENDS)
 class TestPatternXXhfsHandshake:
-    """Full-handshake integration tests."""
+    """
+    Full-handshake integration tests, run once per KEM backend.
+
+    make_fast_kem() picks the native backend wherever it is available, so
+    without this parametrisation every end-to-end test here would resolve
+    to the same backend and kyber-py would keep only unit-level coverage.
+    """
 
     @pytest.mark.trio
-    async def test_handshake_completes(self) -> None:
+    async def test_handshake_completes(self, kem_backend: str) -> None:
         """Both sides return a SecureSession after the handshake."""
-        init_pat, _, _, _ = _make_pattern()
-        resp_pat, _, _, resp_peer = _make_pattern()
+        init_pat, _, _, _ = _make_pattern(kem=_make_kem(kem_backend))
+        resp_pat, _, _, resp_peer = _make_pattern(kem=_make_kem(kem_backend))
         init_conn, resp_conn = _make_conn_pair()
 
         sessions: list = [None, None]
@@ -85,10 +97,10 @@ class TestPatternXXhfsHandshake:
         assert sessions[1] is not None
 
     @pytest.mark.trio
-    async def test_bidirectional_data_exchange(self) -> None:
+    async def test_bidirectional_data_exchange(self, kem_backend: str) -> None:
         """Data written by each side is received correctly by the other."""
-        init_pat, _, _, _ = _make_pattern()
-        resp_pat, _, _, resp_peer = _make_pattern()
+        init_pat, _, _, _ = _make_pattern(kem=_make_kem(kem_backend))
+        resp_pat, _, _, resp_peer = _make_pattern(kem=_make_kem(kem_backend))
         init_conn, resp_conn = _make_conn_pair()
 
         sessions: list = [None, None]
@@ -116,10 +128,10 @@ class TestPatternXXhfsHandshake:
         assert await init_sess.read(len(msg_r)) == msg_r
 
     @pytest.mark.trio
-    async def test_peer_ids_are_correct(self) -> None:
+    async def test_peer_ids_are_correct(self, kem_backend: str) -> None:
         """Both sides see the correct remote peer ID after the handshake."""
-        init_pat, _, _, init_peer = _make_pattern()
-        resp_pat, _, _, resp_peer = _make_pattern()
+        init_pat, _, _, init_peer = _make_pattern(kem=_make_kem(kem_backend))
+        resp_pat, _, _, resp_peer = _make_pattern(kem=_make_kem(kem_backend))
         init_conn, resp_conn = _make_conn_pair()
 
         sessions: list = [None, None]
@@ -139,11 +151,11 @@ class TestPatternXXhfsHandshake:
         assert resp_sess.remote_peer == init_peer
 
     @pytest.mark.trio
-    async def test_peer_id_mismatch_raises(self) -> None:
+    async def test_peer_id_mismatch_raises(self, kem_backend: str) -> None:
         """Initiator raises PeerIDMismatchesPubkey when peer ID is wrong."""
-        init_pat, _, _, _ = _make_pattern()
-        resp_pat, _, _, resp_peer = _make_pattern()
-        _, _, _, wrong_peer = _make_pattern()
+        init_pat, _, _, _ = _make_pattern(kem=_make_kem(kem_backend))
+        resp_pat, _, _, resp_peer = _make_pattern(kem=_make_kem(kem_backend))
+        _, _, _, wrong_peer = _make_pattern(kem=_make_kem(kem_backend))
         init_conn, resp_conn = _make_conn_pair()
 
         init_error: Exception | None = None
@@ -173,10 +185,10 @@ class TestPatternXXhfsHandshake:
         assert isinstance(init_error, PeerIDMismatchesPubkey)
 
     @pytest.mark.trio
-    async def test_large_payload_exchange(self) -> None:
+    async def test_large_payload_exchange(self, kem_backend: str) -> None:
         """Transport handles payloads larger than a single cipher block."""
-        init_pat, _, _, _ = _make_pattern()
-        resp_pat, _, _, resp_peer = _make_pattern()
+        init_pat, _, _, _ = _make_pattern(kem=_make_kem(kem_backend))
+        resp_pat, _, _, resp_peer = _make_pattern(kem=_make_kem(kem_backend))
         init_conn, resp_conn = _make_conn_pair()
 
         sessions: list = [None, None]
@@ -197,12 +209,12 @@ class TestPatternXXhfsHandshake:
         assert received == large_msg
 
     @pytest.mark.trio
-    async def test_independent_sessions_dont_interfere(self) -> None:
+    async def test_independent_sessions_dont_interfere(self, kem_backend: str) -> None:
         """Two simultaneous handshakes produce independent, non-interfering sessions."""
-        ip1, _, _, _ = _make_pattern()
-        rp1, _, _, rp1_peer = _make_pattern()
-        ip2, _, _, _ = _make_pattern()
-        rp2, _, _, rp2_peer = _make_pattern()
+        ip1, _, _, _ = _make_pattern(kem=_make_kem(kem_backend))
+        rp1, _, _, rp1_peer = _make_pattern(kem=_make_kem(kem_backend))
+        ip2, _, _, _ = _make_pattern(kem=_make_kem(kem_backend))
+        rp2, _, _, rp2_peer = _make_pattern(kem=_make_kem(kem_backend))
 
         ic1, rc1 = _make_conn_pair()
         ic2, rc2 = _make_conn_pair()
@@ -236,14 +248,21 @@ class TestPatternXXhfsHandshake:
         assert await sessions[3].read(5) == b"pair2"
 
 
+@pytest.mark.parametrize("kem_backend", KEM_BACKENDS)
 class TestPatternXXhfsWireFormat:
-    """Verify the on-wire message layout."""
+    """
+    Verify the on-wire message layout.
+
+    Run on both backends: the wire encoding of ML-KEM-768 is what the two
+    have to agree on, so a size that differed between them would break
+    interoperability rather than just local performance.
+    """
 
     @pytest.mark.trio
-    async def test_message_a_is_1216_bytes(self) -> None:
+    async def test_message_a_is_1216_bytes(self, kem_backend: str) -> None:
         """Message A = e_pk(32) + e1_pk(1184) = 1216 bytes payload."""
-        init_pat, _, _, _ = _make_pattern()
-        resp_pat, _, _, resp_peer = _make_pattern()
+        init_pat, _, _, _ = _make_pattern(kem=_make_kem(kem_backend))
+        resp_pat, _, _, resp_peer = _make_pattern(kem=_make_kem(kem_backend))
 
         inner_conn, resp_conn = _make_conn_pair()
         spy = _WriteCapture(inner_conn)
@@ -267,10 +286,10 @@ class TestPatternXXhfsWireFormat:
         assert msg_len == 1216, f"Expected 1216, got {msg_len}"
 
     @pytest.mark.trio
-    async def test_message_b_overhead(self) -> None:
+    async def test_message_b_overhead(self, kem_backend: str) -> None:
         """Message B = e(32) + enc_ct(1104) + enc_s(48) + enc_payload(len+16)."""
-        init_pat, _, _, _ = _make_pattern()
-        resp_pat, _, _, resp_peer = _make_pattern()
+        init_pat, _, _, _ = _make_pattern(kem=_make_kem(kem_backend))
+        resp_pat, _, _, resp_peer = _make_pattern(kem=_make_kem(kem_backend))
 
         init_conn, inner_resp_conn = _make_conn_pair()
         spy = _WriteCapture(inner_resp_conn)
@@ -299,3 +318,76 @@ class TestPatternXXhfsWireFormat:
         assert msg_len >= fixed_overhead, (
             f"Message B too short: {msg_len} < {fixed_overhead}"
         )
+
+
+class TestKemInjection:
+    """The pattern uses the KEM it is handed, not a freshly selected one."""
+
+    def test_make_pattern_honours_an_explicit_kem(self) -> None:
+        from tests.security.noise.pq.helpers import make_kem
+
+        kem = make_kem("kyber-py")
+        pattern, _, _, _ = _make_pattern(kem=kem)
+        assert pattern.kem is kem
+
+
+@pytest.mark.skipif(
+    NATIVE_KEM_SKIP_REASON is not None,
+    reason=NATIVE_KEM_SKIP_REASON or "",
+)
+class TestMixedBackendHandshake:
+    """
+    A handshake between peers on *different* ML-KEM-768 backends.
+
+    This is the property the interop story rests on: only the encapsulation
+    key and the ciphertext cross the wire, and those are identical between
+    kyber-py and the native backend, so a peer on either must complete a
+    handshake with a peer on the other. Every other end-to-end test here runs
+    both sides on the same backend, which cannot catch a divergence in the
+    wire encoding.
+    """
+
+    @staticmethod
+    async def _handshake(init_kem_name: str, resp_kem_name: str) -> None:
+        init_kem = _make_kem(init_kem_name)
+        resp_kem = _make_kem(resp_kem_name)
+        assert type(init_kem) is not type(resp_kem), (
+            "this test is meaningless unless the two sides really differ"
+        )
+
+        init_pat, _, _, init_peer = _make_pattern(kem=init_kem)
+        resp_pat, _, _, resp_peer = _make_pattern(kem=resp_kem)
+        init_conn, resp_conn = _make_conn_pair()
+
+        sessions: list = [None, None]
+
+        async def run_init() -> None:
+            sessions[0] = await init_pat.handshake_outbound(init_conn, resp_peer)
+
+        async def run_resp() -> None:
+            sessions[1] = await resp_pat.handshake_inbound(resp_conn)
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(run_init)
+            nursery.start_soon(run_resp)
+
+        init_sess, resp_sess = sessions
+        assert init_sess is not None and resp_sess is not None
+        assert init_sess.remote_peer == resp_peer
+        assert resp_sess.remote_peer == init_peer
+
+        # The transport keys only agree if both sides derived the same KEM
+        # shared secret, so a round trip in each direction is the real
+        # assertion that the two backends interoperated.
+        await init_sess.write(b"native-meets-pure")
+        assert await resp_sess.read(len(b"native-meets-pure")) == b"native-meets-pure"
+        await resp_sess.write(b"pure-meets-native")
+        assert await init_sess.read(len(b"pure-meets-native")) == b"pure-meets-native"
+
+    @pytest.mark.trio
+    async def test_native_initiator_against_pure_python_responder(self) -> None:
+        await self._handshake(NATIVE_KEM, PURE_KEM)
+
+    @pytest.mark.trio
+    async def test_pure_python_initiator_against_native_responder(self) -> None:
+        await self._handshake(PURE_KEM, NATIVE_KEM)
