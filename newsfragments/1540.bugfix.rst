@@ -1,0 +1,1 @@
+Replaced the custom AutoNAT wire schema with the spec's proto2 definition and implemented both protocol halves: the server only dials addresses based on the requester's observed IP and refuses relayed requests, and a new client aggregates server verdicts into a reachability status using the specified more-than-three-servers heuristic.

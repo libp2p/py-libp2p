@@ -515,6 +515,19 @@ def _match_local_thin_waist(
 
     Handles wildcard IPs (``0.0.0.0`` / ``::``) by matching on port and
     transport protocol only.
+
+    Two-pass matching:
+
+    1. Exact: same transport, same port, compatible IP family. This is the
+       common direct-connection case (no NAT port translation).
+    2. Transport-only fallback: same transport and IP family, ignoring the
+       port. NATs routinely remap source ports, so an observation whose
+       port differs from every listen port is still a valid sighting of
+       our external IP — dropping it (as before) meant NAT'd hosts could
+       never learn their external address, breaking hole punching. The
+       recorded external keeps its observed port; consumers that need
+       port predictions (e.g. DCUtR advertising WAN:listen_port) derive
+       them explicitly.
     """
     ext_protos = cast(list[Protocol], external_tw.protocols())
     if len(ext_protos) < 2:
@@ -523,6 +536,7 @@ def _match_local_thin_waist(
     ext_transport_code = ext_protos[1].code
     ext_port = external_tw.value_for_protocol(ext_transport_code)
 
+    parsed: list[tuple[str, int]] = []  # (local_tw_str, local_ip_code)
     for addr in local_addrs:
         result = extract_thin_waist(addr)
         if result is None:
@@ -538,15 +552,16 @@ def _match_local_thin_waist(
         if local_transport_code != ext_transport_code:
             continue
 
-        # Port must match.
         local_port = local_tw.value_for_protocol(local_transport_code)
+        local_ip = local_tw.value_for_protocol(local_ip_code)
+        is_wildcard = local_ip in ("0.0.0.0", "::")
+        parsed.append((str(local_tw), local_ip_code))
+
+        # Pass 1: port must match.
         if local_port != ext_port:
             continue
 
         # IP family must be compatible.
-        local_ip = local_tw.value_for_protocol(local_ip_code)
-        is_wildcard = local_ip in ("0.0.0.0", "::")
-
         if is_wildcard:
             # Wildcard matches any IP of the same family.
             if ext_ip_code == local_ip_code:
@@ -555,5 +570,10 @@ def _match_local_thin_waist(
             # Exact thin waist match (same IP family, same port).
             if local_ip_code == ext_ip_code:
                 return str(local_tw)
+
+    # Pass 2: ignore the port, match on transport + IP family only.
+    for local_tw_str, local_ip_code in parsed:
+        if local_ip_code == ext_ip_code:
+            return local_tw_str
 
     return None

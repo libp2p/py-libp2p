@@ -52,6 +52,7 @@ class BaseNoiseMsgReadWriter(EncryptedMsgReadWriter):
     prefix: bytes = b"\x00" * 32
 
     def __init__(self, conn: IRawConnection, noise_state: NoiseState) -> None:
+        super().__init__(conn)
         self.read_writer = NoisePacketReadWriter(cast(ReadWriteCloser, conn))
         self.noise_state = noise_state
 
