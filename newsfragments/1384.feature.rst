@@ -1,0 +1,7 @@
+Randomise per-round candidate selection in the Kademlia DHT lookup
+(``find_closest_peers_network``). Each round now draws its ALPHA queries at
+random from the closest-peer window instead of always taking the strictly
+closest ALPHA, so a peer that mines an ID next to the target key is no longer
+guaranteed a slot in the first round and cannot shape the lookup path from the
+first hop. The closest peers are still contacted before the lookup returns, so
+randomised admission cannot hand back peers that were never queried.
