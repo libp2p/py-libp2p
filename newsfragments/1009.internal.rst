@@ -1,1 +1,0 @@
-Add type stubs for ``miniupnpc`` to provide proper type information and replace the ``type: ignore`` workaround.
