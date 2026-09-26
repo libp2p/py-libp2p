@@ -1373,3 +1373,58 @@ async def test_websocket_transport_can_dial():
         assert not is_valid_websocket_multiaddr(maddr), (
             f"Address {addr_str} should be invalid"
         )
+
+
+@pytest.mark.trio
+async def test_dns_address_is_dialed_by_name(nursery):
+    """
+    A /dns4 WebSocket address reaches the server by its name.
+
+    A TLS-terminating proxy in front of a peer (a CDN edge, a tunnel) selects
+    the origin by the TLS server name and the Host header, so the handshake
+    must carry the name, not the address it resolves to. The Host header of
+    the upgrade request is checked; the server name is the same string.
+    """
+    seen: dict[str, bytes] = {}
+
+    async def record(stream: trio.SocketStream) -> None:
+        seen["request"] = await stream.receive_some(4096)
+        await stream.aclose()
+
+    listeners = await trio.open_tcp_listeners(0, host="127.0.0.1")
+    port = listeners[0].socket.getsockname()[1]
+    nursery.start_soon(trio.serve_listeners, record, listeners)
+
+    transport = WebsocketTransport(create_upgrader())
+    transport.set_background_nursery(nursery)
+    with pytest.raises(OpenConnectionError):
+        await transport.dial(Multiaddr(f"/dns4/localhost/tcp/{port}/ws"))
+
+    request = seen["request"].decode(errors="replace").lower()
+    assert f"\r\nhost: localhost:{port}\r\n" in request, request
+    nursery.cancel_scope.cancel()
+
+
+@pytest.mark.trio
+async def test_dnsaddr_address_is_resolved_before_dialing(nursery, monkeypatch):
+    """A /dnsaddr address names TXT records; those are dialed, by name too."""
+    dialed: list[Multiaddr] = []
+
+    async def resolve(maddr, resolver, max_retries, timeout_seconds):
+        assert str(maddr) == "/dnsaddr/bootstrap.example/tcp/443/wss"
+        return [Multiaddr("/dns4/edge.example/tcp/443/wss")]
+
+    async def dial_resolved(maddr):
+        dialed.append(maddr)
+        raise OpenConnectionError("not dialing in this test")
+
+    monkeypatch.setattr(
+        "libp2p.transport.websocket.transport.resolve_multiaddr_with_retry",
+        resolve,
+    )
+    transport = WebsocketTransport(create_upgrader())
+    transport.set_background_nursery(nursery)
+    monkeypatch.setattr(transport, "_dial_resolved", dial_resolved)
+    with pytest.raises(OpenConnectionError):
+        await transport.dial(Multiaddr("/dnsaddr/bootstrap.example/tcp/443/wss"))
+    assert [str(m) for m in dialed] == ["/dns4/edge.example/tcp/443/wss"]

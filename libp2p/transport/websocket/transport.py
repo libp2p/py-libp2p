@@ -50,7 +50,9 @@ class WebsocketConfig:
     max_buffered_amount: int = 4 * 1024 * 1024
     max_connections: int = 1000
 
-    # DNS resolution (for dial when multiaddr has dns/dns4/dns6/dnsaddr)
+    # DNS resolution (for dial when the multiaddr is a /dnsaddr; a /dns, /dns4
+    # or /dns6 name is resolved by the socket connect and kept as the TLS
+    # server name and the Host header)
     dns_resolution_timeout: float = 5.0
     dns_max_retries: int = 3
 
@@ -824,7 +826,12 @@ class WebsocketTransport(ITransport):
         """
         Dial a WebSocket connection to the given multiaddr.
 
-        Resolves DNS (dns, dns4, dns6, dnsaddr) before dialing (Phase 3.1).
+        A ``/dnsaddr`` address is resolved through its TXT records first; the
+        records name the concrete addresses. A ``/dns``, ``/dns4`` or ``/dns6``
+        address is dialed by name: the name becomes the TLS server name and
+        the ``Host`` header of the WebSocket handshake, which a TLS-terminating
+        proxy in front of the peer selects the origin by, and the socket
+        connect resolves it. This matches go-libp2p and js-libp2p.
 
         Args:
             maddr: The multiaddr to dial (e.g., /ip4/127.0.0.1/tcp/8000/ws)
@@ -840,8 +847,7 @@ class WebsocketTransport(ITransport):
         logger.debug("WebsocketTransport.dial called with %s", maddr)
 
         protocols = list(maddr.protocols())
-        dns_protocols = {"dns", "dns4", "dns6", "dnsaddr"}
-        if protocols and protocols[0].name in dns_protocols:
+        if protocols and protocols[0].name == "dnsaddr":
             resolved = await resolve_multiaddr_with_retry(
                 maddr,
                 resolver=DNSResolver(),
@@ -874,7 +880,7 @@ class WebsocketTransport(ITransport):
         return await self._dial_resolved(maddr)
 
     async def _dial_resolved(self, maddr: Multiaddr) -> RawConnection:
-        """Dial using a multiaddr that has an IP (no DNS)."""
+        """Dial a multiaddr the socket can connect to: an IP or a DNS name."""
         if not self.can_dial(maddr):
             raise OpenConnectionError(f"Cannot dial {maddr}")
 
