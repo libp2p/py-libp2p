@@ -3,6 +3,384 @@ Release Notes
 
 .. towncrier release notes start
 
+py-libp2p v0.8.0 (2026-09-26)
+-----------------------------
+
+Breaking Changes
+~~~~~~~~~~~~~~~~
+
+- Moved the ``connection_config`` parameter in ``libp2p.new_host()`` to the end of the function signature.
+  This is a breaking API change for callers that pass arguments positionally; use keyword arguments for ``connection_config``. (`#553 <https://github.com/libp2p/py-libp2p/issues/553>`__)
+- Removed the ``nursery`` parameter from ``IListener.listen()`` and all concrete listener implementations (TCP, WebSocket, QUIC, Circuit Relay v2). Listeners now own their background task lifetime internally and are cancelled via ``close()``. Callers should update ``await listener.listen(maddr, nursery)`` to ``await listener.listen(maddr)``. (`#1314 <https://github.com/libp2p/py-libp2p/issues/1314>`__)
+- Removed the ``libp2p.transport.transport_registry`` module and the legacy ``transport=`` keyword argument from ``Swarm.__init__``. Third-party transports should now be registered using ``TransportManager`` or by passing ``transports=[...]`` to ``Swarm()``. (`#1359 <https://github.com/libp2p/py-libp2p/issues/1359>`__)
+
+
+Bugfixes
+~~~~~~~~
+
+- Bootstrap discovery fixes and go-libp2p spec compliance: DNS-resolved addresses now properly have /p2p/ decapsulated (with ValueError fallback), connection timeout uses trio.fail_after with TooSlowError handling, allow_ipv6 enforced in address filtering, ID.from_string used for peer ID parsing, connection_timeout is configurable (float type), _is_supported_addr is now a @staticmethod, stop() properly clears state for clean restart, exception handling uses specific exception types, periodic reconnection loop added (go-libp2p spec), and unreachable bootstrap peers are removed after 3 consecutive failures (go-libp2p spec). (`#bootstrap_fixes <https://github.com/libp2p/py-libp2p/issues/bootstrap_fixes>`__)
+- ``BasicHost.close()`` now stops background services (mDNS, UPnP, bootstrap) and
+  cancels identify tasks before closing the network. Test ``HostFactory`` tears
+  hosts down via ``close()``, eliminating pending-task warnings (issue #92). (`#92 <https://github.com/libp2p/py-libp2p/issues/92>`__)
+- Replaced return True/False pattern with try/catch pattern for better error handling.
+
+  - Updated set_stream_handler method in BasicHost to validate inputs and raise HostException
+  - Enhanced mplex stream deadline methods to raise ValueError for invalid TTL instead of returning False
+  - Updated TCP listener to raise OpenConnectionError instead of returning False on failure
+  - Fixed misleading docstrings in yamux, QUIC stream, swarm, and mplex (`#194 <https://github.com/libp2p/py-libp2p/issues/194>`__)
+- Fixed silent swallowing of ``ConnectionResetError`` in TCP connections. When a remote peer resets the connection, ``TrioTCPStream`` now raises ``ConnectionClosedError`` (for ``trio.BrokenResourceError``) instead of silently returning empty bytes. Locally-initiated closures (``trio.ClosedResourceError``) remain silently handled for backward compatibility. (`#376 <https://github.com/libp2p/py-libp2p/issues/376>`__)
+- TCP dial now raises ``OpenConnectionError`` instead of leaking
+  ``ProtocolLookupError`` when a multiaddr has no TCP component, matching
+  listen() and closing the defence-in-depth gap left after #1357 / #391. (`#391 <https://github.com/libp2p/py-libp2p/issues/391>`__)
+- Completed Circuit Relay v2 reservation proof wiring by returning signed reservation voucher/signature payloads from HOP RESERVE responses and attaching valid reservation proofs on subsequent HOP CONNECT requests. Also made relay DHT discovery toggle configurable through RelayConfig. (`#691 <https://github.com/libp2p/py-libp2p/issues/691>`__)
+- Fixed message ID (mid) handling in pubsub/mcache to use ``bytes`` (``from_id + seqno``) instead of ``tuple[bytes, bytes]``, consistent with go-libp2p's ``DefaultMsgIdFn``. (`#861 <https://github.com/libp2p/py-libp2p/issues/861>`__)
+- Fixed GossipSub publish-before-identify timing issue by queueing messages for peers whose protocol negotiation is still in progress, ensuring deterministic message delivery even in rapid connect-and-publish scenarios. (`#887 <https://github.com/libp2p/py-libp2p/issues/887>`__)
+- Fixed mplex so a remote stream reset does not discard data that was already buffered. This matches Yamux and allows reading a ping payload that arrives with a concurrent reset. (`#1108 <https://github.com/libp2p/py-libp2p/issues/1108>`__)
+- Fixed DHT regression on v0.5.0 where streams failed to open to bootstrap peers due to a race condition in stream muxer initialization. (`#1128 <https://github.com/libp2p/py-libp2p/issues/1128>`__)
+- Noise handshake payloads now require X25519 static keys and raise a clear
+  error when given an invalid key type. (`#1182 <https://github.com/libp2p/py-libp2p/issues/1182>`__)
+- Re-enable the ``test_ipv6_tcp_listen_and_dial`` integration test. The skip was
+  added when ``listen()`` took an external nursery; PR #1308 switched to an
+  internal system task, making IPv6 listen/dial work correctly. The test now
+  passes without modification. (`#1189 <https://github.com/libp2p/py-libp2p/issues/1189>`__)
+- Fixed PytestUnknownMarkWarning for the ``integration`` mark and RuntimeWarning from an unawaited coroutine in stream muxer tests, so CI runs without these warnings. (`#1228 <https://github.com/libp2p/py-libp2p/issues/1228>`__)
+- Fixed ``BasicHost.get_addrs()`` not announcing externally observed NAT addresses, which previously caused peers behind NAT (e.g. AWS/EC2) to advertise only private/loopback addresses. Added ``ObservedAddrManager`` that collects observed addresses reported by peers via the Identify protocol and advertises them once enough distinct observer groups confirm the same address. (`#1250 <https://github.com/libp2p/py-libp2p/issues/1250>`__)
+- Fixed yamux interoperability with go-yamux: SYN/ACK/FIN/RST frames are now sent as TYPE_WINDOW_UPDATE (not TYPE_DATA), writes are serialized with a lock to prevent frame interleaving, and SYN/ACK window values match go-yamux conventions so peers no longer get an inflated send window. (`#1271 <https://github.com/libp2p/py-libp2p/issues/1271>`__)
+- Circuit Relay v2 clients open a new HOP stream for CONNECT after RESERVE so relays that finish the substream after one exchange (for example rust-libp2p) work for hole-punch and interop. (`#1304 <https://github.com/libp2p/py-libp2p/issues/1304>`__)
+- Fixed yamux handling of WINDOW_UPDATE frames with SYN so the length field is treated as a window increment rather than payload size, improving interop with other libp2p implementations. Also handle FIN and RST flags on SYN stream-open frames. (`#1312 <https://github.com/libp2p/py-libp2p/issues/1312>`__)
+- Fixed Kademlia DHT provider advertisement so a failure to open the ADD_PROVIDER stream no longer raises a secondary ``UnboundLocalError``; the underlying connection error is logged instead. (`#1335 <https://github.com/libp2p/py-libp2p/issues/1335>`__)
+- Fixed peer record validation to ensure signed ``PeerRecord`` instances have matching signer identity and peer ID, preventing certified address book poisoning for arbitrary peer IDs. (`#1338 <https://github.com/libp2p/py-libp2p/issues/1338>`__)
+- Fixed TLS inbound authentication bypass where a remote peer could complete the libp2p TLS handshake without presenting a client certificate and still receive a valid ``SecureSession`` with a synthetic placeholder Peer ID. The server-side SSL context now requests a client certificate, and a missing certificate is treated as a hard handshake failure rather than a recoverable warning. (`#1340 <https://github.com/libp2p/py-libp2p/issues/1340>`__)
+- Fixed Circuit Relay v2 issue where a source peer could connect to a destination peer without an active reservation on the relay. (`#1342 <https://github.com/libp2p/py-libp2p/issues/1342>`__)
+- Fixed Python perf interop teardown for tls+mplex and listener lifecycle so slow ws+yamux benchmarks complete without false failures during shutdown. (`#1344 <https://github.com/libp2p/py-libp2p/issues/1344>`__)
+- Fixed an authentication bypass where inbound QUIC connections were accepted without verifying the peer's libp2p certificate. (`#1345 <https://github.com/libp2p/py-libp2p/issues/1345>`__)
+- Fixed a denial-of-service vulnerability where remote pubsub peers could exhaust memory by flooding unique topic subscriptions. (`#1349 <https://github.com/libp2p/py-libp2p/issues/1349>`__)
+- Hardened the WebRTC Direct ``POST /sdp`` dev-harness HTTP server against memory-amplification DoS: bounded ``Content-Length`` to 32 KiB (returns 413 on excess), rejected negative/non-integer values with 400, and capped header parsing at 64 lines / 8 KiB to prevent indefinite task hold via slow header flooding. (`#1354 <https://github.com/libp2p/py-libp2p/issues/1354>`__)
+- Fixed python×python TLS interop failures with ``TLSV1_ALERT_UNKNOWN_CA`` when using self-signed libp2p identity certificates. The TLS transport now requests peer certificates during the handshake while skipping PKIX CA verification at the OpenSSL layer, deferring identity checks to libp2p extension verification per the libp2p TLS specification. (`#1367 <https://github.com/libp2p/py-libp2p/issues/1367>`__)
+- Fixed transport interop listener crashes when publishing IPv6-only multiaddrs. ``_get_ip_value`` now catches ``ProtocolLookupError`` instead of assuming ``value_for_protocol("ip4")`` returns falsy on IPv6 addresses. (`#1371 <https://github.com/libp2p/py-libp2p/issues/1371>`__)
+- Fixed identify protocol reporting empty listen addresses under heavy parallel load. Integration tests that depend on identify and peerstore address propagation are now run serially in ``make test`` to avoid xdist timing flakes. (`#1377 <https://github.com/libp2p/py-libp2p/issues/1377>`__)
+- quic: remove shared ``QuicLogger`` instance that caused ``QuicLoggerTrace does not belong to QuicLogger`` crashes when multiple concurrent inbound QUIC connections were active. Each connection now uses ``quic_logger=None``, preventing cross-connection trace ownership errors. (`#1390 <https://github.com/libp2p/py-libp2p/issues/1390>`__)
+- gossipsub: replay recent messages to a peer once its outbound pubsub stream is registered. When a peer's subscription was processed before that stream existed, the mcache catch-up in ``handle_subscription`` had nothing to write to, so a message published right after connecting was dropped for good. (`#1398 <https://github.com/libp2p/py-libp2p/issues/1398>`__)
+- Clean up ``peer_topics`` for pubsub peers that disconnect before their outbound
+  stream is registered, and replay the gossipsub message cache at most once per
+  peer subscription so a reconnecting peer is no longer handed the whole window
+  again. (`#1403 <https://github.com/libp2p/py-libp2p/issues/1403>`__)
+- kad-dht: never dial ourselves during a ``FIND_NODE`` lookup, and drop our own peer ID from a response's ``closerPeers`` instead of queueing it as a candidate. A responder may legitimately return the requester -- it is the closest key to itself -- and querying ourselves stalled the lookup until timeout. (`#1405 <https://github.com/libp2p/py-libp2p/issues/1405>`__)
+- kademlia-dht: fix random walk stalls caused by artificial ``min_refresh_threshold``, correct KBucket splitting and eviction logic, hash target keys before XOR distance computation, align random walk concurrency with go-libp2p (10), support configurable random walk targets, add discovered peers to routing table, and support ``dnsaddr`` resolution. (`#1413 <https://github.com/libp2p/py-libp2p/issues/1413>`__)
+- ping: add per-peer inbound stream limits (max 2) to prevent resource exhaustion, cache and reuse outbound streams, reduce response timeout from 60s to 10s, add write timeouts and ``CancelScope`` support, fix RTT calculations to milliseconds, use ``read_exactly`` for short-read safety, use ``stream.reset()`` on payload mismatch, and wrap metrics loop in try/except to prevent global crash. (`#1414 <https://github.com/libp2p/py-libp2p/issues/1414>`__)
+- identify: bound varint prefix loops and add timeouts to prevent unbounded reads, scope identify tasks for cleanup on connection drop, fix signed peer record mismatch handling, replace unbounded cache with LRU (maxsize=1000), fix ``id(conn)`` stale observations with weak references, fix semaphore mutable default, remove 5s synchronous poll delay, fix O(n^2) bytes concatenation, replace protocols instead of appending, clear addresses before re-adding, fix ``_is_public_addr`` false-positives, close response streams, validate ``public_key``, fix case-sensitive ``::ffff:`` check, and cancel tasks on host shutdown. (`#1415 <https://github.com/libp2p/py-libp2p/issues/1415>`__)
+- bitswap: rewrite to session-based architecture with ``PeerManager`` and ``BlockPresenceManager``, implement ``WANT_CANCEL`` propagation to save bandwidth, fix memory leaks in pending requests and presence caches with TTL-based cleanup, resolve race conditions with ``set[trio.Event]`` per CID, add ``trio.CancelScope`` for clean shutdown, enforce block size limits (512KB) and CID validation, and add comprehensive error handling for network operations. (`#1416 <https://github.com/libp2p/py-libp2p/issues/1416>`__)
+- mDNS peer discovery now uses spec-compliant ``dnsaddr`` TXT records, supports IPv4 and IPv6, filters unsuitable addresses (circuit relay, browser transports), and resolves the ``remove_service`` ``KeyError`` crash. (`#1419 <https://github.com/libp2p/py-libp2p/issues/1419>`__)
+- yamux: release the per-connection ``stream_backlog_semaphore`` slot when a stream is closed or reset. Slots were previously consumed permanently, so any connection that opened more than 256 streams over its lifetime — e.g. the bitswap client opening one wantlist stream per batch while transferring a large (multi-GB) file — would block forever in ``open_stream`` and hang the transfer. Bitswap response readers are now also scoped to the CIDs their own wantlist covered: they close their stream once that batch is complete instead of lingering until the whole transfer finishes, and no longer report other streams' pending blocks as missing. (`#1420 <https://github.com/libp2p/py-libp2p/issues/1420>`__)
+- Fix resource leaks that accumulate on long-running nodes: yamux now sweeps
+  fully-closed streams whose receive buffers still hold unread data (previously
+  they leaked one entry per stream for the connection's lifetime), and the
+  bitswap client now reaps all per-peer state (wantlists, negotiated protocols,
+  pending bytes, peer stats, presence) when a peer's last connection closes, via
+  a new INotifee integration. (`#1421 <https://github.com/libp2p/py-libp2p/issues/1421>`__)
+- Kademlia DHT ``FIND_NODE`` queries to a single peer are bounded by ``QUERY_TIMEOUT``, so a peer that opens the query stream but never replies cannot stall ``find_peer``, ``provide``, ``find_providers`` or routing-table refresh; a regression test now covers the silent-peer case. (`#1434 <https://github.com/libp2p/py-libp2p/issues/1434>`__)
+- Enforce go-mplex MaxMessageSize (1 MiB) on mplex frame reads, chunk large writes, and apply receive-timeout backpressure so oversized frames cannot exhaust memory. (`#1436 <https://github.com/libp2p/py-libp2p/issues/1436>`__)
+- Fixed the WebRTC-Direct inbound path, which never completed: the listener now runs the
+  Noise XX handshake (as initiator, per spec) on the trio side and hands the authenticated
+  ``WebRTCConnection`` to the handler; the dialer is the Noise responder and verifies the
+  ``/p2p/`` peer ID after the handshake. Also fixed ``get_remote_fingerprint`` (read non-
+  existent aiortc attributes, so ``dial()`` always failed),
+  ``DataChannelReadWriter.read(n)`` now honours ``n`` (the Noise packet reader needs the
+  2-byte length prefix alone), the Noise prologue is role-ordered (dialer fingerprint,
+  then server), and the noise channel ``send`` waits for the channel to open, and the
+  handshake bytes are framed as ``webrtc.pb.Message`` stream frames on channel 0 like
+  go/js (was raw). The dialer bounds the Noise phase with ``handshake_timeout`` and closes
+  the peer connection on every failure path; a raising connection handler no longer takes
+  down the listeners trio run. ``PatternXX.handshake_outbound`` accepts
+  ``remote_peer=None`` for initiators that learn the peer ID from the handshake. Data-
+  channel framing is now decoded as a byte stream (frames may be split or batched across
+  SCTP messages, as go-libp2p sends the varint prefix and body separately), for both the
+  Noise channel and streams; previously every py<->go WebRTC-Direct connection failed with
+  ``malformed handshake frame length``. Opening a data channel re-seeds aiortc's stream-id
+  allocator parity from the DTLS role (client even, server odd, RFC 8832) instead of its
+  ICE-role default, which collided with go-libp2p's even dialer IDs on a py listener. (`#1437 <https://github.com/libp2p/py-libp2p/issues/1437>`__)
+- Kademlia DHT and Rendezvous now reject varint-prefixed messages larger than 4 MiB to prevent remote memory exhaustion. (`#1438 <https://github.com/libp2p/py-libp2p/issues/1438>`__)
+- Harden the varint decoders in ``libp2p.utils.varint`` against malformed input. ``decode_uvarint`` now raises ``ParseError`` on a truncated varint (one whose final byte still has the continuation bit set) instead of silently returning a partial value, and ``decode_uvarint_from_stream`` rejects an over-long (11-byte) varint that would encode a value larger than 64 bits. (`#1440 <https://github.com/libp2p/py-libp2p/issues/1440>`__)
+- GossipSub now GRAFTs peers into an underfilled mesh when their subscription is
+  observed, so publish after join/connect no longer waits on the next heartbeat. (`#1454 <https://github.com/libp2p/py-libp2p/issues/1454>`__)
+- Reject 10-byte uvarint encodings whose terminating byte overflows 64 bits, and align ``decode_uvarint`` over-long failures to ``ParseError``. (`#1458 <https://github.com/libp2p/py-libp2p/issues/1458>`__)
+- GossipSub ``ControlIHave`` / ``ControlIWant`` ``messageIDs`` are now opaque
+  bytes (matching the GossipSub RPC schema and ``ControlIDontWant``), so binary
+  message IDs no longer raise ``UnicodeDecodeError`` on the control path. (`#1463 <https://github.com/libp2p/py-libp2p/issues/1463>`__)
+- Fixed persistent peerstore restore so public and private keys survive process restarts when using durable backends such as SQLite. (`#1466 <https://github.com/libp2p/py-libp2p/issues/1466>`__)
+- ``RawConnection.read()`` and ``RawConnection.write()`` now catch
+  ``ConnectionResetError`` from the underlying stream and wrap it in
+  ``RawConnError``, preventing OS-level connection-reset errors from leaking to
+  callers that expect ``RawConnError`` for all connection failures. (`#1468 <https://github.com/libp2p/py-libp2p/issues/1468>`__)
+- The WebRTC-Direct listener now sets the dialer's ICE credentials on the muxed connection before replaying the first-contact STUN packet. A full-ICE dialer (e.g. go-libp2p) that checks from multiple host candidates no longer strands the peer-reflexive pair it later nominates, so inbound ``go -> py`` dials complete instead of stalling after ICE; the go-libp2p interop suite now exercises both directions for real. (`#1470 <https://github.com/libp2p/py-libp2p/issues/1470>`__)
+- AnyIOManager cancellation now waits on an ``anyio.Event`` instead of busy-polling,
+  matching TrioManager so service shutdown is prompt under load (fixes Windows CI flake). (`#1472 <https://github.com/libp2p/py-libp2p/issues/1472>`__)
+- Close a swarm's live connections when it shuts down so their sockets are released
+  instead of leaking, and treat ``ResourceWarning`` as an error in pytest so future
+  socket leaks fail CI. ``Swarm.run()``'s service-manager shutdown closes tracked
+  connections and transports (not just listeners); test fixtures tear hosts/swarms
+  down while services are still running. Completes the work deferred from #1486
+  (issues #92, #1485). (`#1485 <https://github.com/libp2p/py-libp2p/issues/1485>`__)
+- ``Mplex.close()`` now closes the underlying secured connection even when the muxer is already shutting down. Previously it returned early once ``event_shutting_down`` was set, and the read loop's ``_cleanup()`` sets that flag on a peer-initiated EOF without closing the socket — so whenever the remote closed first, the local socket leaked (``ResourceWarning: unclosed socket``). This mirrors ``Yamux.close()``, which already closed unconditionally, and clears the residual stream-muxer socket leaks tracked in #1487. (`#1487 <https://github.com/libp2p/py-libp2p/issues/1487>`__)
+- Clear residual unclosed-socket / event-loop ``ResourceWarning`` leaks across the
+  core test suite and enable ``filterwarnings = ["error::ResourceWarning"]`` so
+  new socket leaks fail CI. Completes the deferred guard from #1485 / #1486 and
+  closes #1498. (`#1498 <https://github.com/libp2p/py-libp2p/issues/1498>`__)
+- Fixed WebRTC Direct experimental ``/sdp`` harness listen on Windows by binding
+  TCP first for ephemeral ports, then UDP on the same number, so Hyper-V excluded
+  port ranges no longer fail ``listen()`` with ``WinError 10013``. (`#1501 <https://github.com/libp2p/py-libp2p/issues/1501>`__)
+- Fixed WebTransport self-signed leaf generation so Chromium accepts ``/certhash/`` pins via ``serverCertificateHashes`` (empty subject, BasicConstraints/KeyUsage/EKU aligned with go-libp2p; default validity 13 days). (`#1514 <https://github.com/libp2p/py-libp2p/issues/1514>`__)
+- Quietly exit `host.run` / `host.close` when muxer background tasks see expected peer hangup, so apps no longer need ExceptionGroup teardown swallows. (`#1516 <https://github.com/libp2p/py-libp2p/issues/1516>`__)
+- QUIC stream writes now apply send-side backpressure so writers wait when the transport send buffer is full, making upload throughput measurements honest. (`#1520 <https://github.com/libp2p/py-libp2p/issues/1520>`__)
+- Fixed QUIC stream half-close so peers observe FIN and request/response protocols (including perf download) complete correctly. (`#1521 <https://github.com/libp2p/py-libp2p/issues/1521>`__)
+- Fix tls+mplex teardown hang: SecureSession raises ConnectionClosedError on EOF, and Mplex cleans up idempotently if the read loop exits without setting event_closed. (`#1526 <https://github.com/libp2p/py-libp2p/issues/1526>`__)
+- Improve honest QUIC throughput: stop forcing a 1ms event-loop sleep after every batch, wire max_datagram_size to UDP MTU (not the DATAGRAM frame size), expose cubic/initial_rtt on QUICTransportConfig, and coalesce transmits per write watermark batch. (`#1528 <https://github.com/libp2p/py-libp2p/issues/1528>`__)
+- Ignore late FIN-only events on already-closed inbound QUIC streams so they no longer starve ``accept_stream()`` under concurrent load. (`#1530 <https://github.com/libp2p/py-libp2p/issues/1530>`__)
+- Fixed the Rendezvous client advertising ``/p2p``-suffixed addresses in REGISTER messages. Strict servers dial back advertised addresses to verify reachability and rejected these registrations, so registering against non-Python servers failed. The client now advertises bare transport addresses. (`#1535 <https://github.com/libp2p/py-libp2p/issues/1535>`__)
+- Fixed Circuit Relay v2 spec compliance so reservations, STOP flows, and length-delimited framing interoperate with go-libp2p and rust-libp2p relays and peers. (`#1537 <https://github.com/libp2p/py-libp2p/issues/1537>`__)
+- Replaced the custom AutoNAT wire schema with the spec's proto2 definition and implemented both protocol halves: the server only dials addresses based on the requester's observed IP and refuses relayed requests, and a new client aggregates server verdicts into a reachability status using the specified more-than-three-servers heuristic. (`#1540 <https://github.com/libp2p/py-libp2p/issues/1540>`__)
+
+
+Improved Documentation
+~~~~~~~~~~~~~~~~~~~~~~
+
+- Installation documentation now recommends ``uv`` as the primary package manager, with ``pip`` documented as an alternative, including development setup for both workflows. (`#1175 <https://github.com/libp2p/py-libp2p/issues/1175>`__)
+- Noise transport examples now show a dedicated X25519 static key instead of
+  reusing the host identity key for Noise encryption. (`#1182 <https://github.com/libp2p/py-libp2p/issues/1182>`__)
+- Updated contributor setup documentation to use ``uv sync`` with the default ``.venv`` workflow, including clearer setup-script guidance for Linux and macOS. (`#1248 <https://github.com/libp2p/py-libp2p/issues/1248>`__)
+- Document Filecoin protocol support and gaps with a machine-readable
+  support matrix, and expose a gossipsub compatibility snapshot from the
+  read-only Filecoin pubsub observer demo. (`#1267 <https://github.com/libp2p/py-libp2p/issues/1267>`__)
+- Consolidated the ``libp2p.utils`` package documentation into a single page, removing the duplicate module entry and adding missing ``address_validation`` and ``dns_utils`` submodule docs. (`#1296 <https://github.com/libp2p/py-libp2p/issues/1296>`__)
+- Extended the announce-addrs example CLI with ``--factory-extra``
+  (``addrs_factory`` compose mode) and ``--disable-identify-address-discovery``,
+  and clarified that the flag skips observed-address discovery only (Identify
+  itself still runs for peer metadata). (`#1478 <https://github.com/libp2p/py-libp2p/issues/1478>`__)
+- Document Filecoin network parity expectations versus Lotus/Forest and add a
+  machine-readable interop matrix with reproducible Filecoin demo workflows. (`#1481 <https://github.com/libp2p/py-libp2p/issues/1481>`__)
+- Document the two WebRTC-Direct signalling paths (the spec STUN listener vs the dev-only ``POST /sdp`` harness) and add v1-vs-v2 dial guidance — v1 as the migration default and v2 (libp2p/specs#715) as the recommended flow that browser dialling will require — in the ``libp2p.transport.webrtc`` package docstring and the README. (`#1511 <https://github.com/libp2p/py-libp2p/issues/1511>`__)
+
+
+Features
+~~~~~~~~
+
+- py-libp2p now uses trio exclusively for async operations, removing remaining asyncio usage. (`#174 <https://github.com/libp2p/py-libp2p/issues/174>`__)
+- Migrated remaining asyncio usage with trio, so the codebase uses a single async runtime. (`#301 <https://github.com/libp2p/py-libp2p/issues/301>`__)
+- Add opt-in peer identity persistence: ``save_identity`` / ``load_identity`` /
+  ``create_identity_from_seed``, a ``FileSystemKeyStore`` for named keys, and
+  ``key_pair_provider`` / ``keystore`` parameters on ``new_host`` / ``new_swarm``
+  so nodes can keep a stable Peer ID across restarts without changing the default
+  random-identity behavior. (`#312 <https://github.com/libp2p/py-libp2p/issues/312>`__)
+- Added explicit ``wait_for_peer()`` and ``wait_for_subscription()`` methods to the pubsub API. These methods allow tests and applications to wait for actual state changes (peer stream establishment and topic subscriptions) instead of using arbitrary ``trio.sleep()`` calls, eliminating race conditions when dealing with new peers and pubsub subscriptions. (`#418 <https://github.com/libp2p/py-libp2p/issues/418>`__)
+- Replaced the legacy async_service implementation with a new anyio_service framework built on AnyIO for better maintainability and structured concurrency. Import paths change from ``libp2p.tools.async_service`` to ``libp2p.tools.anyio_service``; the public API (``Service``, ``background_trio_service``) is unchanged. (`#524 <https://github.com/libp2p/py-libp2p/issues/524>`__)
+- Added **experimental** WebRTC transport scaffolding (``libp2p.transport.webrtc``)
+  per the libp2p WebRTC and WebRTC Direct specs.  Enabled via the optional
+  ``libp2p[webrtc]`` extra (``aiortc``) and the ``enable_webrtc`` opt-in.
+
+  This is a v1 **node-to-node** foundation, not a production-ready WebRTC stack.
+
+  **What works (node-to-node):**
+
+  - ``WebRTCDirectTransport`` (``/webrtc-direct``) and ``WebRTCPrivateTransport``
+    (``/webrtc`` via Circuit Relay v2).
+  - Data-channel stream framing with uvarint length-prefixed protobuf and the
+    FIN / FIN_ACK / STOP_SENDING / RESET state machine.
+  - In-band data channels for application streams; the Noise channel (id=0)
+    remains negotiated per spec.
+  - Signaling with bilateral ``ICE_DONE`` (libp2p/specs#585 fix).
+  - Noise XX prologue binding the handshake to the DTLS certificate fingerprints.
+  - SDP builder with an isolated ``_apply_ice_credentials()`` seam for
+    libp2p/specs#672.
+  - ECDSA P-256 certificate generation with multihash / multibase fingerprint
+    encoding; DTLS cert pinned to ``RTCPeerConnection`` via the aiortc-internal
+    private slot so the advertised ``/certhash/`` matches the actual handshake.
+  - A clean trio ↔ asyncio bridge for ``aiortc``.
+
+  **Out of scope for this PR (follow-ups):**
+
+  - **Browser interop is explicitly NOT supported.**  v1 SDP munging on the
+    browser side is being phased out by Chrome's ``WebRTC-NoSdpMangleUfrag``
+    field trial; browser dial will land on v2 (libp2p/specs#715).
+  - Interop with go-libp2p / js-libp2p WebRTC Direct dialers.  Their listener
+    reconstructs the offer from the inbound STUN ``USERNAME``; our listener
+    currently uses an HTTP ``POST /sdp`` exchange, which is documented as a
+    py-to-py temporary harness.
+  - Private ``/webrtc`` dial — only the listener / signaling skeleton lands here.
+  - Full inbound handler wiring (Noise + handler invocation) on the
+    ``WebRTCDirectListener`` is pending the aiortc STUN ``USERNAME`` exposure
+    spike (sub-issue of #546).
+
+  Refs #546. (`#546 <https://github.com/libp2p/py-libp2p/issues/546>`__)
+- Implemented advanced connection management features including priority-based dial queues, automatic reconnection, connection limits and pruning, rate limiting, IP allow/deny lists, DNS resolution, and comprehensive connection metrics.
+  These features bring py-libp2p's connection management capabilities in line with JavaScript libp2p. (`#553 <https://github.com/libp2p/py-libp2p/issues/553>`__)
+- Added a DHT Peer-ID chat example that looks up peers via KadDHT after a one-time bootstrap intro. (`#880 <https://github.com/libp2p/py-libp2p/issues/880>`__)
+- Add per-peer outbound RPC queue with priority support and message splitting, matching go-libp2p-pubsub's ``rpcQueue`` and ``split`` pipeline. GossipSub and FloodSub now route all sends through bounded queues instead of writing directly to streams. (`#891 <https://github.com/libp2p/py-libp2p/issues/891>`__)
+- Added GossipSub protocol versions 1.3 and 1.4 support, including extensions framework, adaptive gossip dissemination, enhanced peer scoring (P5-P7), rate limiting for IWANT/IHAVE/GRAFT, IP colocation tracking, and configurable message ID generators. (`#992 <https://github.com/libp2p/py-libp2p/issues/992>`__)
+- Added optional ``strict_validation`` parameter to ``KadDHT``. When enabled, all DHT record keys must use a registered namespace validator; non-namespaced or unknown-namespace keys are rejected. Default remains permissive for backward compatibility, aligning with go-libp2p and rust-libp2p behavior. (`#1070 <https://github.com/libp2p/py-libp2p/issues/1070>`__)
+- Added standardized methods to connection interfaces to access transport address information and connection type without requiring low-level connection access. Connections now expose ``get_transport_addresses()`` and ``get_connection_type()`` methods to determine if a connection is direct or relayed, and to retrieve the actual transport addresses used. (`#1093 <https://github.com/libp2p/py-libp2p/issues/1093>`__)
+- Add optional connection health monitoring and load-balancing strategies.
+
+  This is a Python-local, opt-in QoS extension inspired by go-libp2p ConnMgr
+  (Protect/tags), peerstore LatencyEWMA, and swarm best-connection selection.
+  go-libp2p does not provide a proactive health monitor or auto-replace of
+  unhealthy connections; those behaviors are disabled by default here.
+
+  When enabled, hosts can track per-connection health metrics, run periodic
+  checks, select connections with ``best`` / ``health_based`` / ``latency_based``
+  strategies, and replace unhealthy connections only after a successful
+  replacement dial (skipping ConnMgr-protected peers). (`#1121 <https://github.com/libp2p/py-libp2p/issues/1121>`__)
+- Added ``IPNSValidator`` for the Kademlia DHT, enabling validation of IPNS records
+  per the `IPNS Record Specification <https://specs.ipfs.tech/ipns/ipns-record/>`_
+  (V2 signatureV2, DAG-CBOR data, expiry, V1/V2 consistency). The ``/ipns``
+  namespace is now validated by default alongside the ``/pk`` namespace. (`#1157 <https://github.com/libp2p/py-libp2p/issues/1157>`__)
+- Added implementation of the libp2p perf protocol for measuring transfer performance.
+
+  The perf protocol allows benchmarking data transfer speeds between libp2p nodes. It includes:
+  - ``PerfService`` class for perf protocol server/client operations
+  - ``measure_performance()`` method to measure upload/download throughput to a remote peer
+  - Server-side handling for responding to perf protocol requests
+  - Detailed metrics output including latency, upload/download times, and throughput in bytes/second
+
+  See the spec at https://github.com/libp2p/specs/blob/master/perf/perf.md (`#1169 <https://github.com/libp2p/py-libp2p/issues/1169>`__)
+- Enhanced DNS support in bootstrap discovery.
+
+  - Bootstrap now treats ``dns``, ``dns4``, ``dns6``, and ``dnsaddr`` as DNS addresses (previously only ``dnsaddr`` was recognized), enabling IPv4/IPv6-specific bootstrap entries.
+  - DNS resolution is wrapped in exception handling; failed or empty resolutions are logged and bootstrap continues with the next address.
+  - User-facing documentation and examples for DNS bootstrap addresses were added in the Getting Started guide and the bootstrap discovery API docs. (`#1187 <https://github.com/libp2p/py-libp2p/issues/1187>`__)
+- Added AutoTLS support for QUIC transport, including QUIC address handling in the AutoTLS flow and loading cached ACME certificates for QUIC TLS configuration. Also propagated ``enable_autotls`` through normal host/swarm QUIC transport construction so QUIC nodes created via ``new_host`` can use AutoTLS when enabled. (`#1190 <https://github.com/libp2p/py-libp2p/issues/1190>`__)
+- Added the metrics module to monitor internal service activities via Prometheus/Grafana dashboards. (`#1199 <https://github.com/libp2p/py-libp2p/issues/1199>`__)
+- Added ``IHost.remove_stream_handler()`` and ``IMultiselectMuxer.remove_handler()`` to allow services to cleanly unregister protocol handlers during shutdown. Migrated Circuit Relay v2, DCUtR, Bitswap, and Perf services to use the new API, replacing ad-hoc workarounds. (`#1227 <https://github.com/libp2p/py-libp2p/issues/1227>`__)
+- GossipSub v1.3 Extensions and Topic Observation support.
+
+  - Added Extensions Control Message mechanism per GossipSub v1.3 spec; extensions are advertised in the first message on the stream and gated to v1.3+ protocol negotiation.
+  - Added Topic Observation extension: peers can observe topics without full subscription via ``start_observing_topic()`` and ``stop_observing_topic()``, receiving IHAVE notifications for presence awareness.
+  - Added test extension for cross-implementation interop (go-libp2p, rust-libp2p, py-libp2p). (`#1231 <https://github.com/libp2p/py-libp2p/issues/1231>`__)
+- Bitswap CID handling now uses the py-cid library. Existing byte-returning APIs are unchanged; new helpers and object-returning APIs are available for new code. (`#1234 <https://github.com/libp2p/py-libp2p/issues/1234>`__)
+- Bitswap now accepts canonical CID text, ``/ipfs/...`` CID paths, hex CID strings, and CID objects across client/store/message/DAG boundaries while preserving byte-based wire and storage compatibility. The Bitswap example CLI now accepts canonical/path/hex CID input forms for ``--cid`` and displays canonical CID text in output. (`#1246 <https://github.com/libp2p/py-libp2p/issues/1246>`__)
+- Added ``announce_addrs`` support to ``BasicHost`` so nodes behind NAT or
+  reverse proxies can advertise their publicly reachable addresses instead of
+  local listen addresses. (`#1250 <https://github.com/libp2p/py-libp2p/issues/1250>`__)
+- Bitswap's internal data structures (client wantlists, block store) now fully utilize ``py-cid`` objects (``CIDObject``) instead of raw ``bytes`` as keys. Public APIs continue to accept ``CIDInput`` transparently. The legacy ``cid_to_string`` and ``parse_cid_version`` helpers have been removed in favor of the new ``parse_cid`` and ``cid_to_text`` functions, and the ``__init__.py`` exports have been organized into preferred and backward-compatible tiers. **Breaking change:** external code that imports ``cid_to_string`` or ``parse_cid_version`` must migrate to ``cid_to_text`` and ``parse_cid(cid).version``, respectively. (`#1264 <https://github.com/libp2p/py-libp2p/issues/1264>`__)
+- Added yamux receive window auto-tuning: the per-stream receive window starts at 256 KB and doubles each RTT epoch up to 16 MB, matching go-yamux behavior for improved throughput on high-bandwidth connections. (`#1270 <https://github.com/libp2p/py-libp2p/issues/1270>`__)
+- Replaced lock-step batch querying in DHT operations with semaphore-based sliding window concurrency, so a new query starts as soon as any in-flight query completes instead of waiting for the whole batch. (`#1273 <https://github.com/libp2p/py-libp2p/issues/1273>`__)
+- Align PubSub and GossipSub routing with Go's `go-libp2p-pubsub` by deferring dropped outbound control RPCs (Graft/Prune) and subscription announcements for later retry. (`#1276 <https://github.com/libp2p/py-libp2p/issues/1276>`__)
+- Added a new ``libp2p.filecoin`` DX package with pinned Filecoin protocol/topic/bootstrap
+  constants, runtime bootstrap helpers, Filecoin pubsub preset builders, a new ``filecoin-dx``
+  CLI, and a Filecoin pubsub demo workflow. (`#1279 <https://github.com/libp2p/py-libp2p/issues/1279>`__)
+- Added semaphore-based stream concurrency limiting at the Swarm level so ``new_stream`` queues when the limit is reached instead of raising immediately, and stream resources are properly released on close. (`#1285 <https://github.com/libp2p/py-libp2p/issues/1285>`__)
+- Added a new ``libp2p.request_response`` helper that provides safe one-shot request/response exchanges with framed messages, bounded payload sizes, default timeouts, pluggable codecs, and a generic demo. (`#1287 <https://github.com/libp2p/py-libp2p/issues/1287>`__)
+- Added an ``agentic-request-response-demo`` example that uses
+  ``libp2p.request_response`` to model Filecoin-aligned capability discovery and
+  storage-style task submission with simulated complete, partial, and rejected
+  results. (`#1294 <https://github.com/libp2p/py-libp2p/issues/1294>`__)
+- Added a callable ``addrs_factory`` (go-libp2p ``AddrsFactory`` parity) and
+  ``disable_identify_address_discovery`` so hosts can compose advertised
+  addresses and optionally opt out of Identify-driven observed-address discovery. (`#1311 <https://github.com/libp2p/py-libp2p/issues/1311>`__)
+- Implement comprehensive Bitswap interoperability with IPFS Kubo, including raw-leaf chunks, canonical DAG-PB internal-node encoding, and balanced layout support. Introduces ``FilesystemBlockStore`` and ``BlockService`` for robust block caching, Bitswap batch fetching, and streaming inputs (``chunk_stream``). (`#1347 <https://github.com/libp2p/py-libp2p/issues/1347>`__)
+- Added ``libp2p.transport.webrtc._udp_mux.UdpMux`` — a shared UDP socket dispatcher for WebRTC-Direct inbound connections. Routes pre-ICE STUN datagrams by ``USERNAME`` ufrag prefix and post-ICE DTLS/SCTP frames by remote address, enabling a single fixed port to demultiplex concurrent inbound dials without spinning up a separate socket per peer (prerequisite for a spec-aligned WebRTC-Direct v2 listener, libp2p/specs#715). (`#1352 <https://github.com/libp2p/py-libp2p/issues/1352>`__)
+- Add multi-transport support to ``Swarm``, ``new_swarm``, and ``new_host``.
+  A node can now listen and dial over TCP, WebSocket, and QUIC simultaneously,
+  matching go-libp2p's ``TransportManager`` architecture.  Pass an explicit
+  ``transports=[...]`` list to ``new_swarm`` / ``new_host``, or let transports
+  be auto-detected from ``listen_addrs``. (`#1359 <https://github.com/libp2p/py-libp2p/issues/1359>`__)
+- Enforce IP subnet diversity in Kademlia k-buckets (issue #1383): a new peer is rejected if its globally-routable ``/24`` (IPv4) or ``/48`` (IPv6) subnet already holds ``MAX_PEERS_PER_SUBNET`` (default 2) peers in that bucket, raising the cost of eclipse attacks that grind peer IDs from a single subnet. Loopback, private, CGNAT, link-local, DNS-named, and relayed (``p2p-circuit``) peers are exempt; set ``MAX_PEERS_PER_SUBNET`` to 0 to disable. (`#1383 <https://github.com/libp2p/py-libp2p/issues/1383>`__)
+- kad-dht: ``FIND_NODE`` replies now include the target peer itself when we know its addresses, even when the target is the requester or ourselves, matching go-libp2p. This lets a peer ask the network for its own observed addresses, and keeps client-mode peers reachable through the DHT. (`#1405 <https://github.com/libp2p/py-libp2p/issues/1405>`__)
+- Made the per-bucket subnet-diversity limit runtime-configurable via a ``max_peers_per_subnet`` argument on ``RoutingTable``, ``KBucket`` and ``KadDHT`` (issue #1422), and added an opt-in table-wide IP-group cap (``max_peers_per_subnet_table``) limiting peers sharing one subnet across all k-buckets (issue #1421). (`#1422 <https://github.com/libp2p/py-libp2p/issues/1422>`__)
+- Added ``RoutingTableDiagnostics`` to ``libp2p.kad_dht``, providing operators with a read-only health-inspection surface for the Kademlia routing table: bucket fill rates, keyspace coverage gaps, peer freshness distribution, and a composite 0-100 health score. (`#1432 <https://github.com/libp2p/py-libp2p/issues/1432>`__)
+- Added a spec-aligned WebRTC-Direct listener: one shared UDP port (``UdpMux``), inbound
+  dials dispatched by the STUN ``USERNAME`` ufrag with ``libp2p+webrtc+v1/`` version-
+  prefix validation (unknown/missing prefixes are rejected, never assumed v1), the
+  dialer's offer inferred from its first STUN packet, DTLS fingerprint verification
+  disabled for inbound per spec (Noise authenticates), a per-source-IP token bucket on
+  first-contact STUN (before any parsing or ICE allocation), and an in-flight cap on
+  unauthenticated inbounds. The spec-path dial configures no STUN/TURN servers
+  (``ice_servers`` now only applies to the HTTP harness). Our dialer now speaks WebRTC-
+  Direct v1 (``libp2p+webrtc+v1/`` ufrag == pwd on both the local offer and a synthesised
+  ICE-Lite answer built from the multiaddr), so py↔py loopback exercises the real STUN
+  path. The HTTP ``POST /sdp`` signaling harness is now opt-in via
+  ``WebRTCTransportConfig(enable_sdp_http_harness=True)`` (experimental, py↔py only). New
+  helpers in ``libp2p.transport.webrtc.sdp``: ``parse_direct_username``,
+  ``build_inferred_offer``, ``build_synthetic_answer``, ``make_v1_credential``; ICE
+  credentials are generated with ice-chars only. The listener now also accepts the WebRTC-
+  Direct v2 flow (libp2p/specs#715, ``libp2p+webrtc+v2/<client-pwd>`` server ufrag, no SDP
+  munging), and the dialer can opt in with
+  ``WebRTCTransportConfig(webrtc_direct_dial_version=2)`` (default stays v1 while the spec
+  change is unmerged). (`#1437 <https://github.com/libp2p/py-libp2p/issues/1437>`__)
+- The opt-in connection health monitor now probes each connection with ``/ipfs/ping/1.0.0``, with Sphinx docs, a live demo TUI/web UI, and extra config flags for busy-connection skip, peerstore RTT, and abort-on-ping-failure. (`#1453 <https://github.com/libp2p/py-libp2p/issues/1453>`__)
+- Filecoin connect, ping/identify, and pubsub demos can report negotiated transport, security, and muxer metadata in their JSON probe output. (`#1482 <https://github.com/libp2p/py-libp2p/issues/1482>`__)
+- Added experimental libp2p WebTransport (``/quic-v1/webtransport``) on aioquic:
+  HTTP/3 ALPN ``h3``, Noise XX with ``webtransport_certhashes``, dual cert rotation,
+  host flag ``enable_webtransport``, go-libp2p interop harness, and echo demo.
+  Also maps QUIC ``CONNECTION_FLOW_CONTROL_WINDOW`` / ``STREAM_FLOW_CONTROL_WINDOW``
+  onto aioquic ``max_data`` / ``max_stream_data`` for multi-stream stability. (`#1507 <https://github.com/libp2p/py-libp2p/issues/1507>`__)
+- Made DCUtR hole punching spec-compliant (RTT synchronization, dial coordination, TCP simultaneous open with ``SO_REUSEPORT``) so direct connectivity can be established with go-libp2p and rust-libp2p peers behind NATs. (`#1537 <https://github.com/libp2p/py-libp2p/issues/1537>`__)
+
+
+Internal Changes - for py-libp2p Contributors
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- Simplified upgrader by consolidating duplicated multistream-select negotiation logic from SecurityMultistream and MuxerMultistream into a reusable GenericMultistreamSelector class. Fixed attribute naming bug (multistream_client → multiselect_client) in MuxerMultistream. (`#313 <https://github.com/libp2p/py-libp2p/issues/313>`__)
+- Add shared pubsub test fixtures (``GossipSubHarness``, ``gossipsub_nodes``, ``connected_gossipsub_nodes``, ``subscribed_mesh``) and reusable polling helpers (``wait_for``, ``wait_for_convergence``) to support the pubsub test suite refactor. (`#378 <https://github.com/libp2p/py-libp2p/issues/378>`__)
+- Removed dead code from ``CircuitV2Transport`` left over from the old relay
+  selection strategy (``_relay_list``, ``_last_relay_index``, ``_relay_metrics``,
+  and ``_measure_relay``), which were superseded by ``RelayPerformanceTracker``
+  introduced in https://github.com/libp2p/py-libp2p/pull/972. (`#735 <https://github.com/libp2p/py-libp2p/issues/735>`__)
+- Replaced generic ``Any`` type annotations with a specific ``MetadataValue`` type alias (``str | int | float | bool | None``) for peer metadata handling, improving type safety and code clarity. Added runtime type validation in ``PeerData.put_metadata()`` to prevent storage of non-serializable objects. Also fixed ``get_metadata()`` return type from ``IPeerMetadata`` to ``MetadataValue``. (`#911 <https://github.com/libp2p/py-libp2p/issues/911>`__)
+- Improved cross-platform path handling and added path audit to pre-commit. (`#944 <https://github.com/libp2p/py-libp2p/issues/944>`__)
+- Add type stubs for ``miniupnpc`` to provide proper type information and replace the ``type: ignore`` workaround. (`#1009 <https://github.com/libp2p/py-libp2p/issues/1009>`__)
+- Improved Mplex edge-case warning logs and corrected QUIC/Mplex type annotations. (`#1135 <https://github.com/libp2p/py-libp2p/issues/1135>`__)
+- Replaced bare ``print()`` calls in test modules with logger-based output so test verbosity is configurable and consistent with project conventions. (`#1207 <https://github.com/libp2p/py-libp2p/issues/1207>`__)
+- Replaced fragile string matching on exception messages with typed exception subclasses across QUIC, TLS, WebSocket, Circuit Relay, and Bootstrap modules, and updated tests to assert on structured exception attributes. (`#1218 <https://github.com/libp2p/py-libp2p/issues/1218>`__)
+- Replace the last string-constructed ``decapsulate(Multiaddr("/p2p/..."))`` call with the protocol-code API ``decapsulate_code(P_P2P)`` in Identify's ``_strip_p2p_suffix`` (the websocket and circuit-relay sites were already migrated). This is value- and order-independent and a no-op when ``/p2p`` is absent; for a relay/circuit listen address it now strips only the trailing peer id (keeping ``/p2p/<relay>/p2p-circuit``) instead of truncating at the first ``/p2p``. (`#1223 <https://github.com/libp2p/py-libp2p/issues/1223>`__)
+- Improved OSO observability report reliability by correctly detecting rcmgr metric availability, continuing vulnerability checks after single-package lookup failures, and making dependency graph output project-name aware. (`#1254 <https://github.com/libp2p/py-libp2p/issues/1254>`__)
+- Deduplicated repeated `requests` and `types-requests` entries in project dependencies to keep dependency metadata consistent and reduce false duplicate signals in observability reports. (`#1255 <https://github.com/libp2p/py-libp2p/issues/1255>`__)
+- Extended ``interop/transport/ping_test.py`` for the libp2p test-plans harness: TLS and WSS transport paths, test-plans JSON dialer output, ``listenerAddr`` Redis coordination, and related timing and compatibility adjustments. (`#1300 <https://github.com/libp2p/py-libp2p/issues/1300>`__)
+- Replace the fixed ``trio.sleep(settle_time)`` in the ``subscribed_mesh`` pubsub
+  test fixture with deterministic predicate-based polling using ``wait_for()``.
+  The fixture now accepts ``ready_timeout`` / ``poll_interval`` and waits until
+  every router's mesh for the topic has at least ``min(n - 1, router.degree_low)``
+  peers before yielding. (`#1307 <https://github.com/libp2p/py-libp2p/issues/1307>`__)
+- Hardened pubsub dummyaccount topology tests against intermittent CI failures by waiting for event-driven network readiness instead of fixed delays. (`#1353 <https://github.com/libp2p/py-libp2p/issues/1353>`__)
+- Removed the duplicate ``libp2p/transport/webrtc/_varint.py`` and migrated WebRTC stream and signaling framing onto the shared ``libp2p.utils.varint`` utilities. (`#1355 <https://github.com/libp2p/py-libp2p/issues/1355>`__)
+- Widened the ``zeroconf`` dependency range to ``>=0.149.16,<0.151.0`` to allow security and bugfix releases while keeping mDNS discovery on a tested 0.149–0.150 line. (`#1369 <https://github.com/libp2p/py-libp2p/issues/1369>`__)
+- Fixed CI lint failure on ``main`` caused by mypy 2.2 ``comparison-overlap`` in the QUIC stream read loop. Reads blocked on ``_receive_event`` still raise ``QUICStreamResetError`` when the stream is reset concurrently. (`#1373 <https://github.com/libp2p/py-libp2p/issues/1373>`__)
+- De-flaked the GossipSub v1.1 score-gate test ``test_gossip_gate_filters_peers`` by waiting for event-driven subscription readiness (``Pubsub.wait_for_subscription``) instead of a fixed ``trio.sleep``, which raced on slow CI runners. (`#1401 <https://github.com/libp2p/py-libp2p/issues/1401>`__)
+- Declare ``flush_pending_messages`` and ``send_recent_messages`` as optional
+  no-op hooks on ``IPubsubRouter`` instead of probing the router with ``hasattr``
+  in ``Pubsub``. (`#1403 <https://github.com/libp2p/py-libp2p/issues/1403>`__)
+- De-flaked identify-aware GossipSub publish tests by waiting for the subscriber payload instead of a fixed ``trio.sleep``, which raced on slow Windows CI. (`#1406 <https://github.com/libp2p/py-libp2p/issues/1406>`__)
+- De-flaked ``test_expiry_removal`` by polling until the background sweeper thread removes the expired entry instead of a fixed ``trio.sleep``, which raced on slow CI runners (integer-second TTL swept on a coarse ~1s thread cadence). (`#1408 <https://github.com/libp2p/py-libp2p/issues/1408>`__)
+- De-flaked remaining timed-cache expiry tests by polling until entries expire instead of fixed ``trio.sleep``, and stopped waiting via ``LastSeenCache.has()`` (which refreshes TTL). (`#1428 <https://github.com/libp2p/py-libp2p/issues/1428>`__)
+- Stop the two ``TestQUICListenerRaceConditions`` tests from racing on a fixed ``trio.sleep(0.1)``. ``test_multiple_cid_routing_concurrent_load`` and ``test_promotion_race_condition`` now join a nursery around their concurrent tasks so the assertions run only after every task has finished, instead of guessing how long the tasks take. (`#1430 <https://github.com/libp2p/py-libp2p/issues/1430>`__)
+- De-flake ``test_circuit_v2_transport_message_routing_through_relay`` by replacing fixed ``trio.sleep`` waits with bounded readiness polls on the actual connection and relay-reservation conditions. (`#1433 <https://github.com/libp2p/py-libp2p/issues/1433>`__)
+- ``UdpMux`` can now carry a full aiortc ``RTCPeerConnection``: new ``attach_muxed_connection(pc, mux, conn)`` helper swaps the peer connection's ICE agent for a mux-backed one (including the DTLS ``_recv``/``_send`` bindings) and registers/unregisters the peer address on ICE state changes; ``add_ice_connection`` marks gathering *started* so aiortc's ``gather()`` no longer binds extra sockets; STUN responses (no ``USERNAME``) route by address; peer addresses are learned from STUN checks and outbound sends (latest wins, capped per connection); ``unregister(ufrag)`` drops the learned addresses; malformed STUN-shaped datagrams are delivered to the connection's data path instead of re-raising ``struct.error`` out of the loop. ``webrtc`` extra now requires ``aiortc>=1.15``. (`#1437 <https://github.com/libp2p/py-libp2p/issues/1437>`__)
+- De-flaked Kademlia DHT tests by waiting until routing tables are linked instead of using fixed sleeps, which raced on slow CI runners, especially on Windows. (`#1456 <https://github.com/libp2p/py-libp2p/issues/1456>`__)
+- Added go-libp2p WebRTC-Direct interop tests: a pinned go-libp2p v0.49 harness
+  built on demand (skipped when the Go toolchain is absent) drives our transport
+  in both directions and both protocol versions. py -> go is exercised for v1
+  and v2; go -> py is xfail pending the inbound stall in #1470. (`#1471 <https://github.com/libp2p/py-libp2p/issues/1471>`__)
+- De-flaked GossipSub direct-peer tests by replacing fixed ``trio.sleep`` waits with bounded ``wait_for`` / ``wait_for_peer`` readiness checks. (`#1491 <https://github.com/libp2p/py-libp2p/issues/1491>`__)
+- De-flaked pubsub tests by replacing fixed ``trio.sleep`` readiness waits with
+  ``wait_for_peer`` / ``wait_for_subscription`` / ``wait_for_mesh`` / payload helpers. (`#1493 <https://github.com/libp2p/py-libp2p/issues/1493>`__)
+- De-flaked WebRTC unit/integration tests by replacing fixed ``sleep`` / poll
+  synchronization with event-driven waits (``trio``/``asyncio`` Events and
+  bounded ``fail_after`` / ``wait_for``). (`#1501 <https://github.com/libp2p/py-libp2p/issues/1501>`__)
+- De-flaked ``test_fanout_maintenance`` with event-driven peer/subscription/mesh waits and aligned prune/unsubscribe backoff to avoid GRAFT-flood rejects after resubscribe. (`#1504 <https://github.com/libp2p/py-libp2p/issues/1504>`__)
+- Reap the echo example subprocess cleanly in ``test_echo_thin_waist`` so it no longer leaks its stdout pipe (and, on Windows, the child's listener socket): send SIGTERM, ``wait()`` with a timeout, escalate to SIGKILL only if needed, then close the pipe. Previously ``terminate()`` + ``kill()`` without ``wait()``/close left a ``ResourceWarning`` that failed ``windows (3.12, demos)`` under the ``error::ResourceWarning`` guard. (`#1541 <https://github.com/libp2p/py-libp2p/issues/1541>`__)
+
+
+Miscellaneous Changes
+~~~~~~~~~~~~~~~~~~~~~
+
+- `#654 <https://github.com/libp2p/py-libp2p/issues/654>`__, `#1145 <https://github.com/libp2p/py-libp2p/issues/1145>`__, `#1219 <https://github.com/libp2p/py-libp2p/issues/1219>`__, `#1356 <https://github.com/libp2p/py-libp2p/issues/1356>`__, `#1437 <https://github.com/libp2p/py-libp2p/issues/1437>`__
+
+
+Performance Improvements
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+- Improved yamux receive-window updates during partial reads to reduce round-trips in large perf transfers. (`#1344 <https://github.com/libp2p/py-libp2p/issues/1344>`__)
+
+
 py-libp2p v0.6.0 (2026-02-16)
 -----------------------------
 
