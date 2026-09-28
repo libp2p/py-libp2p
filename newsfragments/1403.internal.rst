@@ -1,3 +1,0 @@
-Declare ``flush_pending_messages`` and ``send_recent_messages`` as optional
-no-op hooks on ``IPubsubRouter`` instead of probing the router with ``hasattr``
-in ``Pubsub``.
