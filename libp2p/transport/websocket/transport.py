@@ -51,6 +51,14 @@ class WebsocketConfig:
     tls_client_config: ssl.SSLContext | None = None
     tls_server_config: ssl.SSLContext | None = None
 
+    # Dial ``wss`` without verifying the server certificate. Off by default: a
+    # ``wss`` dial with no explicit client configuration verifies against the
+    # system trust store and checks the hostname, as go-libp2p and js-libp2p do.
+    # Turn this on only for a self-signed endpoint you already trust; libp2p's
+    # own handshake still authenticates the peer inside the WebSocket, but an
+    # unverified outer TLS lets anyone on the path terminate it unnoticed.
+    insecure_skip_verify: bool = False
+
     # Advanced TLS configuration
     tls_config: WebSocketTLSConfig | None = None
 
@@ -564,6 +572,32 @@ class WebsocketTransport(ITransport):
             # Mark as initialized even if disabled so we don't check again
             self._autotls_initialized = True
 
+    def _default_client_ssl_context(self) -> ssl.SSLContext:
+        """
+        Build the TLS client context for a ``wss`` dial.
+
+        An explicit ``tls_client_config`` wins. Otherwise the context verifies
+        the server certificate against the system trust store and checks the
+        hostname, which is what go-libp2p (a zero ``tls.Config``) and js-libp2p
+        (the platform TLS stack) do. ``insecure_skip_verify`` restores the old
+        unverified behaviour for a self-signed endpoint the caller trusts.
+        """
+        if self._config.tls_client_config:
+            logger.debug("Using custom TLS client config")
+            return self._config.tls_client_config
+
+        ssl_context = ssl.create_default_context()
+        if self._config.insecure_skip_verify:
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            logger.warning(
+                "Dialing wss with certificate verification disabled "
+                "(insecure_skip_verify): the outer TLS is unauthenticated"
+            )
+        else:
+            logger.debug("Using default TLS client config (system trust store)")
+        return ssl_context
+
     async def _get_ssl_context(
         self,
         peer_id: ID | None = None,
@@ -674,16 +708,7 @@ class WebsocketTransport(ITransport):
                 )
 
                 if ssl_context is None:
-                    # Fall back to legacy TLS configuration
-                    if self._config.tls_client_config:
-                        ssl_context = self._config.tls_client_config
-                        logger.debug("Using custom TLS client config")
-                    else:
-                        # Create default SSL context for client
-                        ssl_context = ssl.create_default_context()
-                        ssl_context.check_hostname = False
-                        ssl_context.verify_mode = ssl.CERT_NONE
-                        logger.debug("Using default TLS client config (insecure)")
+                    ssl_context = self._default_client_ssl_context()
 
             # Handle proxy connections
             if final_proxy_url:
