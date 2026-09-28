@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 import logging
+import ssl
 from typing import Any
 
 import pytest
@@ -11,6 +12,7 @@ except ImportError:
         from exceptiongroup import ExceptionGroup  # type: ignore[assignment]
     except ImportError:  # pragma: no cover - fallback if dependency missing
         ExceptionGroup = Exception  # type: ignore[assignment]
+from cryptography.hazmat.primitives import serialization
 from multiaddr import Multiaddr
 import trio
 
@@ -21,6 +23,7 @@ from libp2p.network.swarm import Swarm
 from libp2p.peer.id import ID
 from libp2p.peer.peerstore import PeerStore
 from libp2p.security.insecure.transport import InsecureTransport
+from libp2p.security.tls.certificate import generate_self_signed_cert
 from libp2p.stream_muxer.yamux.yamux import Yamux
 from libp2p.transport.exceptions import OpenConnectionError
 from libp2p.transport.upgrader import TransportUpgrader
@@ -28,7 +31,10 @@ from libp2p.transport.websocket.multiaddr_utils import (
     is_valid_websocket_multiaddr,
     parse_websocket_multiaddr,
 )
-from libp2p.transport.websocket.transport import WebsocketTransport
+from libp2p.transport.websocket.transport import (
+    WebsocketConfig,
+    WebsocketTransport,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1373,3 +1379,116 @@ async def test_websocket_transport_can_dial():
         assert not is_valid_websocket_multiaddr(maddr), (
             f"Address {addr_str} should be invalid"
         )
+
+
+def _self_signed_tls_server_context(tmp_path: Any) -> ssl.SSLContext:
+    """A server TLS context holding a fresh self-signed certificate."""
+    key, cert = generate_self_signed_cert()
+    cert_path = tmp_path / "cert.pem"
+    key_path = tmp_path / "key.pem"
+    cert_path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    key_path.write_bytes(
+        key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+    )
+    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    context.load_cert_chain(certfile=str(cert_path), keyfile=str(key_path))
+    return context
+
+
+@pytest.mark.trio
+async def test_failed_dial_closes_the_tcp_connection(nursery):
+    """
+    A dial that never completes the WebSocket upgrade still closes its socket.
+
+    The handshake used to run in the Swarm's background nursery, so when it did
+    not complete nothing owned the stream and the descriptor stayed open for the
+    lifetime of the Swarm. The server checks this the only way a peer can: it
+    reads again after the upgrade request and sees whether the client hung up.
+    """
+    disconnected = trio.Event()
+
+    async def accept_and_never_answer(stream: trio.SocketStream) -> None:
+        await stream.receive_some(4096)  # the upgrade request
+        # No reply. The client must give up and close.
+        try:
+            while await stream.receive_some(4096):
+                pass
+        except trio.BrokenResourceError:
+            pass
+        disconnected.set()
+
+    listeners = await trio.open_tcp_listeners(0, host="127.0.0.1")
+    port = int(listeners[0].socket.getsockname()[1])
+    nursery.start_soon(trio.serve_listeners, accept_and_never_answer, listeners)
+
+    transport = WebsocketTransport(
+        create_upgrader(), config=WebsocketConfig(handshake_timeout=2.0)
+    )
+    transport.set_background_nursery(nursery)
+    with pytest.raises(OpenConnectionError):
+        await transport.dial(Multiaddr(f"/ip4/127.0.0.1/tcp/{port}/ws"))
+
+    with trio.move_on_after(5):
+        await disconnected.wait()
+    assert disconnected.is_set(), (
+        "the server never saw the client disconnect: the failed dial left its "
+        "TCP socket open"
+    )
+    nursery.cancel_scope.cancel()
+
+
+@pytest.mark.trio
+async def test_wss_dial_reports_the_certificate_error(nursery, tmp_path):
+    """
+    A refused certificate is reported as such, not as a handshake timeout.
+
+    The TLS handshake used to happen in a task the dialer did not await, so the
+    dialer waited out handshake_timeout and raised a timeout, hiding the reason
+    and making a rejected certificate look like an unreachable peer.
+    """
+    server_context = _self_signed_tls_server_context(tmp_path)
+
+    async def serve_tls(stream: trio.SocketStream) -> None:
+        tls_stream = trio.SSLStream(stream, server_context, server_side=True)
+        try:
+            await tls_stream.do_handshake()
+        except Exception:
+            pass
+        finally:
+            with trio.CancelScope(shield=True):  # type: ignore[call-arg]
+                await trio.aclose_forcefully(stream)
+
+    listeners = await trio.open_tcp_listeners(0, host="127.0.0.1")
+    port = int(listeners[0].socket.getsockname()[1])
+    nursery.start_soon(trio.serve_listeners, serve_tls, listeners)
+
+    # An explicitly verifying client context, so this test states the behaviour
+    # it cares about instead of depending on what the default happens to be.
+    transport = WebsocketTransport(
+        create_upgrader(),
+        config=WebsocketConfig(
+            handshake_timeout=10.0, tls_client_config=ssl.create_default_context()
+        ),
+    )
+    transport.set_background_nursery(nursery)
+
+    started = trio.current_time()
+    with pytest.raises(OpenConnectionError) as excinfo:
+        await transport.dial(Multiaddr(f"/ip4/127.0.0.1/tcp/{port}/wss"))
+    elapsed = trio.current_time() - started
+
+    assert "certificate" in str(excinfo.value).lower(), (
+        f"the error should name the certificate, got: {excinfo.value}"
+    )
+    assert isinstance(excinfo.value.__cause__, ssl.SSLCertVerificationError), (
+        f"the cause should be the ssl error, got {excinfo.value.__cause__!r}"
+    )
+    assert elapsed < 5.0, (
+        f"took {elapsed:.1f}s of a 10s timeout: the dial waited out the "
+        "handshake timeout instead of failing on the certificate"
+    )
+    nursery.cancel_scope.cancel()

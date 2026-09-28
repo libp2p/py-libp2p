@@ -1,0 +1,7 @@
+A failed WebSocket dial now reports why it failed and closes its socket. The
+TLS handshake and the WebSocket upgrade run in the dialing task instead of the
+Swarm background nursery, so a refused certificate raises
+``OpenConnectionError`` naming the ``ssl`` error instead of
+``WebSocket handshake timeout`` after the full ``handshake_timeout``, and the
+TCP connection is closed on every failure path rather than left open for the
+lifetime of the Swarm.

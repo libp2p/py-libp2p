@@ -14,6 +14,8 @@ stack works over WebSocket transport, including:
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 import logging
+import ssl
+from typing import Any
 
 import pytest
 from multiaddr import Multiaddr
@@ -1007,3 +1009,122 @@ async def test_websocket_multiple_connections():
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def _localhost_cert(tmp_path) -> tuple[str, str]:
+    """
+    Write a self-signed certificate valid for 127.0.0.1 and localhost.
+
+    It carries the IP in a subjectAltName, so a client can verify it with
+    hostname checking on, the way it would verify a real peer's certificate.
+    """
+    import datetime
+    import ipaddress
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    # Typed as Any to match libp2p.security.tls.certificate: the stub's value
+    # TypeVar does not accept a plain str.
+    common_name: Any = "localhost"
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(days=1))
+        .not_valid_after(now + datetime.timedelta(days=30))
+        .add_extension(
+            x509.SubjectAlternativeName(
+                [
+                    x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
+                    x509.DNSName("localhost"),
+                ]
+            ),
+            critical=False,
+        )
+        .sign(key, hashes.SHA256())
+    )
+    cert_path = tmp_path / "cert.pem"
+    key_path = tmp_path / "key.pem"
+    cert_path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    key_path.write_bytes(
+        key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+    )
+    return str(cert_path), str(key_path)
+
+
+@asynccontextmanager
+async def create_wss_host(
+    tls_client_config: ssl.SSLContext | None = None,
+    tls_server_config: ssl.SSLContext | None = None,
+    listen_addrs: list[Multiaddr] | None = None,
+) -> AsyncIterator[BasicHost]:
+    """A WebSocket host configured for wss."""
+    key_pair = create_new_key_pair()
+    peer_id = ID.from_pubkey(key_pair.public_key)
+    peer_store = PeerStore()
+    peer_store.add_key_pair(peer_id, key_pair)
+    upgrader = create_plaintext_upgrader(key_pair)
+    transport = WebsocketTransport(
+        upgrader,
+        tls_client_config=tls_client_config,
+        tls_server_config=tls_server_config,
+    )
+    swarm = Swarm(peer_id, peer_store, upgrader, [transport])
+    host = BasicHost(swarm)
+    async with background_trio_service(swarm):
+        await swarm.event_background_nursery_created.wait()
+        for addr in listen_addrs or []:
+            await swarm.listen(addr)
+            await trio.sleep(0.05)
+        try:
+            yield host
+        finally:
+            await host.close()
+
+
+@pytest.mark.trio
+async def test_wss_echo_round_trip_with_a_verified_certificate(tmp_path):
+    """
+    A wss dial that verifies the server certificate carries a real stream.
+
+    Every other integration test here uses plain /ws, so the TLS path had no
+    end-to-end coverage: a dial could verify correctly and still fail to hand
+    back a working connection.
+    """
+    cert_path, key_path = _localhost_cert(tmp_path)
+    server_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    server_context.load_cert_chain(cert_path, key_path)
+    # Verification on, against this certificate only.
+    client_context = ssl.create_default_context(cafile=cert_path)
+
+    listen_addr = Multiaddr("/ip4/127.0.0.1/tcp/0/wss")
+    async with create_wss_host(
+        tls_server_config=server_context, listen_addrs=[listen_addr]
+    ) as server:
+
+        async def echo(stream):
+            payload = await stream.read(MAX_READ_LEN)
+            await stream.write(payload)
+            await stream.close()
+
+        server.set_stream_handler(ECHO_PROTOCOL, echo)
+        server_addr = server.get_addrs()[0]
+
+        async with create_wss_host(tls_client_config=client_context) as client:
+            await client.connect(PeerInfo(server.get_id(), [server_addr]))
+            stream = await client.new_stream(server.get_id(), [ECHO_PROTOCOL])
+            await stream.write(b"hello over wss")
+            assert await stream.read(MAX_READ_LEN) == b"hello over wss"
+            await stream.close()
