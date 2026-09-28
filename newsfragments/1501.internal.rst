@@ -1,3 +1,0 @@
-De-flaked WebRTC unit/integration tests by replacing fixed ``sleep`` / poll
-synchronization with event-driven waits (``trio``/``asyncio`` Events and
-bounded ``fail_after`` / ``wait_for``).
