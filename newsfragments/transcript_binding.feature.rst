@@ -1,5 +1,0 @@
-Added transcript-bound security protocol negotiation to both Noise transports, off by default and enabled per transport with ``transcript_binding``.
-multistream-select picks the connection encrypter in plaintext before any handshake runs, so an on-path attacker can strip a proposal or forge an ``na`` and silently push both peers onto a weaker protocol.
-Each peer now optionally states its configured protocol list inside the encrypted handshake payload, signed against the Noise transcript hash, and both peers recompute what the negotiation should have produced; a mismatch raises ``SecurityProtocolDowngrade``.
-Both bindings from the design are implemented: a separate ``transcript_sig`` extension field, which is wire compatible with peers that do not implement it, and folding the binding into ``identity_sig``, which is not.
-``NoiseExtensions`` gains ``security_protocols`` (field 4) and ``transcript_sig`` (field 5); the py-libp2p-only ``early_data`` extension keeps field 3, so no existing wire format changes.

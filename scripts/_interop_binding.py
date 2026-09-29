@@ -65,12 +65,20 @@ def binding_for_mode(
         TranscriptBindingConfig | None: The configuration to hand the pattern.
 
     Raises:
-        ValueError: If mode is not one of MODES.
+        ValueError: If mode is not one of MODES, or if a downgrade is
+            simulated with the binding off, which would test nothing.
 
     """
     if mode not in MODES:
         raise ValueError(
             f"transcript binding mode must be one of {MODES}, got {mode!r}"
+        )
+    # The simulated downgrade is the negative control. With the binding off
+    # nothing checks it, so the run would pass while exercising nothing.
+    if mode == "off" and simulate_downgrade:
+        raise ValueError(
+            "--simulate-downgrade needs --transcript-binding extension or "
+            "identity; with the binding off it tests nothing"
         )
     if mode == "off":
         return None
