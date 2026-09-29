@@ -603,15 +603,17 @@ class PatternXX(BasePattern):
                 f"remote_peer_id_from_pubkey={remote_peer_id_from_pubkey}"
             )
 
-        # Send msg#3, which includes our encrypted payload and our noise static key.
-        await self.write_handshake_payload(read_writer, noise_state)
-
-        # Both signed offers are in hand, so the negotiation can be replayed.
+        # Both signed offers are in hand once msg#2 is verified, so replay the
+        # negotiation before msg#3: sending first would put our payload, and
+        # any early data, into a session we are about to call a downgrade.
         check_negotiation(
             self.transcript_binding,
             is_initiator=True,
             remote_extensions=peer_handshake_payload.extensions,
         )
+
+        # Send msg#3, which includes our encrypted payload and our noise static key.
+        await self.write_handshake_payload(read_writer, noise_state)
 
         if not noise_state.handshake_finished:
             raise HandshakeHasNotFinished(

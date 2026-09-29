@@ -8,6 +8,8 @@ right instant, so these tests exercise the full three-message handshake rather
 than the encoding and the check in isolation.
 """
 
+import contextlib
+
 import pytest
 import trio
 
@@ -63,7 +65,10 @@ def make_pattern(
 
 
 async def run_handshake(
-    initiator: PatternXXhfs, responder: PatternXXhfs, responder_peer: ID
+    initiator: PatternXXhfs,
+    responder: PatternXXhfs,
+    responder_peer: ID,
+    timeout: float | None = None,
 ) -> list[BaseException]:
     """
     Run one XXhfs handshake over an in-memory connection pair.
@@ -75,6 +80,8 @@ async def run_handshake(
         initiator: The dialling pattern.
         responder: The listening pattern.
         responder_peer: The peer ID the initiator expects.
+        timeout: Seconds to wait when only one side is expected to refuse;
+            None means both sides must finish, within 60 seconds.
 
     Returns:
         list: What each side raised, empty when the handshake succeeded.
@@ -95,12 +102,37 @@ async def run_handshake(
         except Exception as exc:
             errors.append(exc)
 
-    with trio.fail_after(60):
+    if timeout is None:
+        with trio.fail_after(60):
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(dial)
+                nursery.start_soon(listen)
+        return errors
+
+    # When only one side refuses, the other blocks on a message that never
+    # arrives: the in-memory pair delivers no EOF. Collect what was raised.
+    with trio.move_on_after(timeout) as scope:
         async with trio.open_nursery() as nursery:
             nursery.start_soon(dial)
             nursery.start_soon(listen)
-
+    if scope.cancelled_caught and not errors:
+        raise AssertionError(f"handshake neither completed nor failed in {timeout}s")
     return errors
+
+
+class _CountingConn:
+    """Delegates to a connection and counts the messages written to it."""
+
+    def __init__(self, inner: object) -> None:
+        self._inner = inner
+        self.writes = 0
+
+    async def write(self, data: bytes) -> None:
+        self.writes += 1
+        await self._inner.write(data)  # type: ignore[attr-defined]
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._inner, name)
 
 
 @pytest.mark.trio
@@ -125,10 +157,66 @@ async def test_simulated_downgrade_is_refused(variant: str) -> None:
     initiator, _ = make_pattern(config)
     responder, responder_peer = make_pattern(config)
 
-    errors = await run_handshake(initiator, responder, responder_peer)
+    errors = await run_handshake(initiator, responder, responder_peer, timeout=5)
 
-    assert len(errors) == 2
-    assert all(isinstance(exc, SecurityProtocolDowngrade) for exc in errors)
+    # The dialer refuses after msg B, before sending msg C, so the listener
+    # never gets far enough to run its own check.
+    assert len(errors) == 1
+    assert isinstance(errors[0], SecurityProtocolDowngrade)
+
+
+@pytest.mark.trio
+@pytest.mark.parametrize("variant", VARIANTS)
+async def test_the_listener_refuses_a_downgrade_the_dialer_only_logs(
+    variant: str,
+) -> None:
+    """A warn-mode dialer sends msg C anyway; the listener's check refuses."""
+    protocols = (NOISE, HFS)
+    dialer = make_config(protocols=protocols, variant=variant, mode="warn")
+    listener = make_config(protocols=protocols, variant=variant)
+    initiator, _ = make_pattern(dialer)
+    responder, responder_peer = make_pattern(listener)
+
+    errors = await run_handshake(initiator, responder, responder_peer, timeout=5)
+
+    assert len(errors) == 1
+    assert isinstance(errors[0], SecurityProtocolDowngrade)
+
+
+@pytest.mark.trio
+async def test_the_dialer_refuses_before_sending_msg_c() -> None:
+    """Msg C carries the dialer's payload; it must not leave on a downgrade."""
+    config = make_config(protocols=(NOISE, HFS))
+    initiator, _ = make_pattern(config)
+    responder, responder_peer = make_pattern(config)
+    init_conn, resp_conn = make_conn_pair()
+    counting = _CountingConn(init_conn)
+    raised: list[BaseException] = []
+
+    async def dial() -> None:
+        try:
+            await initiator.handshake_outbound(
+                counting,  # type: ignore[arg-type]
+                responder_peer,
+            )
+        except Exception as exc:
+            raised.append(exc)
+
+    async def listen() -> None:
+        # Blocks on msg C, which should never arrive.
+        with contextlib.suppress(Exception):
+            await responder.handshake_inbound(resp_conn)
+
+    with trio.move_on_after(10):
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(dial)
+            nursery.start_soon(listen)
+            while not raised:
+                await trio.sleep(0.01)
+            nursery.cancel_scope.cancel()
+
+    assert len(raised) == 1 and isinstance(raised[0], SecurityProtocolDowngrade)
+    assert counting.writes == 1, "only msg A may leave the dialer"
 
 
 @pytest.mark.trio

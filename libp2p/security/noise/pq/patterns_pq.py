@@ -390,6 +390,15 @@ class PatternXXhfs:
                 f"peer ID mismatch: expected {remote_peer}, got {resp_peer_id}"
             )
 
+        # Both signed offers are in hand once msg B is verified, so replay the
+        # negotiation before msg C: sending first would put our payload, and
+        # our static key, into a session we are about to call a downgrade.
+        check_negotiation(
+            self.transcript_binding,
+            is_initiator=True,
+            remote_extensions=resp_payload.extensions,
+        )
+
         # ---- Message C: s, se ----------------------------------------
         # s: encrypt our static public key
         enc_s_c = ss.encrypt_and_hash(self._static_pk_bytes())
@@ -403,13 +412,6 @@ class PatternXXhfs:
         enc_payload_c = ss.encrypt_and_hash(self._make_payload(own_payload_hash))
         await pkt.write_msg(enc_s_c + enc_payload_c)
         logger.debug("handshake_outbound: msg C sent")
-
-        # Both signed offers are in hand, so the negotiation can be replayed.
-        check_negotiation(
-            self.transcript_binding,
-            is_initiator=True,
-            remote_extensions=resp_payload.extensions,
-        )
 
         # ---- Split and return ----------------------------------------
         cs1, cs2 = ss.split()

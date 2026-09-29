@@ -10,6 +10,7 @@ The XXhfs side of the same feature lives in
 from collections.abc import (
     Iterator,
 )
+import contextlib
 import logging
 
 import pytest
@@ -490,13 +491,91 @@ async def test_simulated_downgrade_is_refused(
     """
     Both peers offer the post-quantum suite first, yet this session is running
     plain /noise, which is what a stripped proposal looks like from the
-    inside. Both ends must refuse.
+    inside. The dialer sees it first, after msg#2, and refuses before sending
+    msg#3, so the listener never gets that far: in a real upgrade it sees the
+    connection close.
     """
     config = make_config(actual_protocol=NOISE, variant=variant)
-    errors = await run_handshake(nursery, make_pattern(config), make_pattern(config))
+    errors = await run_handshake(
+        nursery, make_pattern(config), make_pattern(config), timeout=3
+    )
 
-    assert len(errors) == 2
-    assert all(isinstance(exc, SecurityProtocolDowngrade) for exc in errors)
+    assert len(errors) == 1
+    assert isinstance(errors[0], SecurityProtocolDowngrade)
+
+
+@pytest.mark.trio
+@pytest.mark.parametrize("variant", VARIANTS)
+async def test_the_listener_refuses_a_downgrade_the_dialer_only_logs(
+    nursery: trio.Nursery, variant: str
+) -> None:
+    """
+    A dialer in warn mode logs the downgrade and sends msg#3 anyway. The
+    listener's own check, run on that msg#3, is what refuses the session.
+    """
+    dialer = make_config(actual_protocol=NOISE, variant=variant, mode="warn")
+    listener = make_config(actual_protocol=NOISE, variant=variant)
+    errors = await run_handshake(
+        nursery, make_pattern(dialer), make_pattern(listener), timeout=3
+    )
+
+    assert len(errors) == 1
+    assert isinstance(errors[0], SecurityProtocolDowngrade)
+
+
+class _CountingConn:
+    """Delegates to a raw connection and counts the messages written to it."""
+
+    def __init__(self, inner: object) -> None:
+        self._inner = inner
+        self.writes = 0
+
+    async def write(self, data: bytes) -> None:
+        self.writes += 1
+        await self._inner.write(data)  # type: ignore[attr-defined]
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._inner, name)
+
+
+@pytest.mark.trio
+async def test_the_dialer_refuses_before_sending_msg_3(nursery: trio.Nursery) -> None:
+    """
+    The dialer has both offers once msg#2 is verified, so it must decide
+    there. Sending msg#3 first would put its payload, and any early data,
+    under classical-only keys in a session it is about to call a downgrade.
+    """
+    config = make_config(actual_protocol=NOISE)
+    initiator, responder = make_pattern(config), make_pattern(config)
+    raised: list[BaseException] = []
+
+    async with raw_conn_factory(nursery) as (init_conn, resp_conn):
+        counting = _CountingConn(init_conn)
+
+        async def dial() -> None:
+            try:
+                await initiator.handshake_outbound(
+                    counting,  # type: ignore[arg-type]
+                    responder.local_peer,
+                )
+            except Exception as exc:
+                raised.append(exc)
+
+        async def listen() -> None:
+            # Blocks on msg#3, which should never arrive.
+            with contextlib.suppress(Exception):
+                await responder.handshake_inbound(resp_conn)
+
+        with trio.move_on_after(5):
+            async with trio.open_nursery() as handshake_nursery:
+                handshake_nursery.start_soon(dial)
+                handshake_nursery.start_soon(listen)
+                while not raised:
+                    await trio.sleep(0.01)
+                handshake_nursery.cancel_scope.cancel()
+
+    assert len(raised) == 1 and isinstance(raised[0], SecurityProtocolDowngrade)
+    assert counting.writes == 1, "only msg#1 may leave the dialer"
 
 
 @pytest.mark.trio
