@@ -639,3 +639,14 @@ class TestVariantDeployment:
         config = make_config(actual_protocol=NOISE, variant="identity", mode="off")
 
         assert self._classical(transcript_binding=config).transcript_binding is config
+
+    @pytest.mark.parametrize("mode", ["enforce", "warn"])
+    def test_a_config_naming_another_protocol_is_refused(self, mode: str) -> None:
+        # One config shared with the XXhfs transport names HFS as the actual
+        # protocol. On /noise that would make a stripped HFS offer compare
+        # equal to itself, so the downgrade this transport exists to catch
+        # would pass silently.
+        config = make_config(actual_protocol=HFS, mode=mode)
+
+        with pytest.raises(ValueError, match="advertises '/noise'"):
+            self._classical(transcript_binding=config)

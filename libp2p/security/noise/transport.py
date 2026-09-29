@@ -94,6 +94,22 @@ class Transport(ISecureTransport):
                 "identifier."
             )
 
+        # The downgrade check compares the protocol it expected against
+        # ``actual_protocol``. A config shared with the XXhfs transport names
+        # that transport's identifier, so on /noise a stripped hybrid offer
+        # would compare equal to itself and pass silently, in any mode.
+        if (
+            transcript_binding is not None
+            and transcript_binding.enabled
+            and transcript_binding.actual_protocol != PROTOCOL_ID
+        ):
+            raise ValueError(
+                "transcript_binding.actual_protocol is "
+                f"{transcript_binding.actual_protocol!r} but this transport "
+                f"advertises {PROTOCOL_ID!r}. Give each secure transport its "
+                "own config naming its own identifier."
+            )
+
         self.transcript_binding = transcript_binding
 
         # Initialize advanced features
