@@ -19,6 +19,7 @@ import trio
 from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.peer.id import ID
 from libp2p.security.noise.exceptions import (
+    InvalidSignature,
     SecurityProtocolDowngrade,
 )
 from libp2p.security.noise.messages import (
@@ -29,6 +30,7 @@ from libp2p.security.noise.messages import (
 )
 from libp2p.security.noise.patterns import PatternXX
 from libp2p.security.noise.transcript_binding import (
+    MAX_ENCODED_PROTOCOLS_LENGTH,
     MAX_PROTOCOLS,
     TRANSCRIPT_SIG_PREFIX,
     IdentityBinding,
@@ -100,6 +102,21 @@ class TestCanonicalProtocols:
     def test_rejects_an_overlong_identifier(self) -> None:
         with pytest.raises(ValueError, match="too long"):
             canonical_protocols(["x" * 0x10000])
+
+    def test_rejects_a_list_whose_encoding_exceeds_the_cap(self) -> None:
+        """
+        32 identifiers of 0xFFFF bytes each would be about 2 MiB, far past what
+        a Noise handshake message can carry, so the total is capped as well.
+        """
+        per_entry = MAX_ENCODED_PROTOCOLS_LENGTH // 2
+        with pytest.raises(ValueError, match="encoded security protocol list"):
+            canonical_protocols(["x" * per_entry, "y" * per_entry])
+
+    def test_accepts_a_list_exactly_at_the_cap(self) -> None:
+        # Two uint16 prefixes plus the bodies land exactly on the cap.
+        body = (MAX_ENCODED_PROTOCOLS_LENGTH - 4) // 2
+        encoded = canonical_protocols(["x" * body, "y" * body])
+        assert len(encoded) == MAX_ENCODED_PROTOCOLS_LENGTH
 
 
 # ---------------------------------------------------------------------------
@@ -349,8 +366,16 @@ class TestPayloadVerification:
         )
 
     @pytest.mark.parametrize("variant", VARIANTS)
-    def test_tampered_protocol_list_fails_verification(self, variant: str) -> None:
-        """An attacker rewriting the list would have to forge a signature."""
+    @pytest.mark.parametrize(
+        "tampered", [[NOISE], [NOISE, HFS]], ids=["truncated", "reordered"]
+    )
+    def test_tampered_protocol_list_fails_verification(
+        self, variant: str, tampered: list[str]
+    ) -> None:
+        """
+        An attacker rewriting the list would have to forge a signature. Order
+        counts as much as membership: the dialer's order decides the outcome.
+        """
         keypair = create_new_key_pair()
         static_key = noise_static_key_factory()
         config = make_config(actual_protocol=NOISE, variant=variant)
@@ -362,7 +387,7 @@ class TestPayloadVerification:
             payload_hash=FAKE_HASH,
         )
         assert payload.extensions is not None
-        payload.extensions.security_protocols = [NOISE]
+        payload.extensions.security_protocols = tampered
 
         assert not verify_handshake_payload_sig(
             payload, static_key.get_public_key(), config=config, payload_hash=FAKE_HASH
@@ -382,6 +407,83 @@ class TestPayloadVerification:
 
         assert not verify_handshake_payload_sig(
             payload, static_key.get_public_key(), config=config, payload_hash=bytes(32)
+        )
+
+    @pytest.mark.parametrize("mode", ["warn", "enforce"])
+    @pytest.mark.parametrize("half", ["list-only", "signature-only"])
+    def test_half_a_binding_fails_verification_in_every_mode(
+        self, mode: str, half: str
+    ) -> None:
+        """
+        An older peer sends neither field. One without the other is malformed,
+        not old, and the list travels under the handshake AEAD, so an on-path
+        attacker cannot produce this either. Warn mode softens only the
+        negotiation mismatch, never a malformed or unverifiable binding.
+        """
+        keypair = create_new_key_pair()
+        static_key = noise_static_key_factory()
+        config = make_config(actual_protocol=HFS, mode=mode)
+
+        payload = build_handshake_payload(
+            keypair.private_key,
+            static_key.get_public_key(),
+            config=config,
+            payload_hash=FAKE_HASH,
+        )
+        assert payload.extensions is not None
+        if half == "list-only":
+            payload.extensions.transcript_sig = b""
+        else:
+            payload.extensions.security_protocols = []
+
+        assert not verify_handshake_payload_sig(
+            payload, static_key.get_public_key(), config=config, payload_hash=FAKE_HASH
+        )
+
+    def test_a_garbage_transcript_signature_fails_verification(self) -> None:
+        keypair = create_new_key_pair()
+        static_key = noise_static_key_factory()
+        config = make_config(actual_protocol=HFS)
+
+        payload = build_handshake_payload(
+            keypair.private_key,
+            static_key.get_public_key(),
+            config=config,
+            payload_hash=FAKE_HASH,
+        )
+        assert payload.extensions is not None
+        payload.extensions.transcript_sig = bytes(64)
+
+        assert not verify_handshake_payload_sig(
+            payload, static_key.get_public_key(), config=config, payload_hash=FAKE_HASH
+        )
+
+    def test_the_identity_variant_rejects_a_signed_empty_list(self) -> None:
+        """
+        No honest config produces an empty list, since it must name this
+        transport's own protocol. A peer that signs one anyway would otherwise
+        skip the downgrade check under a variant that is meant to fail closed.
+        """
+        keypair = create_new_key_pair()
+        static_key = noise_static_key_factory()
+        config = make_config(actual_protocol=HFS, variant="identity")
+
+        payload = build_handshake_payload(
+            keypair.private_key,
+            static_key.get_public_key(),
+            config=config,
+            payload_hash=FAKE_HASH,
+        )
+        assert payload.extensions is not None
+        payload.extensions.security_protocols = []
+        payload.id_sig = keypair.private_key.sign(
+            make_data_to_be_signed(
+                static_key.get_public_key(), IdentityBinding(FAKE_HASH, ())
+            )
+        )
+
+        assert not verify_handshake_payload_sig(
+            payload, static_key.get_public_key(), config=config, payload_hash=FAKE_HASH
         )
 
     def test_binding_is_absent_when_disabled(self) -> None:
@@ -615,7 +717,9 @@ async def test_the_identity_variant_cannot_talk_to_a_peer_without_it(
 
     errors = await run_handshake(nursery, initiator, responder, timeout=5)
 
-    assert errors, "an identity-variant peer must not complete against an older peer"
+    assert any(isinstance(exc, InvalidSignature) for exc in errors), (
+        f"an identity-variant peer must fail verification, got {errors!r}"
+    )
 
 
 @pytest.mark.trio
@@ -628,7 +732,9 @@ async def test_the_identity_variant_fails_against_an_older_peer_even_in_warn_mod
         nursery, make_pattern(config), make_pattern(None), timeout=5
     )
 
-    assert errors, "warn mode cannot soften a signature verification failure"
+    assert any(isinstance(exc, InvalidSignature) for exc in errors), (
+        f"warn mode cannot soften a signature failure, got {errors!r}"
+    )
 
 
 @pytest.mark.trio
@@ -642,7 +748,9 @@ async def test_peers_configured_with_different_variants_do_not_complete(
         nursery, make_pattern(extension), make_pattern(identity), timeout=5
     )
 
-    assert errors, "a variant mismatch must not silently produce a session"
+    assert any(isinstance(exc, InvalidSignature) for exc in errors), (
+        f"a variant mismatch must fail verification, got {errors!r}"
+    )
 
 
 @pytest.mark.parametrize("variant", VARIANTS)

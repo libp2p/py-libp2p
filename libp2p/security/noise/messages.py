@@ -18,6 +18,7 @@ from .transcript_binding import (
     TranscriptBindingConfig,
     has_transcript_binding,
     is_enabled,
+    is_partial_binding,
     sign_transcript_binding,
     verify_transcript_binding,
 )
@@ -429,6 +430,31 @@ def verify_handshake_payload_sig(
         return False
 
     if not result:
+        return False
+
+    # identity_sig has just been verified over the list as received. No honest
+    # config yields an empty list, since it must name the transport's own
+    # protocol, and accepting one would let the peer skip the downgrade check
+    # under the variant that is meant to fail closed.
+    if (
+        binding_active
+        and config is not None
+        and config.variant == "identity"
+        and not remote_protocols
+    ):
+        logger.error("verify_handshake_payload_sig: identity binding lists nothing")
+        return False
+
+    # An older peer sends neither field. One without the other is malformed
+    # rather than old, and both travel under the handshake AEAD, so it is
+    # rejected here, in every mode, instead of being read as "no binding".
+    if (
+        binding_active
+        and config is not None
+        and config.variant == "extension"
+        and is_partial_binding(remote_extensions)
+    ):
+        logger.error("verify_handshake_payload_sig: partial transcript binding")
         return False
 
     # The extension variant carries its own signature. A peer that sends no

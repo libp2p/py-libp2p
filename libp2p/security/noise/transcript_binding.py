@@ -80,11 +80,22 @@ MAX_PROTOCOL_LENGTH = 0xFFFF
 #: configure hundreds of connection encrypters.
 MAX_PROTOCOLS = 32
 
+#: Upper bound on the canonical encoding as a whole. The two limits above
+#: allow about 2 MiB, far past the 65535-byte Noise message the list has to
+#: travel in, so without this an oversized local config would surface as a
+#: framing error mid-handshake rather than a clear error at construction.
+MAX_ENCODED_PROTOCOLS_LENGTH = 4096
+
 #: How strictly a peer treats the binding.
 #:
 #: ``off`` does not send the field and does not check it, ``warn`` sends the
 #: field and logs a mismatch, ``enforce`` sends the field and aborts the
 #: handshake on a mismatch.
+#:
+#: ``warn`` softens only that negotiation mismatch. A binding that is present
+#: but malformed or unverifiable (a bad signature, one field without the other,
+#: an over-long list) aborts the handshake in every mode, because it is not
+#: what an older peer sends and it cannot be relied on to say anything.
 TranscriptBindingMode = Literal["off", "warn", "enforce"]
 
 #: Which of the two bindings is in use. See the module docstring.
@@ -132,7 +143,13 @@ def canonical_protocols(protocols: Sequence[str]) -> bytes:
         parts.append(struct.pack(">H", len(encoded)))
         parts.append(encoded)
 
-    return b"".join(parts)
+    canonical = b"".join(parts)
+    if len(canonical) > MAX_ENCODED_PROTOCOLS_LENGTH:
+        raise ValueError(
+            f"encoded security protocol list is too long: {len(canonical)} "
+            f"> {MAX_ENCODED_PROTOCOLS_LENGTH} bytes"
+        )
+    return canonical
 
 
 def transcript_signature_payload(
@@ -339,6 +356,27 @@ def has_transcript_binding(
     if variant == "extension":
         return bool(extensions.transcript_sig)
     return True
+
+
+def is_partial_binding(extensions: "NoiseExtensions | None") -> bool:
+    """
+    Whether an ``extension``-variant binding is half present.
+
+    An older peer sends neither ``security_protocols`` nor ``transcript_sig``.
+    One without the other is malformed rather than old, and since both travel
+    under the handshake AEAD an on-path attacker cannot produce it either, so
+    the caller rejects it instead of treating it as "no binding".
+
+    Args:
+        extensions: The extensions from the remote handshake payload.
+
+    Returns:
+        bool: True if exactly one of the two fields is present.
+
+    """
+    if extensions is None:
+        return False
+    return bool(extensions.security_protocols) != bool(extensions.transcript_sig)
 
 
 def check_negotiation(
