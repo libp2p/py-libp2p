@@ -62,3 +62,50 @@ The full source code for this example is below:
 .. literalinclude:: ../examples/pubsub/pubsub.py
     :language: python
     :linenos:
+
+
+GossipSub Large Message Demo
+============================
+
+This example demonstrates one-shot large payload behavior using GossipSub.
+It runs two peers: a receiver and a sender. The sender publishes one 500KB
+message, and the receiver prints payload size plus end-to-end timing.
+
+.. code-block:: console
+
+    $ gossipsub-large-message-demo
+    2026-05-10 10:10:00,000 - gossipsub-large-message-demo - INFO - Running receiver mode
+    2026-05-10 10:10:00,010 - gossipsub-large-message-demo - INFO - Receiver ready with peer ID: Qm...
+    2026-05-10 10:10:00,010 - gossipsub-large-message-demo - INFO - Topic: gossipsub-large-message
+    2026-05-10 10:10:00,010 - gossipsub-large-message-demo - INFO - Run this in a second terminal to send 500KB:
+    2026-05-10 10:10:00,010 - gossipsub-large-message-demo - INFO - gossipsub-large-message-demo -d /ip4/127.0.0.1/tcp/12345/p2p/Qm... -t gossipsub-large-message
+
+Open a second terminal and run the printed command:
+
+.. code-block:: console
+
+    $ gossipsub-large-message-demo -d /ip4/127.0.0.1/tcp/12345/p2p/Qm... -t gossipsub-large-message
+    2026-05-10 10:10:05,000 - gossipsub-large-message-demo - INFO - Running sender mode
+    2026-05-10 10:10:05,200 - gossipsub-large-message-demo - INFO - Publishing 512000-byte payload to topic 'gossipsub-large-message'...
+    2026-05-10 10:10:05,260 - gossipsub-large-message-demo - INFO - Publish completed in 60.00 ms
+
+The receiver then prints confirmation and timing:
+
+.. code-block:: console
+
+    2026-05-10 10:10:05,300 - gossipsub-large-message-demo - INFO - Received payload: 512000 bytes on topic 'gossipsub-large-message' from Qm...
+    2026-05-10 10:10:05,300 - gossipsub-large-message-demo - INFO - End-to-end elapsed time: 100.00 ms
+
+Command Line Options
+--------------------
+
+- ``-t, --topic``: Topic name to use (default: ``gossipsub-large-message``)
+- ``-d, --destination``: Receiver address for sender mode
+- ``-p, --port``: Local listen port (default: random available port)
+- ``-v, --verbose``: Enable debug logging
+
+The full source code for this example is below:
+
+.. literalinclude:: ../examples/pubsub/gossipsub_large_message.py
+    :language: python
+    :linenos:
