@@ -92,6 +92,10 @@ authenticates the peer inside the WebSocket, so stream data cannot be read or
 forged, but anyone on the path can terminate the outer TLS unnoticed. Prefer
 trusting the certificate over disabling the check.
 
+With ``new_host``, pass ``tls_client_config=...`` for a custom trust store, or
+build a ``WebsocketTransport`` with ``WebsocketConfig(insecure_skip_verify=True)``
+when you need the explicit opt-out.
+
 SOCKS Proxy Configuration
 -------------------------
 

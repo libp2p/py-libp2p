@@ -1516,7 +1516,9 @@ async def test_dns_address_is_dialed_by_name(nursery):
     port = listeners[0].socket.getsockname()[1]
     nursery.start_soon(trio.serve_listeners, record, listeners)
 
-    transport = WebsocketTransport(create_upgrader())
+    transport = WebsocketTransport(
+        create_upgrader(), config=WebsocketConfig(handshake_timeout=2.0)
+    )
     transport.set_background_nursery(nursery)
     with pytest.raises(OpenConnectionError):
         await transport.dial(Multiaddr(f"/dns4/localhost/tcp/{port}/ws"))

@@ -399,6 +399,8 @@ def combine_configs(*configs: WebsocketConfig) -> WebsocketConfig:
             result.tls_client_config = config.tls_client_config
         if config.tls_server_config is not None:
             result.tls_server_config = config.tls_server_config
+        if config.insecure_skip_verify:
+            result.insecure_skip_verify = True
 
         # Connection settings
         if config.handshake_timeout != 15.0:  # Not default
