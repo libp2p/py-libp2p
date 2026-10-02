@@ -18,6 +18,7 @@ Examples
    examples.a2a_http_payment_demo
    examples.interop
    examples.pubsub
+   examples.gossipsub
    examples.bitswap
    examples.cid
    examples.circuit_relay
