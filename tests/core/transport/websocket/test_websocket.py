@@ -1,6 +1,8 @@
 from collections.abc import Sequence
 import logging
+import socket
 import ssl
+import threading
 from typing import Any
 
 import pytest
@@ -1514,7 +1516,9 @@ async def test_dns_address_is_dialed_by_name(nursery):
     port = listeners[0].socket.getsockname()[1]
     nursery.start_soon(trio.serve_listeners, record, listeners)
 
-    transport = WebsocketTransport(create_upgrader())
+    transport = WebsocketTransport(
+        create_upgrader(), config=WebsocketConfig(handshake_timeout=2.0)
+    )
     transport.set_background_nursery(nursery)
     with pytest.raises(OpenConnectionError):
         await transport.dial(Multiaddr(f"/dns4/localhost/tcp/{port}/ws"))
@@ -1547,3 +1551,119 @@ async def test_dnsaddr_address_is_resolved_before_dialing(nursery, monkeypatch):
     with pytest.raises(OpenConnectionError):
         await transport.dial(Multiaddr("/dnsaddr/bootstrap.example/tcp/443/wss"))
     assert [str(m) for m in dialed] == ["/dns4/edge.example/tcp/443/wss"]
+
+
+def test_default_client_tls_config_verifies_the_certificate():
+    """
+    A wss dial with no explicit client configuration verifies.
+
+    go-libp2p dials with a zero tls.Config and js-libp2p uses the platform TLS
+    stack; both check the certificate against the system roots and check the
+    hostname. Accepting any certificate by default is not what `wss://` means.
+    """
+    transport = WebsocketTransport(create_upgrader())
+
+    context = transport._default_client_ssl_context()
+
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname
+
+
+def test_insecure_skip_verify_opts_out_of_verification():
+    """The old unverified behaviour stays reachable, but only on request."""
+    transport = WebsocketTransport(
+        create_upgrader(), config=WebsocketConfig(insecure_skip_verify=True)
+    )
+
+    context = transport._default_client_ssl_context()
+
+    assert context.verify_mode == ssl.CERT_NONE
+    assert not context.check_hostname
+
+
+def test_explicit_tls_client_config_still_wins():
+    """An explicitly supplied context is handed back untouched."""
+    supplied = ssl.create_default_context()
+    supplied.check_hostname = False
+    supplied.verify_mode = ssl.CERT_NONE
+    transport = WebsocketTransport(create_upgrader(), tls_client_config=supplied)
+
+    assert transport._default_client_ssl_context() is supplied
+
+
+def _tls_handshake_against_self_signed(
+    client_context: ssl.SSLContext, server_context: ssl.SSLContext
+) -> BaseException | None:
+    """
+    Run one real TLS handshake and return the client's error, if any.
+
+    Plain sockets in a thread rather than trio: this asserts on what the
+    ``ssl`` layer decides about the certificate, and stdlib reports that
+    decision as a precise ``SSLCertVerificationError`` on the client.
+    """
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+
+    def serve() -> None:
+        # The server's own error is uninteresting: a refused certificate ends
+        # its handshake with an "unknown ca" alert, which is the same outcome
+        # the client's error already describes.
+        conn, _ = listener.accept()
+        tls_conn: ssl.SSLSocket | None = None
+        try:
+            tls_conn = server_context.wrap_socket(conn, server_side=True)
+        except OSError:
+            pass
+        finally:
+            (tls_conn or conn).close()
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    sock = socket.create_connection(("127.0.0.1", port), timeout=5)
+    tls_sock: ssl.SSLSocket | None = None
+    try:
+        # wrap_socket detaches `sock` and handshakes straight away, so the
+        # wrapper owns the descriptor from here on and has to be closed.
+        tls_sock = client_context.wrap_socket(sock, server_hostname="127.0.0.1")
+        return None
+    except OSError as exc:
+        return exc
+    finally:
+        (tls_sock or sock).close()
+        thread.join(5)
+        listener.close()
+
+
+def test_default_client_config_rejects_a_self_signed_certificate(tmp_path):
+    """
+    The context a wss dial uses by default refuses a self-signed certificate.
+
+    This is the behaviour go-libp2p and js-libp2p already have. Before this
+    change the default context set CERT_NONE and completed this handshake.
+    """
+    transport = WebsocketTransport(create_upgrader())
+
+    error = _tls_handshake_against_self_signed(
+        transport._default_client_ssl_context(),
+        _self_signed_tls_server_context(tmp_path),
+    )
+
+    assert isinstance(error, ssl.SSLCertVerificationError), (
+        f"expected the certificate to be refused, got {error!r}"
+    )
+
+
+def test_insecure_skip_verify_accepts_a_self_signed_certificate(tmp_path):
+    """The old behaviour stays reachable for an endpoint the caller trusts."""
+    transport = WebsocketTransport(
+        create_upgrader(), config=WebsocketConfig(insecure_skip_verify=True)
+    )
+
+    error = _tls_handshake_against_self_signed(
+        transport._default_client_ssl_context(),
+        _self_signed_tls_server_context(tmp_path),
+    )
+
+    assert error is None, f"handshake should have been accepted, got {error!r}"
