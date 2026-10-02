@@ -31,6 +31,18 @@ from .tls_config import WebSocketTLSConfig
 logger = logging.getLogger(__name__)
 
 
+def _find_ssl_error(exc: BaseException) -> ssl.SSLError | None:
+    """Return the ``ssl`` error behind ``exc``, if there is one in its chain."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, ssl.SSLError):
+            return current
+        current = current.__cause__ or current.__context__
+    return None
+
+
 @dataclass
 class WebsocketConfig:
     """Configuration options for WebSocket transport."""
@@ -694,6 +706,11 @@ class WebsocketTransport(ITransport):
             logger.info(f"Connection established to {ws_url}")
             return conn
 
+        except OpenConnectionError:
+            # Already describes its own cause (a refused certificate, say);
+            # re-wrapping would bury it inside "Failed to connect to ...".
+            self._failed_connections += 1
+            raise
         except trio.TooSlowError as e:
             self._failed_connections += 1
             logger.error(f"Connection timeout after {self._config.handshake_timeout}s")
@@ -703,7 +720,10 @@ class WebsocketTransport(ITransport):
         except Exception as e:
             self._failed_connections += 1
             logger.error(f"Failed to connect to {ws_url}: {e}", exc_info=True)
-            raise OpenConnectionError(f"Failed to connect to {ws_url}: {str(e)}")
+            # Chain the cause: a refused certificate or a rejected upgrade is
+            # what the caller needs to see, and str(e) alone is empty for some
+            # ssl and trio errors.
+            raise OpenConnectionError(f"Failed to connect to {ws_url}: {e!r}") from e
 
     async def _create_direct_connection(
         self, proto_info: ParsedWebSocketMultiaddr, ssl_context: ssl.SSLContext | None
@@ -724,7 +744,8 @@ class WebsocketTransport(ITransport):
 
         # Apply timeout to the connection process
         with trio.fail_after(self._config.handshake_timeout):
-            from trio_websocket import connect_websocket_url
+            from trio import aclose_forcefully
+            from trio_websocket import wrap_client_stream
 
             # Use background nursery if available (set by Swarm),
             # otherwise create temporary one
@@ -734,15 +755,57 @@ class WebsocketTransport(ITransport):
                     "WebSocket transport requires Swarm to set background nursery."
                 )
 
-            # Create the WebSocket connection using the Swarm's background nursery
-            # This nursery stays alive for the lifetime of the Swarm service
-            ws = await connect_websocket_url(
-                self._background_nursery,
-                ws_url,
-                ssl_context=ssl_context,
-                message_queue_size=1024,
-                max_message_size=self._config.max_message_size,
-            )
+            # Open the stream, and for wss complete the TLS handshake, in this
+            # task rather than letting trio_websocket do it from the background
+            # nursery. connect_websocket_url() starts its reader task there and
+            # then waits on an Event that is only ever set on success, so a
+            # refused certificate or an unanswered upgrade never reaches the
+            # dialer: it waits out handshake_timeout and reports a timeout,
+            # while the failed connection keeps the socket open. Owning the
+            # stream here means TLS errors surface with their cause and the
+            # socket is closed on every failure path.
+            stream: trio.SocketStream | trio.SSLStream
+            stream = await trio.open_tcp_stream(host, port)
+            try:
+                if ssl_context is not None:
+                    stream = trio.SSLStream(
+                        stream,
+                        ssl_context,
+                        server_hostname=host,
+                        https_compatible=True,
+                    )
+                    try:
+                        await stream.do_handshake()
+                    except Exception as exc:
+                        # trio reports a failed handshake as BrokenResourceError
+                        # and keeps the ssl error as the cause, so report the
+                        # cause: "certificate verify failed" is the actionable
+                        # part, "BrokenResourceError()" is not.
+                        ssl_error = _find_ssl_error(exc)
+                        if ssl_error is None:
+                            raise
+                        raise OpenConnectionError(
+                            f"TLS handshake failed for {ws_url}: {ssl_error}"
+                        ) from ssl_error
+
+                # trio_websocket omits the port from the Host header on the
+                # default ports, so keep that behaviour.
+                host_header = host if port in (80, 443) else f"{host}:{port}"
+                ws = await wrap_client_stream(
+                    self._background_nursery,
+                    stream,
+                    host_header,
+                    "/",
+                    message_queue_size=1024,
+                    max_message_size=self._config.max_message_size,
+                )
+            except BaseException:
+                # Includes the trio.Cancelled from fail_after: without the
+                # shield the close itself would be cancelled and the socket
+                # would leak exactly when the handshake timed out.
+                with trio.CancelScope(shield=True):  # type: ignore[call-arg]
+                    await aclose_forcefully(stream)
+                raise
 
             # Create our connection wrapper
             conn = P2PWebSocketConnection(
