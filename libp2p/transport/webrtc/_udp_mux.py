@@ -342,6 +342,7 @@ class UdpMux(asyncio.DatagramProtocol):
         local_password: str,
         *,
         host: str,
+        ice_lite: bool = False,
     ) -> _ice.Connection:
         """
         Create an ``aioice.Connection`` backed by this mux (no own UDP socket).
@@ -352,6 +353,11 @@ class UdpMux(asyncio.DatagramProtocol):
         shared port is injected as the connection's local candidate, so the
         caller must **not** call ``conn.gather_candidates()`` — doing so binds
         additional UDP sockets and defeats the shared-port design.
+
+        Pass ``ice_lite=True`` for the WebRTC-Direct listener path so the
+        connection is a true ICE-Lite agent (respond-only, always controlled);
+        see :func:`make_connection_ice_lite`. Default ``False`` keeps a full
+        controlled agent for tests and non-listener callers.
 
         The caller must:
         1. For each of the dialer's candidates, ``await conn.add_remote_candidate(c)``,
@@ -415,6 +421,8 @@ class UdpMux(asyncio.DatagramProtocol):
         conn._local_candidates_start = True
         conn._local_candidates_end = True
         self.register(local_username, protocol)  # type: ignore[arg-type]
+        if ice_lite:
+            make_connection_ice_lite(conn)
         return conn
 
     # ------------------------------------------------------------------
@@ -436,3 +444,61 @@ class UdpMux(asyncio.DatagramProtocol):
         self._by_addr.clear()
         self._addr_count.clear()
         self._unknown_stun_handler = None
+
+
+def make_connection_ice_lite(conn: _ice.Connection) -> None:
+    """
+    Turn a muxed listener connection into a true ICE-Lite agent (respond-only).
+
+    Per the WebRTC-Direct spec the publicly-reachable server "acts as an ICE
+    Lite agent": it binds a port, answers the controlling dialer's STUN checks,
+    and never initiates its own (RFC 8445 §2.1 — a Lite agent performs no
+    connectivity checks and offers only host candidates).
+
+    aioice has no local lite mode (only ``remote_is_lite``), so its controlled
+    agent still sends connectivity checks. ``check_start`` is aioice's *sole*
+    sender of connectivity-check requests (``pair.protocol.request`` at
+    ice.py:889/927). Replacing it with a respond-only version makes the agent
+    genuinely Lite: it never puts a check on the wire, marks the pair valid, and
+    honours the dialer's nomination so the incoming ``USE-CANDIDATE`` still
+    completes ICE. This mirrors the success tail of aioice's own ``check_start``
+    minus the network round trip; ``check_incoming`` handles the other ordering
+    (nomination arriving after the pair is already ``SUCCEEDED``). Binding
+    *responses* (``request_received`` → ``send_stun``) and consent-freshness
+    liveness are left untouched — the latter matching pion's Lite, which keeps
+    consent.
+
+    A Lite agent is also always in the *controlled* role and never switches
+    (RFC 8445 §6.1.1). aioice's ``request_received`` performs role-conflict
+    repair (ice.py:1127-1132): a peer that sends an ``ICE-CONTROLLED`` attribute
+    would flip this agent to controlling, after which the respond-only override
+    can no longer self-nominate and ICE fails. Pinning ``switch_role`` to a
+    no-op keeps the agent controlled — a no-op for conformant dialers (which are
+    controlling and never send ``ICE-CONTROLLED``) and correct against one that
+    does.
+
+    Touches aioice 0.10.x internals; the asserts fail loudly on a bump that
+    renames a slot rather than silently reverting to a full checking agent.
+    """
+    assert not conn.ice_controlling, (
+        "ICE-Lite requires a controlled agent (ice_controlling=False)"
+    )
+    assert hasattr(conn, "check_start"), "aioice Connection has no check_start"
+    assert hasattr(conn, "switch_role"), "aioice Connection has no switch_role"
+    _succeeded = _ice.CandidatePair.State.SUCCEEDED
+
+    async def _lite_check_start(pair: _ice.CandidatePair) -> None:
+        if pair.remote_nominated:
+            pair.nominated = True
+        conn.check_state(pair, _succeeded)
+        conn.check_complete(pair)
+
+    def _stay_controlled(ice_controlling: bool) -> None:
+        # RFC 8445 §6.1.1: a Lite agent is always controlled; never switch.
+        return None
+
+    # Instance attributes shadow the bound methods; aioice calls
+    # ``self.check_start(pair)`` / ``self.switch_role(...)`` throughout, so both
+    # route here.
+    conn.check_start = _lite_check_start  # type: ignore[method-assign]
+    conn.switch_role = _stay_controlled  # type: ignore[method-assign]
