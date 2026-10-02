@@ -76,13 +76,15 @@ class _PatternXXWithCerthashes(PatternXX):
         self.remote_extensions: NoiseExtensions | None = None
 
     def make_handshake_payload(
-        self, extensions: NoiseExtensions | None = None
+        self,
+        extensions: NoiseExtensions | None = None,
+        payload_hash: bytes | None = None,
     ) -> NoiseHandshakePayload:
         if extensions is None and self._responder_certhashes is not None:
             extensions = NoiseExtensions(
                 webtransport_certhashes=list(self._responder_certhashes)
             )
-        return super().make_handshake_payload(extensions)
+        return super().make_handshake_payload(extensions, payload_hash)
 
     async def handshake_outbound(
         self, conn: IRawConnection, remote_peer: ID | None
