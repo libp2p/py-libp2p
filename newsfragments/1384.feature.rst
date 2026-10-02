@@ -3,5 +3,6 @@ Randomise per-round candidate selection in the Kademlia DHT lookup
 random from the closest-peer window instead of always taking the strictly
 closest ALPHA, so a peer that mines an ID next to the target key is no longer
 guaranteed a slot in the first round and cannot shape the lookup path from the
-first hop. The closest peers are still contacted before the lookup returns, so
-randomised admission cannot hand back peers that were never queried.
+first hop. The ``BETA`` closest peers are still contacted before the lookup
+returns, so randomised admission cannot end a lookup while the nearest peers
+are unqueried.
