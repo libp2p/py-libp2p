@@ -1,0 +1,1 @@
+The WebSocket transport dials ``/dns``, ``/dns4`` and ``/dns6`` addresses by name, so the TLS server name and the ``Host`` header carry the name and peers behind a TLS-terminating proxy (a CDN edge, a tunnel) can be reached; only ``/dnsaddr`` is resolved before dialing, and ``dns_resolution_timeout`` / ``dns_max_retries`` apply only to that ``/dnsaddr`` resolution.
