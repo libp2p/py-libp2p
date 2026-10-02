@@ -1,2 +1,0 @@
-Noise transport examples now show a dedicated X25519 static key instead of
-reusing the host identity key for Noise encryption.
