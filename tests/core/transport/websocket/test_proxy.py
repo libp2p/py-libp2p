@@ -327,6 +327,17 @@ def test_combine_configs_multiple():
     assert combined.handshake_timeout == 45.0
 
 
+def test_combine_configs_preserves_insecure_skip_verify():
+    """Combining with WithProxy must not drop insecure_skip_verify."""
+    skip = WebsocketConfig(insecure_skip_verify=True)
+    proxy_config = WithProxy("socks5://proxy:1080")
+
+    combined = combine_configs(skip, proxy_config)
+
+    assert combined.insecure_skip_verify is True
+    assert combined.proxy_url == "socks5://proxy:1080"
+
+
 @pytest.mark.trio
 async def test_socks5_connection_manager_creation():
     """
