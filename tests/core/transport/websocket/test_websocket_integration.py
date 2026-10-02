@@ -1007,10 +1007,6 @@ async def test_websocket_multiple_connections():
             )
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
-
-
 def _localhost_cert(tmp_path) -> tuple[str, str]:
     """
     Write a self-signed certificate valid for 127.0.0.1 and localhost.
@@ -1128,3 +1124,7 @@ async def test_wss_echo_round_trip_with_a_verified_certificate(tmp_path):
             await stream.write(b"hello over wss")
             assert await stream.read(MAX_READ_LEN) == b"hello over wss"
             await stream.close()
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
