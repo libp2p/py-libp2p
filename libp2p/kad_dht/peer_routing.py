@@ -14,6 +14,7 @@ from libp2p.abc import (
     IHost,
     IPeerRouting,
 )
+from libp2p.custom_types import TProtocol
 from libp2p.peer.id import (
     ID,
 )
@@ -57,7 +58,12 @@ class PeerRouting(IPeerRouting):
     and helps maintain the routing table.
     """
 
-    def __init__(self, host: IHost, routing_table: RoutingTable):
+    def __init__(
+        self,
+        host: IHost,
+        routing_table: RoutingTable,
+        protocol_id: TProtocol = PROTOCOL_ID,
+    ):
         """
         Initialize the peer routing service.
 
@@ -67,6 +73,7 @@ class PeerRouting(IPeerRouting):
         """
         self.host = host
         self.routing_table = routing_table
+        self.protocol_id = protocol_id
 
     async def find_peer(self, peer_id: ID) -> PeerInfo | None:
         """
@@ -374,7 +381,7 @@ class PeerRouting(IPeerRouting):
                 # Open a stream to the peer using the Kademlia protocol
                 logger.debug(f"Opening stream to {peer} for closest peers query")
                 try:
-                    stream = await self.host.new_stream(peer, [PROTOCOL_ID])
+                    stream = await self.host.new_stream(peer, [self.protocol_id])
                     logger.debug(f"Stream opened to {peer}")
                 except Exception as e:
                     logger.warning(f"Failed to open stream to {peer}: {e}")
