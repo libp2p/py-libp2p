@@ -4,6 +4,9 @@ import traceback
 from multiaddr import (
     Multiaddr,
 )
+from multiaddr.protocols import (
+    P_P2P,
+)
 import trio
 
 from libp2p.abc import (
@@ -18,6 +21,7 @@ from libp2p.network.stream.exceptions import (
     StreamClosed,
     StreamReset,
 )
+from libp2p.peer.id import ID as PeerID
 from libp2p.peer.peerstore import env_to_send_in_RPC
 from libp2p.stream_muxer.exceptions import MuxedStreamError
 from libp2p.utils import (
@@ -39,16 +43,17 @@ AGENT_VERSION = get_agent_version()
 
 def _strip_p2p_suffix(maddr: Multiaddr) -> Multiaddr:
     """
-    Strip /p2p/{peer_id} suffix from a multiaddr if present.
+    Strip the trailing /p2p/{peer_id} suffix from a multiaddr if present.
 
-    The Identify spec requires listenAddrs to be plain multiaddresses
-    without a /p2p suffix.
+    The Identify spec requires listenAddrs to be plain transport
+    multiaddresses without a /p2p peer-id suffix. Removing the component by
+    protocol code with ``decapsulate_code(P_P2P)`` is value-independent and a
+    no-op when /p2p is absent, so it replaces reconstructing the exact
+    ``/p2p/<value>`` string. For a relay/circuit address it strips only the
+    trailing peer id, preserving the ``/p2p/<relay>/p2p-circuit`` path rather
+    than truncating at the first /p2p.
     """
-    try:
-        p2p_value = maddr.value_for_protocol("p2p")
-    except Exception:
-        return maddr
-    return maddr.decapsulate(Multiaddr(f"/p2p/{p2p_value}"))
+    return maddr.decapsulate_code(P_P2P)
 
 
 def _multiaddr_to_bytes(maddr: Multiaddr) -> bytes:
@@ -144,6 +149,42 @@ def parse_identify_response(response: bytes) -> Identify:
         raise
 
 
+def _prefer_circuit_addr(
+    host: IHost, peer_id: PeerID, fallback: Multiaddr | None
+) -> Multiaddr | None:
+    """
+    Return the circuit address for a relayed connection to ``peer_id``.
+
+    Returns ``fallback`` unchanged when the peer has no relayed connection
+    (direct connections keep reporting the socket remote address).
+    """
+    try:
+        network = host.get_network()
+        conns = (getattr(network, "connections", {}) or {}).get(peer_id, [])
+    except Exception as exc:
+        logger.debug(
+            "_prefer_circuit_addr: failed to read connections for %s: %s",
+            peer_id,
+            exc,
+        )
+        return fallback
+    if not isinstance(conns, list):
+        conns = [conns]
+    for conn in conns:
+        try:
+            addrs = conn.get_transport_addresses() or []
+        except Exception:
+            continue
+        for addr in addrs:
+            try:
+                s = str(addr)
+            except Exception:
+                continue
+            if "/p2p-circuit" in s:
+                return addr if isinstance(addr, Multiaddr) else fallback
+    return fallback
+
+
 def identify_handler_for(
     host: IHost, use_varint_format: bool = True
 ) -> StreamHandlerFn:
@@ -160,6 +201,14 @@ def identify_handler_for(
             # Convert to multiaddr
             if remote_address:
                 observed_multiaddr = _remote_address_to_multiaddr(remote_address)
+
+            # On relayed connections the raw socket remote is the relay's
+            # own address. Reporting it as the peer's observed address
+            # poisons strict peers: they record it as *their* external and
+            # advertise the relay back in DCUtR (undialable). Report the
+            # circuit address instead, which peers filter (matching
+            # go/rust behavior).
+            observed_multiaddr = _prefer_circuit_addr(host, peer_id, observed_multiaddr)
 
         except Exception as e:
             logger.error("Error getting remote address: %s", e)

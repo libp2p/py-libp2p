@@ -79,7 +79,7 @@ async def test_connection_config_defaults():
     config = ConnectionConfig()
     assert config.max_connections_per_peer == 3
     assert config.connection_timeout == 30.0
-    assert config.load_balancing_strategy == "round_robin"
+    assert config.load_balancing_strategy == "best"
 
 
 @pytest.mark.trio
@@ -159,7 +159,7 @@ async def test_swarm_retry_logic():
     # Mock the single attempt method to fail twice then succeed
     attempt_count = [0]
 
-    async def mock_single_attempt(addr, peer_id):
+    async def mock_single_attempt(addr, peer_id, source=None):
         attempt_count[0] += 1
         if attempt_count[0] < 3:
             raise SwarmException(f"Attempt {attempt_count[0]} failed")

@@ -6,6 +6,7 @@ Manages bidirectional QUIC connections with integrated stream multiplexing.
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 import logging
+import os
 import socket
 import time
 from typing import TYPE_CHECKING, Any, Optional
@@ -24,6 +25,7 @@ from libp2p.peer.id import ID
 from libp2p.rcmgr import Direction
 from libp2p.stream_muxer.exceptions import MuxedConnUnavailable
 
+from . import aioquic_compat
 from .exceptions import (
     QUICConnectionClosedError,
     QUICConnectionError,
@@ -42,6 +44,22 @@ if TYPE_CHECKING:
     from .transport import QUICTransport
 
 logger = logging.getLogger(__name__)
+
+# Every QUICConnection wraps an aioquic QuicConnection; make sure the aioquic
+# fixes are in place before any stream data is sent.
+aioquic_compat.apply()
+
+# Event-loop cadence for QUIC connections.  The sans-IO aioquic core needs
+# periodic pumping for timers and queued events, but the old fixed 1-10ms
+# polling (and a zero-sleep yield while events were being processed) made
+# every connection — including fully idle ones and in-flight handshakes —
+# Event-loop pacing: idle connections sleep up to _IDLE_POLL_INTERVAL (waking
+# sooner when aioquic reports a pending timer that includes pacing). Active
+# connections yield cooperatively; avoid a fixed 1ms sleep after every batch
+# (that inflated ACK→send RTT), but use a short _ACTIVE_POLL_INTERVAL when
+# spinning without a sooner timer so peer packet tasks are not starved.
+_IDLE_POLL_INTERVAL = 2.0  # seconds: max idle gap between event-loop polls
+_ACTIVE_POLL_INTERVAL = 0.0001  # seconds: yield gap when actively draining
 
 
 class QUICConnection(IRawConnection, IMuxedConn):
@@ -177,9 +195,13 @@ class QUICConnection(IRawConnection, IMuxedConn):
         # Background task management
         self._background_tasks_started: bool = False
         self._nursery: trio.Nursery | None = None
+        self._cancel_scope: trio.CancelScope = trio.CancelScope()
+        self._task_cancel_scopes: list[trio.CancelScope] = []
         self._event_processing_task: Any | None = None
         self.on_close: Callable[[], Awaitable[None]] | None = None
         self.event_started = trio.Event()
+        self._activity_event: trio.Event = trio.Event()
+        self._last_cc_stats_log: float = 0.0
 
         self._available_connection_ids: set[bytes] = set()
         self._current_connection_id: bytes | None = None
@@ -455,9 +477,12 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 # start() which is the sole setter of event_started for the
                 # Swarm lifecycle contract.
 
-        except Exception as e:
-            logger.error(f"Failed to establish connection: {e}")
-            await self.close()
+        except BaseException as e:
+            if not isinstance(e, trio.Cancelled):
+                logger.error(f"Failed to establish connection: {e}")
+            with trio.CancelScope() as close_scope:
+                close_scope.shield = True
+                await self.close()
             raise
 
     async def _start_background_tasks(self) -> None:
@@ -467,13 +492,32 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         self._background_tasks_started = True
 
-        if self._is_initiator:
-            self._nursery.start_soon(async_fn=self._client_packet_receiver)
+        async def _run_scoped(fn: Callable[[], Awaitable[None]]) -> None:
+            scope = trio.CancelScope()
+            self._task_cancel_scopes.append(scope)
+            try:
+                with scope:
+                    await fn()
+            except trio.Cancelled:
+                pass
+            except Exception as e:
+                logger.debug(f"QUIC background task exited: {e}")
+            finally:
+                if scope in self._task_cancel_scopes:
+                    self._task_cancel_scopes.remove(scope)
 
-        self._nursery.start_soon(async_fn=self._event_processing_loop)
-        self._nursery.start_soon(async_fn=self._periodic_maintenance)
+        if self._is_initiator:
+            self._nursery.start_soon(_run_scoped, self._client_packet_receiver)
+
+        self._nursery.start_soon(_run_scoped, self._event_processing_loop)
+        self._nursery.start_soon(_run_scoped, self._periodic_maintenance)
 
         logger.debug("Started background tasks for QUIC connection")
+
+    def _signal_activity(self) -> None:
+        """Signal that new datagram or stream activity occurred."""
+        if hasattr(self, "_activity_event") and not self._activity_event.is_set():
+            self._activity_event.set()
 
     async def _event_processing_loop(self) -> None:
         """Main event processing loop for the connection."""
@@ -483,7 +527,6 @@ class QUICConnection(IRawConnection, IMuxedConn):
         )
 
         try:
-            consecutive_idle_iterations = 0
             while not self._closed:
                 # Batch process events - returns True if events were processed
                 events_processed = await self._process_quic_events_batched()
@@ -493,25 +536,36 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
                 # Transmit any pending data
                 await self._transmit()
+                self._maybe_log_congestion_stats()
 
-                # Adaptive sleep based on activity
-                # When processing events: use minimal sleep (just yield) for low latency
-                # When idle: use longer sleep to reduce CPU usage
-                if not events_processed:
-                    consecutive_idle_iterations += 1
-                    # Use longer sleep when idle to reduce CPU usage
-                    # Start with 1ms, increase to 10ms after several idle iterations
-                    sleep_time = 0.01 if consecutive_idle_iterations > 5 else 0.001
-                    await trio.sleep(sleep_time)
+                if events_processed:
+                    # Cooperative yield without a fixed 1ms RTT tax.
+                    await trio.sleep(_ACTIVE_POLL_INTERVAL)
+                    continue
+
+                # Calculate next sleep duration based on pending aioquic timer
+                # (includes pacing delay). Idle connections sleep up to
+                # _IDLE_POLL_INTERVAL; wake earlier on datagram activity.
+                timer = self._quic.get_timer()
+                now = time.time()
+                if timer is not None:
+                    delay = min(max(0.0, timer - now), _IDLE_POLL_INTERVAL)
                 else:
-                    consecutive_idle_iterations = 0
-                    # Minimal sleep when processing events - just yield to allow
-                    # other tasks to run, but keep latency low
-                    await trio.sleep(0)  # Yield without sleeping
+                    delay = _IDLE_POLL_INTERVAL
+
+                if delay > 0.0:
+                    with trio.move_on_after(delay):
+                        await self._activity_event.wait()
+                    if self._activity_event.is_set():
+                        self._activity_event = trio.Event()
+                else:
+                    # Timer already due; cooperative yield, then drain again.
+                    await trio.sleep(_ACTIVE_POLL_INTERVAL)
 
         except Exception as e:
-            logger.error(f"Error in event processing loop: {e}")
-            await self._handle_connection_error(e)
+            if not self._closed:
+                logger.error(f"Error in event processing loop: {e}")
+                await self._handle_connection_error(e)
         finally:
             logger.debug("QUIC event processing loop finished")
 
@@ -562,6 +616,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
                     # Feed packet to QUIC connection
                     self._quic.receive_datagram(data, addr, now=time.time())
+                    self._signal_activity()
 
                     # Batch process events
                     await self._process_quic_events_batched()
@@ -569,10 +624,12 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     # Send any response packets
                     await self._transmit()
 
-                except trio.ClosedResourceError:
+                except (trio.ClosedResourceError, OSError):
                     logger.debug("Client socket closed")
                     break
                 except Exception as e:
+                    if self._closed or not self._socket:
+                        break
                     logger.error(f"Error receiving client packet: {e}")
                     await trio.sleep(0.01)
 
@@ -994,11 +1051,8 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 self._event_batch.append(event)
                 events_processed += 1
 
-            # Process batch if we have events or timeout
-            if self._event_batch and (
-                len(self._event_batch) >= self._event_batch_size
-                or current_time - self._last_event_time > 0.01  # 10ms timeout
-            ):
+            # Process batch if we have events
+            if self._event_batch:
                 await self._process_event_batch()
                 self._event_batch.clear()
                 self._last_event_time = current_time
@@ -1047,6 +1101,26 @@ class QUICConnection(IRawConnection, IMuxedConn):
             stream = self._get_stream_fast(stream_id)  # Use fast lookup
 
             if not stream:
+                # After _remove_stream(), late FIN-only events must not recreate
+                # wrappers (inbound ghosts starve accept_stream under load).
+                if self._is_fin_only_events(stream_events):
+                    direction = (
+                        "inbound" if self._is_incoming_stream(stream_id) else "outbound"
+                    )
+                    logger.debug(
+                        "Ignoring late FIN on closed %s stream %s "
+                        "(is_initiator=%s, quic.is_client=%s)",
+                        direction,
+                        stream_id,
+                        self._is_initiator,
+                        getattr(
+                            getattr(self._quic, "configuration", None),
+                            "is_client",
+                            None,
+                        ),
+                    )
+                    continue
+
                 if self._is_incoming_stream(stream_id):
                     try:
                         stream = await self._create_inbound_stream(stream_id)
@@ -1056,28 +1130,6 @@ class QUICConnection(IRawConnection, IMuxedConn):
                         await self._transmit()
                         continue
                 else:
-                    # Common benign case: we closed and removed a locally-initiated
-                    # stream wrapper, then received a late FIN-only event.
-                    fin_only = True
-                    for e in stream_events:
-                        data = getattr(e, "data", b"")
-                        end_stream = getattr(e, "end_stream", False)
-                        if data or not end_stream:
-                            fin_only = False
-                            break
-                    if fin_only:
-                        logger.debug(
-                            "Ignoring late FIN on closed outbound stream %s "
-                            "(is_initiator=%s, quic.is_client=%s)",
-                            stream_id,
-                            self._is_initiator,
-                            getattr(
-                                getattr(self._quic, "configuration", None),
-                                "is_client",
-                                None,
-                            ),
-                        )
-                        continue
                     is_client = getattr(
                         getattr(self._quic, "configuration", None), "is_client", None
                     )
@@ -1403,12 +1455,32 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     scope.release()
                 elif hasattr(scope, "done"):
                     scope.done()
-                self._resource_scope = None
         except Exception as e:
             logger.debug(f"Error releasing resource scope: {e}")
 
         self._stream_accept_event.set()
         logger.debug(f"Woke up pending accept_stream() calls, {id(self)}")
+
+        # Ensure socket is closed immediately on connection termination
+        if self._socket and self._owns_socket:
+            try:
+                self._socket.close()
+            except Exception:
+                pass
+            self._socket = None
+
+        # Cancel background tasks
+        if hasattr(self, "_task_cancel_scopes"):
+            for s in list(self._task_cancel_scopes):
+                try:
+                    s.cancel()
+                except Exception:
+                    pass
+        if hasattr(self, "_cancel_scope") and self._cancel_scope is not None:
+            try:
+                self._cancel_scope.cancel()
+            except Exception:
+                pass
 
         await self._notify_parent_of_termination()
 
@@ -1430,23 +1502,30 @@ class QUICConnection(IRawConnection, IMuxedConn):
             stream = self._get_stream_fast(stream_id)
 
             if not stream:
+                # After _remove_stream(), late FIN-only events must not recreate
+                # wrappers (inbound ghosts starve accept_stream under load).
+                if self._is_fin_only_event(event):
+                    direction = (
+                        "inbound" if self._is_incoming_stream(stream_id) else "outbound"
+                    )
+                    logger.debug(
+                        "Ignoring late FIN on closed %s stream %s "
+                        "(is_initiator=%s, quic.is_client=%s)",
+                        direction,
+                        stream_id,
+                        self._is_initiator,
+                        getattr(
+                            getattr(self._quic, "configuration", None),
+                            "is_client",
+                            None,
+                        ),
+                    )
+                    return
+
                 if self._is_incoming_stream(stream_id):
                     logger.debug(f"Creating new incoming stream {stream_id}")
                     stream = await self._create_inbound_stream(stream_id)
                 else:
-                    if not event.data and event.end_stream:
-                        logger.debug(
-                            "Ignoring late FIN on closed outbound stream %s "
-                            "(is_initiator=%s, quic.is_client=%s)",
-                            stream_id,
-                            self._is_initiator,
-                            getattr(
-                                getattr(self._quic, "configuration", None),
-                                "is_client",
-                                None,
-                            ),
-                        )
-                        return
                     is_client = getattr(
                         getattr(self._quic, "configuration", None), "is_client", None
                     )
@@ -1483,6 +1562,23 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         # Create new inbound stream
         return await self._create_inbound_stream(stream_id)
+
+    @staticmethod
+    def _is_fin_only_event(event: events.StreamDataReceived) -> bool:
+        """Return True when the event is an empty end-of-stream (FIN-only)."""
+        return (not event.data) and bool(event.end_stream)
+
+    @staticmethod
+    def _is_fin_only_events(events_list: list[QuicEvent]) -> bool:
+        """Return True when every event in the batch is FIN-only."""
+        if not events_list:
+            return False
+        for event in events_list:
+            data = getattr(event, "data", b"")
+            end_stream = getattr(event, "end_stream", False)
+            if data or not end_stream:
+                return False
+        return True
 
     def _is_incoming_stream(self, stream_id: int) -> bool:
         """
@@ -1565,6 +1661,26 @@ class QUICConnection(IRawConnection, IMuxedConn):
         except Exception as e:
             logger.error(f"Transmission error: {e}")
             await self._handle_connection_error(e)
+            return
+
+        # Every receive path (client receiver, listener routing, event loop)
+        # ends here after aioquic has consumed incoming ACKs, so this is the
+        # single place to wake writers blocked on send backpressure.
+        self._refresh_send_backpressure()
+
+    # Send-side backpressure support
+
+    def stream_send_buffer_size(self, stream_id: int) -> int:
+        """Bytes written to ``stream_id`` that the peer has not acknowledged yet."""
+        return aioquic_compat.stream_send_buffer_size(self._quic, stream_id)
+
+    def _refresh_send_backpressure(self) -> None:
+        """Release streams whose un-ACKed send buffer dropped below the watermark."""
+        for stream in list(self._streams.values()):
+            # Writers re-arm backpressure themselves after each write step;
+            # here we only need to look at streams that are currently blocked.
+            if not stream._backpressure_event.is_set():
+                stream._update_send_backpressure()
 
     # Additional methods for stream data processing
     async def _process_quic_event(self, event: events.QuicEvent) -> None:
@@ -1592,9 +1708,22 @@ class QUICConnection(IRawConnection, IMuxedConn):
     async def close(self) -> None:
         """Connection close with proper stream cleanup."""
         if self._closed:
+            if self._socket and self._owns_socket:
+                try:
+                    self._socket.close()
+                except Exception:
+                    pass
+                self._socket = None
             return
 
         self._closed = True
+        self._signal_activity()
+        if hasattr(self, "_task_cancel_scopes"):
+            for s in list(self._task_cancel_scopes):
+                try:
+                    s.cancel()
+                except Exception:
+                    pass
         logger.debug(f"Closing QUIC connection to {self._remote_peer_id}")
 
         try:
@@ -1632,19 +1761,64 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 await self.on_close()
 
             # Close QUIC connection
-            self._quic.close()
+            try:
+                self._quic.close()
+            except Exception:
+                pass
 
+            # Best-effort transmit close frame (bounded with 0.1s timeout)
             if self._socket:
-                await self._transmit()  # Send close frames
+                try:
+                    with trio.move_on_after(0.1):
+                        await self._transmit()
+                except Exception:
+                    pass
 
-            # Close socket
+            # Guaranteed socket close
             if self._socket and self._owns_socket:
-                self._socket.close()
+                try:
+                    self._socket.close()
+                except Exception:
+                    pass
                 self._socket = None
 
             self._streams.clear()
             self._stream_cache.clear()  # Clear cache
             self._closed_event.set()
+
+            # Immediately cancel background tasks (receiver, event loop, maintenance)
+            if hasattr(self, "_task_cancel_scopes"):
+                for s in list(self._task_cancel_scopes):
+                    try:
+                        s.cancel()
+                    except Exception:
+                        pass
+            if hasattr(self, "_cancel_scope") and self._cancel_scope is not None:
+                try:
+                    self._cancel_scope.cancel()
+                except Exception:
+                    pass
+
+            # Always notify parent transport and listener to remove this connection
+            # from their connection tracking dictionaries to prevent memory leaks.
+            try:
+                await self._notify_parent_of_termination()
+            except Exception as e:
+                logger.debug(f"Error notifying parent of connection termination: {e}")
+
+            # Clear internal aioquic event queues and stream maps to free memory
+            # immediately.
+            if self._quic is not None:
+                if hasattr(self._quic, "_events"):
+                    try:
+                        self._quic._events.clear()
+                    except Exception:
+                        pass
+                if hasattr(self._quic, "_streams"):
+                    try:
+                        self._quic._streams.clear()
+                    except Exception:
+                        pass
 
             logger.debug(f"QUIC connection to {self._remote_peer_id} closed")
 
@@ -1795,6 +1969,43 @@ class QUICConnection(IRawConnection, IMuxedConn):
         """Update connection statistics."""
         # Add any periodic stats updates here
         pass
+
+    def get_congestion_stats(self) -> dict[str, float | int | None]:
+        """
+        Snapshot aioquic congestion-control state for throughput diagnosis.
+
+        Returns congestion_window, bytes_in_flight, and smoothed_rtt when the
+        underlying QuicConnection exposes ``_loss`` (aioquic private API).
+        """
+        loss = getattr(self._quic, "_loss", None)
+        if loss is None:
+            return {
+                "congestion_window": None,
+                "bytes_in_flight": None,
+                "smoothed_rtt": None,
+            }
+        return {
+            "congestion_window": int(getattr(loss, "congestion_window", 0) or 0),
+            "bytes_in_flight": int(getattr(loss, "bytes_in_flight", 0) or 0),
+            "smoothed_rtt": float(getattr(loss, "_rtt_smoothed", 0.0) or 0.0),
+        }
+
+    def _maybe_log_congestion_stats(self) -> None:
+        """Periodically log CWND/RTT when LIBP2P_QUIC_CC_STATS is set."""
+        if not os.environ.get("LIBP2P_QUIC_CC_STATS", "").strip():
+            return
+        now = time.monotonic()
+        if now - self._last_cc_stats_log < 0.05:
+            return
+        self._last_cc_stats_log = now
+        stats = self.get_congestion_stats()
+        logger.info(
+            "QUIC CC stats cwnd=%s bif=%s srtt=%.6f peer=%s",
+            stats["congestion_window"],
+            stats["bytes_in_flight"],
+            float(stats["smoothed_rtt"] or 0.0),
+            self._remote_peer_id,
+        )
 
     async def _cleanup_idle_streams(self) -> None:
         """Clean up idle streams that are no longer needed."""

@@ -1,0 +1,6 @@
+A ``wss`` dial with no explicit TLS client configuration now verifies the server
+certificate against the system trust store and checks the hostname, matching
+go-libp2p and js-libp2p. Previously the default client context set
+``verify_mode = CERT_NONE`` and ``check_hostname = False``, so any certificate
+was accepted. Set ``WebsocketConfig(insecure_skip_verify=True)`` to dial a
+self-signed endpoint you trust, or pass your own ``tls_client_config``.

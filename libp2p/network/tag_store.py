@@ -490,6 +490,22 @@ class TagStore:
             return list(self._protected.keys())
 
 
+def _extract_peer_id_from_conn(conn: Any) -> ID | None:
+    """Safely extract peer_id from SwarmConn, QUICConnection, or raw conn."""
+    if hasattr(conn, "muxed_conn") and conn.muxed_conn is not None:
+        pid = getattr(conn.muxed_conn, "peer_id", None)
+        if pid is not None:
+            return pid
+    if hasattr(conn, "peer_id") and conn.peer_id is not None:
+        return conn.peer_id
+    if hasattr(conn, "get_remote_peer"):
+        try:
+            return conn.get_remote_peer()
+        except Exception:
+            pass
+    return None
+
+
 class TagStoreNotifee(INotifee):
     """
     Bridges real swarm connection events into TagStore's lifecycle.
@@ -506,13 +522,15 @@ class TagStoreNotifee(INotifee):
 
     async def connected(self, network: INetwork, conn: INetConn) -> None:
         """Record connection in TagStore using id(conn) as the key."""
-        peer_id = conn.muxed_conn.peer_id
-        self._store.record_connection(peer_id, id(conn))
+        peer_id = _extract_peer_id_from_conn(conn)
+        if peer_id is not None:
+            self._store.record_connection(peer_id, id(conn))
 
     async def disconnected(self, network: INetwork, conn: INetConn) -> None:
         """Remove connection from TagStore; deletes entry when last conn closes."""
-        peer_id = conn.muxed_conn.peer_id
-        self._store.remove_connection(peer_id, id(conn))
+        peer_id = _extract_peer_id_from_conn(conn)
+        if peer_id is not None:
+            self._store.remove_connection(peer_id, id(conn))
 
     async def opened_stream(self, network: INetwork, stream: INetStream) -> None:
         """No-op — TagStore does not track streams."""

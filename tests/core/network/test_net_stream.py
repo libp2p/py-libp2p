@@ -30,24 +30,35 @@ async def test_net_stream_read_until_eof(net_stream_pair):
     stream_0, stream_1 = net_stream_pair
 
     async def read_until_eof():
-        read_bytes.extend(await stream_1.read())
+        # read() returns available data without waiting for stream close
+        # (yamux read semantics), so accumulate across reads until EOF.
+        from libp2p.network.stream.exceptions import StreamEOF
+
+        while True:
+            try:
+                chunk = await stream_1.read()
+            except StreamEOF:
+                break
+            if not chunk:
+                break
+            read_bytes.extend(chunk)
 
     async with trio.open_nursery() as nursery:
         nursery.start_soon(read_until_eof)
         expected_data = bytearray()
 
-        # Test: `read` doesn't return before `close` is called.
+        # Test: `read` returns data as soon as it is available.
         await stream_0.write(DATA)
         expected_data.extend(DATA)
         await trio.sleep(0.01)
-        assert len(read_bytes) == 0
-        # Test: `read` doesn't return before `close` is called.
+        assert len(read_bytes) > 0
+        # Test: subsequent writes are delivered as they arrive.
         await stream_0.write(DATA)
         expected_data.extend(DATA)
         await trio.sleep(0.01)
-        assert len(read_bytes) == 0
+        assert read_bytes == expected_data
 
-        # Test: Close the stream, `read` returns, and receive previous sent data.
+        # Test: Close the stream, `read` hits EOF, and all data was received.
         await stream_0.close()
         await trio.sleep(0.01)
         assert read_bytes == expected_data

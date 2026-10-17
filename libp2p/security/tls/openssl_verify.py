@@ -47,26 +47,57 @@ def _load_libssl() -> ctypes.CDLL:
     if sys.platform == "win32":
         import _ssl
 
-        dll_dir = Path(_ssl.__file__).resolve().parent
-        for name in ("libssl-3.dll", "libssl-1_1.dll", "ssleay32.dll"):
-            for candidate in (dll_dir / name, Path(name)):
-                if not candidate.is_file():
-                    continue
-                try:
-                    return ctypes.CDLL(str(candidate))
-                except OSError:
-                    continue
+        dll_file = getattr(_ssl, "__file__", None)
+        if dll_file:
+            dll_dir = Path(dll_file).resolve().parent
+            for name in ("libssl-3.dll", "libssl-1_1.dll", "ssleay32.dll"):
+                for candidate in (dll_dir / name, Path(name)):
+                    if not candidate.is_file():
+                        continue
+                    try:
+                        return ctypes.CDLL(str(candidate))
+                    except OSError:
+                        continue
         raise RuntimeError("Could not load libssl on Windows")
 
-    libname = ctypes.util.find_library("ssl")
-    if libname is not None:
-        return ctypes.CDLL(libname)
+    if sys.platform == "darwin":
+        # On macOS, Apple ships system LibreSSL in /usr/lib which causes ABI collisions
+        # with CPython's OpenSSL 3. Search Homebrew and MacPorts OpenSSL 3 first.
+        darwin_candidates = (
+            "/opt/homebrew/opt/openssl@3/lib/libssl.3.dylib",
+            "/opt/homebrew/opt/openssl@3/lib/libssl.dylib",
+            "/usr/local/opt/openssl@3/lib/libssl.3.dylib",
+            "/usr/local/opt/openssl@3/lib/libssl.dylib",
+            "/opt/homebrew/lib/libssl.3.dylib",
+            "/usr/local/lib/libssl.3.dylib",
+            "/opt/local/lib/openssl3/libssl.3.dylib",
+            "/opt/local/lib/libssl.3.dylib",
+        )
+        for candidate in darwin_candidates:
+            if Path(candidate).is_file():
+                try:
+                    return ctypes.CDLL(candidate)
+                except OSError:
+                    continue
 
-    for fallback in ("libssl.so.3", "libssl.so.1.1", "ssl"):
+    for fallback in (
+        "libssl.so.3",
+        "libssl.so.1.1",
+        "libssl.3.dylib",
+        "libssl.dylib",
+        "ssl",
+    ):
         try:
             return ctypes.CDLL(fallback)
         except OSError:
-            continue
+            pass
+
+    libname = ctypes.util.find_library("ssl")
+    if libname is not None:
+        try:
+            return ctypes.CDLL(libname)
+        except OSError:
+            pass
 
     raise RuntimeError("Could not load libssl")
 

@@ -7,6 +7,7 @@ from typing import Any, cast
 from .allowlist import Allowlist, AllowlistConfig
 from .cidr_limits import CIDRLimiter
 from .circuit_breaker import CircuitBreaker, CircuitBreakerError
+from .connection_lifecycle import ConnectionLifecycleManager
 from .connection_limits import ConnectionLimits, new_connection_limits_with_defaults
 from .connection_pool import ConnectionPool
 from .connection_tracker import ConnectionTracker
@@ -161,15 +162,25 @@ class ResourceManager:
         self._current_memory = 0
         self._current_streams = 0
 
-        # Connection tracking
-        self.connection_tracker: ConnectionTracker | None = None
-        if enable_connection_tracking:
-            self.connection_tracker = ConnectionTracker()
-
-        # Connection limits
+        # Connection limits (Rust-style per-direction/per-peer limits)
         self.connection_limits = (
             connection_limits or new_connection_limits_with_defaults()
         )
+
+        # Connection tracking + lifecycle enforcement (Bug 1).  The lifecycle
+        # manager was previously created nowhere and its handlers were never
+        # called, so max_pending_inbound, max_established_inbound,
+        # max_established_outbound, max_established_per_peer and
+        # max_established_total were silently non-functional.  Swarm.add_conn
+        # now invokes the lifecycle handlers; removal is wired through
+        # Swarm.remove_conn.
+        self.connection_tracker: ConnectionTracker | None = None
+        self.connection_lifecycle: ConnectionLifecycleManager | None = None
+        if enable_connection_tracking:
+            self.connection_tracker = ConnectionTracker(self.connection_limits)
+            self.connection_lifecycle = ConnectionLifecycleManager(
+                self.connection_tracker, self.connection_limits
+            )
 
         # Memory limits
         self.memory_limits = (
@@ -827,7 +838,10 @@ def new_resource_manager(
     enable_connection_tracking: bool = True,
     memory_limits: MemoryConnectionLimits | None = None,
     enable_memory_limits: bool = True,
-    enable_connection_pooling: bool = True,
+    # Off by default: the connection pool is never actually used for
+    # acquire/release (dead code), so creating it by default was pure waste
+    # (Bug 12).
+    enable_connection_pooling: bool = False,
     enable_memory_pooling: bool = True,
     enable_circuit_breaker: bool = True,
     enable_graceful_degradation: bool = True,

@@ -27,6 +27,13 @@ logger = logging.getLogger(__name__)
 # Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/master/pubsub.go#L55
 DefaultMaxMessageSize = 1 * 1024 * 1024
 
+# js-libp2p defaultDecodeRpcLimits.maxSubscriptions (post-15.0.23).
+# Ref: https://github.com/libp2p/js-libp2p/blob/master/packages/gossipsub/src/message/decodeRpc.ts
+DefaultMaxSubscriptionsPerRPC = 5000
+
+# go-libp2p downstream (e.g. Filecoin Lotus WrapLimitSubscriptionFilter).
+DefaultMaxSubscriptionsPerPeer = 100
+
 # Default outbound peer queue size, matching go-libp2p-pubsub.
 # Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/master/pubsub.go
 OutBoundQueueSize = 32

@@ -521,11 +521,11 @@ def test_get_addrs_includes_observed():
     swarm.listeners = {"tcp": mock_transport}
 
     observed = Multiaddr("/ip4/1.2.3.4/tcp/4001")
+    mgr = host._observed_addr_manager
+    assert mgr is not None
     for i in range(ACTIVATION_THRESHOLD):
         c = _make_conn(remote_ip=f"10.0.0.{i + 1}")
-        host._observed_addr_manager.record_observation(
-            c, observed, host.get_transport_addrs()
-        )
+        mgr.record_observation(c, observed, host.get_transport_addrs())
 
     addrs = host.get_addrs()
     addr_strs = [str(a) for a in addrs]

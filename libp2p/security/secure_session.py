@@ -12,6 +12,9 @@ from libp2p.crypto.keys import (
 from libp2p.io.abc import (
     EncryptedMsgReadWriter,
 )
+from libp2p.io.exceptions import (
+    ConnectionClosedError,
+)
 from libp2p.peer.id import (
     ID,
 )
@@ -103,7 +106,7 @@ class SecureSession(BaseSession):
             # If underlying connection returned empty bytes, treat as closed
             # and raise to signal that reads after close are invalid.
             if msg == b"":
-                raise Exception("Connection closed")
+                raise ConnectionClosedError("Connection closed")
 
             return msg
 
@@ -126,7 +129,7 @@ class SecureSession(BaseSession):
             if msg == b"":
                 if result:
                     return bytes(result)
-                raise Exception("Connection closed")
+                raise ConnectionClosedError("Connection closed")
 
             if len(msg) <= needed:
                 result.extend(msg)

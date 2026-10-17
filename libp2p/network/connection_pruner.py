@@ -7,6 +7,7 @@ to close when connection limits are exceeded, matching go-libp2p behavior.
 Reference: https://github.com/libp2p/go-libp2p/blob/master/p2p/net/connmgr/connmgr.go
 """
 
+import ipaddress
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -113,8 +114,10 @@ def is_connection_in_allow_list(connection: INetConn, swarm: "Swarm") -> bool:
     """
     Check if connection is in the allow list.
 
-    Uses ConnectionGate to check if connection's IP is in allow list.
-    ConnectionGate is a required attribute of Swarm.
+    Uses ConnectionGate to check if the connection's actual remote IP is in
+    the allow list.  Previously this consulted the peer's peerstore addresses,
+    which could exempt a connection made over a non-allow-listed IP simply
+    because the peer had *some* allow-listed address on record (Bug 14).
 
     Parameters
     ----------
@@ -130,20 +133,29 @@ def is_connection_in_allow_list(connection: INetConn, swarm: "Swarm") -> bool:
 
     """
     try:
-        # muxed_conn is a required attribute of INetConn interface
-        peer_id = connection.muxed_conn.peer_id
-        # Get peer addresses from peerstore
-        peer_addrs = swarm.peerstore.addrs(peer_id)
-        # Check if any peer address is in allow list
-        # connection_gate is a required attribute of Swarm
-        for addr in peer_addrs:
-            if swarm.connection_gate.is_in_allow_list(addr):
-                return True
+        remote = None
+        get_remote = getattr(connection, "get_remote_address", None)
+        if callable(get_remote):
+            remote = get_remote()
+        if remote is None:
+            # Fall back to the underlying muxed connection's remote address.
+            muxed_conn = getattr(connection, "muxed_conn", None)
+            get_remote = getattr(muxed_conn, "get_remote_address", None)
+            if callable(get_remote):
+                remote = get_remote()
+        if not isinstance(remote, (tuple, list)) or len(remote) != 2:
+            return False
+        host, port = remote
+        try:
+            ip = ipaddress.ip_address(host)
+        except ValueError:
+            return False
+        proto = "ip6" if isinstance(ip, ipaddress.IPv6Address) else "ip4"
+        remote_maddr = Multiaddr(f"/{proto}/{host}/tcp/{port}")
+        return swarm.connection_gate.is_in_allow_list(remote_maddr)
     except Exception as e:
         logger.debug("Error checking allow list for connection: %s", e)
         return False
-
-    return False
 
 
 class ConnectionPruner:
@@ -248,9 +260,11 @@ class ConnectionPruner:
         # Sort connections for pruning
         sorted_connections = self.sort_connections(connections, peer_values)
 
-        # Prune down to low_watermark (not high_watermark)
-        # This avoids thrashing between high and low watermark
-        to_prune = max(num_connections - low_watermark, 0)
+        # Prune down towards low_watermark in bounded batches (max 20 per cycle)
+        # to prevent sudden connection cliffs and network degradation.
+        raw_to_prune = max(num_connections - low_watermark, 0)
+        max_prune_batch = 20
+        to_prune = min(raw_to_prune, max_prune_batch)
         to_close: list[INetConn] = []
 
         for connection in sorted_connections:
@@ -273,6 +287,29 @@ class ConnectionPruner:
                 logger.debug(
                     "Skipping connection to %s - within grace period",
                     conn_peer_id,
+                )
+                continue
+
+            # 1. Skip connections that currently have active multiplexed streams
+            # (never interrupt live traffic)
+            try:
+                streams = connection.get_streams()
+                if streams and len(streams) > 0:
+                    logger.debug(
+                        "Skipping connection to %s - has %d active streams",
+                        conn_peer_id,
+                        len(streams),
+                    )
+                    continue
+            except Exception:
+                pass
+
+            # 2. Skip peers with positive tag score (preserve valued peers)
+            if conn_peer_id is not None and peer_values.get(conn_peer_id, 0) > 0:
+                logger.debug(
+                    "Skipping connection to %s - positive tag score (%d)",
+                    conn_peer_id,
+                    peer_values[conn_peer_id],
                 )
                 continue
 

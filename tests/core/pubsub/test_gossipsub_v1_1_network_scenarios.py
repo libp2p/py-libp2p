@@ -8,6 +8,22 @@ import trio
 from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.tools.utils import connect
 from tests.utils.factories import PubsubFactory
+from tests.utils.pubsub.wait import wait_for
+
+
+async def _wait_connected_pair(pubsubs, i: int, j: int) -> None:
+    await pubsubs[i].wait_for_peer(pubsubs[j].my_id)
+    await pubsubs[j].wait_for_peer(pubsubs[i].my_id)
+
+
+async def _wait_subscription_pair(pubsubs, i: int, j: int, topic: str) -> None:
+    await pubsubs[i].wait_for_subscription(pubsubs[j].my_id, topic)
+    await pubsubs[j].wait_for_subscription(pubsubs[i].my_id, topic)
+
+
+async def _wait_mesh_pair(pubsubs, i: int, j: int, topic: str) -> None:
+    await pubsubs[i].wait_for_mesh(pubsubs[j].my_id, topic)
+    await pubsubs[j].wait_for_mesh(pubsubs[i].my_id, topic)
 
 
 @pytest.mark.trio
@@ -24,8 +40,10 @@ async def test_large_scale_fanout():
 
         # Connect in a star topology with peer 0 at the center
         # This allows testing fanout without requiring a full mesh
+        edges: list[tuple[int, int]] = []
         for i in range(1, len(hosts)):
             await connect(hosts[0], hosts[i])
+            edges.append((0, i))
 
         # Add some additional connections to create a more realistic network
         # Connect every 2nd peer to create some redundancy
@@ -33,8 +51,10 @@ async def test_large_scale_fanout():
             for j in range(i + 2, len(hosts), 2):
                 if j < len(hosts):
                     await connect(hosts[i], hosts[j])
+                    edges.append((i, j))
 
-        await trio.sleep(1.0)  # Allow time for connections to establish
+        for i, j in edges:
+            await _wait_connected_pair(pubsubs, i, j)
 
         # All peers subscribe to the same topic
         topic = "test_large_scale"
@@ -42,10 +62,8 @@ async def test_large_scale_fanout():
 
         async with trio.open_nursery() as nursery:
             # Subscribe all peers to the topic and collect messages
-            subscriptions = []
             for i, pubsub in enumerate(pubsubs):
                 subscription = await pubsub.subscribe(topic)
-                subscriptions.append(subscription)
 
                 async def collect_messages(peer_index, sub):
                     try:
@@ -56,7 +74,16 @@ async def test_large_scale_fanout():
 
                 nursery.start_soon(collect_messages, i, subscription)
 
-            await trio.sleep(2.0)  # Allow time for mesh formation
+            for i, j in edges:
+                await _wait_subscription_pair(pubsubs, i, j, topic)
+
+            await wait_for(
+                lambda: all(
+                    topic in gsub.mesh and len(gsub.mesh[topic]) > 0 for gsub in gsubs
+                ),
+                timeout=10.0,
+                fail_msg="Large-scale mesh did not form",
+            )
 
             # Verify mesh formation
             for gsub in gsubs:
@@ -68,19 +95,33 @@ async def test_large_scale_fanout():
             middle_peer_index = num_peers // 2
             await pubsubs[middle_peer_index].publish(topic, message_data)
 
-            # Allow time for message propagation in the network
-            await trio.sleep(3.0)
+            # Wait until at least 90% of peers receive the message
+            min_received = int(num_peers * 0.9)
+            await wait_for(
+                lambda: sum(
+                    1
+                    for msgs in received_messages
+                    if any(msg.data == message_data for msg in msgs)
+                )
+                >= min_received,
+                timeout=10.0,
+                fail_msg=(
+                    f"Fewer than {min_received}/{num_peers} peers received "
+                    "large-scale fanout message"
+                ),
+            )
 
-            # Verify message propagation
-            # We expect at least 90% of peers to receive the message
             peers_received = sum(
                 1
                 for msgs in received_messages
                 if any(msg.data == message_data for msg in msgs)
             )
-            assert peers_received >= int(num_peers * 0.9)
+            assert peers_received >= min_received
 
-            # Cancel all background tasks before exiting
+            # Unsubscribe before cancel so late deliveries cannot schedule
+            # push_msg on a closing Swarm nursery under CI load.
+            for ps in pubsubs:
+                await ps.unsubscribe(topic)
             nursery.cancel_scope.cancel()
 
 
@@ -97,11 +138,14 @@ async def test_simulated_partition():
         hosts = [ps.host for ps in pubsubs]
 
         # Connect all peers in a full mesh
+        edges = []
         for i in range(len(hosts)):
             for j in range(i + 1, len(hosts)):
                 await connect(hosts[i], hosts[j])
+                edges.append((i, j))
 
-        await trio.sleep(1.0)  # Allow time for connections to establish
+        for i, j in edges:
+            await _wait_connected_pair(pubsubs, i, j)
 
         # Create two separate topics to simulate partitions
         topic_group1 = "group1_topic"
@@ -169,7 +213,14 @@ async def test_simulated_partition():
 
                 nursery.start_soon(collect_common2, i, common_sub2)
 
-            await trio.sleep(1.0)  # Allow time for mesh formation
+            # Group-topic mesh between peers that share the topic
+            await _wait_subscription_pair(pubsubs, 0, 1, topic_group1)
+            await _wait_mesh_pair(pubsubs, 0, 1, topic_group1)
+            await _wait_subscription_pair(pubsubs, 2, 3, topic_group2)
+            await _wait_mesh_pair(pubsubs, 2, 3, topic_group2)
+            for i, j in edges:
+                await _wait_subscription_pair(pubsubs, i, j, common_topic)
+                await _wait_mesh_pair(pubsubs, i, j, common_topic)
 
             # Publish messages to the partitioned topics
             message_group1 = b"message for group 1"
@@ -178,7 +229,24 @@ async def test_simulated_partition():
             message_group2 = b"message for group 2"
             await pubsubs[2].publish(topic_group2, message_group2)
 
-            await trio.sleep(2.0)  # Allow time for message propagation
+            await wait_for(
+                lambda: all(
+                    any(
+                        msg.data == message_group1
+                        for msg in received_messages[topic_group1][i]
+                    )
+                    for i in range(2)
+                )
+                and all(
+                    any(
+                        msg.data == message_group2
+                        for msg in received_messages[topic_group2][i]
+                    )
+                    for i in range(2, 4)
+                ),
+                timeout=10.0,
+                fail_msg="Partitioned group messages did not arrive",
+            )
 
             # Verify that messages stayed within their respective groups
             # Group 1 (peers 0-1) should have received message_group1
@@ -203,7 +271,17 @@ async def test_simulated_partition():
             message_common = b"message for everyone"
             await pubsubs[1].publish(common_topic, message_common)
 
-            await trio.sleep(2.0)  # Allow time for message propagation
+            await wait_for(
+                lambda: all(
+                    any(
+                        msg.data == message_common
+                        for msg in received_messages[common_topic][i]
+                    )
+                    for i in range(len(pubsubs))
+                ),
+                timeout=10.0,
+                fail_msg="Common-topic message did not reach all peers",
+            )
 
             # Verify that all peers received the common message
             for i in range(len(pubsubs)):
@@ -212,7 +290,10 @@ async def test_simulated_partition():
                     for msg in received_messages[common_topic][i]
                 )
 
-            # Cancel all background tasks before exiting
+            for ps in pubsubs:
+                await ps.unsubscribe(topic_group1)
+                await ps.unsubscribe(topic_group2)
+                await ps.unsubscribe(common_topic)
             nursery.cancel_scope.cancel()
 
 
@@ -227,17 +308,20 @@ async def test_mesh_stability():
         gsubs = [cast(GossipSub, ps.router) for ps in pubsubs]
 
         # Connect peers in a ring topology initially
-        for i in range(len(hosts)):
-            await connect(hosts[i], hosts[(i + 1) % len(hosts)])
-
-        await trio.sleep(1.0)  # Allow time for connections to establish
+        ring_edges = [(i, (i + 1) % len(hosts)) for i in range(len(hosts))]
+        for i, j in ring_edges:
+            await connect(hosts[i], hosts[j])
+        for i, j in ring_edges:
+            await _wait_connected_pair(pubsubs, i, j)
 
         # All peers subscribe to the same topic
         topic = "test_stability"
         for pubsub in pubsubs:
             await pubsub.subscribe(topic)
 
-        await trio.sleep(1.0)  # Allow time for mesh formation
+        for i, j in ring_edges:
+            await _wait_subscription_pair(pubsubs, i, j, topic)
+            await _wait_mesh_pair(pubsubs, i, j, topic)
 
         # Verify initial mesh state
         for gsub in gsubs:
@@ -246,14 +330,21 @@ async def test_mesh_stability():
 
         # Add some new connections to change the topology
         await connect(hosts[0], hosts[2])
-
-        await trio.sleep(1.0)  # Allow time for new connections
+        await _wait_connected_pair(pubsubs, 0, 2)
+        await _wait_subscription_pair(pubsubs, 0, 2, topic)
 
         # Trigger mesh heartbeat
         for gsub in gsubs:
             gsub.mesh_heartbeat()
 
-        await trio.sleep(1.0)  # Allow time for mesh changes to take effect
+        # Wait until mesh remains non-empty after topology change
+        await wait_for(
+            lambda: all(
+                topic in gsub.mesh and len(gsub.mesh[topic]) > 0 for gsub in gsubs
+            ),
+            timeout=10.0,
+            fail_msg="Mesh not maintained after topology change",
+        )
 
         # Verify that mesh is still maintained
         for i, gsub in enumerate(gsubs):
@@ -279,13 +370,29 @@ async def test_mesh_stability():
 
                 nursery.start_soon(collect_messages, i, subscription)
 
-            await trio.sleep(0.5)  # Allow time for subscriptions to be processed
+            # Already subscribed; ensure collectors are attached and mesh ready
+            await wait_for(
+                lambda: all(
+                    topic in gsub.mesh and len(gsub.mesh[topic]) > 0 for gsub in gsubs
+                ),
+                timeout=10.0,
+                fail_msg="Mesh not ready before stability publish",
+            )
 
             # Publish a message
             await pubsubs[0].publish(topic, message_data)
 
-            # Allow time for message propagation
-            await trio.sleep(2.0)
+            # Wait until at least 75% of peers receive the message
+            await wait_for(
+                lambda: sum(
+                    1
+                    for msgs in received_messages
+                    if any(msg.data == message_data for msg in msgs)
+                )
+                >= 3,
+                timeout=10.0,
+                fail_msg="Fewer than 3 peers received message after topology change",
+            )
 
             # Verify message propagation
             peers_received = sum(
@@ -297,5 +404,6 @@ async def test_mesh_stability():
                 peers_received >= 3
             )  # At least 75% of peers should receive the message
 
-            # Cancel all background tasks before exiting
+            for ps in pubsubs:
+                await ps.unsubscribe(topic)
             nursery.cancel_scope.cancel()

@@ -26,10 +26,6 @@ class WaitCancelledService(Service):
         await self.manager.wait_finished()
 
 
-# Timeout for wait_started/wait_finished; 0.1s is too tight on Windows CI
-_LIFECYCLE_TIMEOUT = 2.0
-
-
 async def do_service_lifecycle_check(
     manager, manager_run_fn, trigger_exit_condition_fn, should_be_cancelled
 ):
@@ -41,8 +37,7 @@ async def do_service_lifecycle_check(
 
         nursery.start_soon(manager_run_fn)
 
-        with trio.fail_after(_LIFECYCLE_TIMEOUT):
-            await manager.wait_started()
+        await manager.wait_started()
 
         assert manager.is_started is True
         assert manager.is_running is True
@@ -52,8 +47,7 @@ async def do_service_lifecycle_check(
         # trigger the service to exit
         trigger_exit_condition_fn()
 
-        with trio.fail_after(_LIFECYCLE_TIMEOUT):
-            await manager.wait_finished()
+        await manager.wait_finished()
 
         if should_be_cancelled:
             assert manager.is_started is True

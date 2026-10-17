@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 import logging
+import socket
 import struct
 from typing import Protocol
 
@@ -57,13 +58,20 @@ class _MuxedTransport:
         self,
         real_transport: asyncio.DatagramTransport,
         local_addr: tuple[str, int],
+        mux: UdpMux | None = None,
     ) -> None:
         self._real = real_transport
         self._local_addr = local_addr
+        self._mux = mux
         # Set by UdpMux after the StunProtocol is constructed (avoids circular ref).
         self._protocol: _HasConnectionLost | None = None
 
     def sendto(self, data: bytes, addr: tuple[str, int]) -> None:
+        # Anything we send to (our own connectivity checks included) will
+        # answer from that address without a USERNAME, so learn the mapping
+        # on the way out.
+        if self._mux is not None and self._protocol is not None:
+            self._mux._learn_addr((addr[0], addr[1]), self._protocol)
         self._real.sendto(data, addr)
 
     def close(self) -> None:
@@ -101,14 +109,20 @@ class UdpMux(asyncio.DatagramProtocol):
         await conn.add_remote_candidate(None)  # end-of-candidates
         await conn.connect()                   # do NOT call gather_candidates()
 
-        # After ICE selects a candidate pair:
-        mux.register_addr(("203.0.113.5", 54321), conn._protocols[0])
+        # The peer's address is learned from its STUN checks; register_addr()
+        # can add more (e.g. the nominated pair's remote address).
 
-        # Teardown:
+        # Teardown (also drops the addresses learned for "abc"):
         mux.unregister("abc")
-        mux.unregister_addr(("203.0.113.5", 54321))
         await mux.close()
+
+    To run a full aiortc ``RTCPeerConnection`` over a muxed connection use
+    :func:`libp2p.transport.webrtc._aiortc_helpers.attach_muxed_connection`.
     """
+
+    # Bound on addresses learned per connection (a real peer has a handful
+    # of candidates; anything beyond that is noise or an attack).
+    _MAX_ADDRS_PER_PROTOCOL = 16
 
     def __init__(self) -> None:
         self._transport: asyncio.DatagramTransport | None = None
@@ -117,8 +131,11 @@ class UdpMux(asyncio.DatagramProtocol):
         self._by_ufrag: dict[str, _HasConnectionLost] = {}
         # (host, port) -> StunProtocol (post-ICE DTLS/SCTP dispatch)
         self._by_addr: dict[tuple[str, int], _HasConnectionLost] = {}
-        # Called for a STUN packet whose ufrag is not registered (see
-        # set_unknown_stun_handler); lets a listener observe first-contact dials.
+        # id(protocol) -> number of _by_addr entries pointing at it
+        self._addr_count: dict[int, int] = {}
+        # Called with the full USERNAME for a BINDING REQUEST whose local ufrag
+        # is not registered (see set_unknown_stun_handler); lets a listener
+        # observe first-contact dials.
         self._unknown_stun_handler: (
             Callable[[str, bytes, tuple[str, int]], None] | None
         ) = None
@@ -151,38 +168,113 @@ class UdpMux(asyncio.DatagramProtocol):
         self._transport = transport  # type: ignore[assignment]
         addr = transport.get_extra_info("sockname")
         self._local_addr = (addr[0], addr[1])
+        # Windows reports an ICMP port-unreachable for a datagram we sent (e.g.
+        # a keepalive to a peer that just closed) as WSAECONNRESET on the *next
+        # recv* of this shared socket, and the proactor loop does not re-arm
+        # reading after error_received - the mux would go deaf for every other
+        # peer. SIO_UDP_CONNRESET=False disables that behaviour. No-op elsewhere.
+        sio = getattr(socket, "SIO_UDP_CONNRESET", None)
+        sock = transport.get_extra_info("socket")
+        if sio is not None and sock is not None:
+            try:
+                sock.ioctl(sio, False)
+            except OSError:
+                logger.debug("UdpMux: SIO_UDP_CONNRESET not applied", exc_info=True)
 
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
         norm: tuple[str, int] = (addr[0], addr[1])
         try:
             msg = _stun.parse_message(data)
-            username: str = msg.attributes.get("USERNAME", "")
-            ufrag = username.split(":")[0]
-            protocol = self._by_ufrag.get(ufrag)
-            if protocol is not None:
-                protocol.datagram_received(data, norm)
-                return
+        except ValueError:
+            # Non-STUN (DTLS handshake, SCTP frames after ICE): route by addr.
+            # aioice's StunProtocol re-parses, hits the same ValueError and
+            # forwards the bytes to the connection's data path.
+            self._route_by_addr(data, norm, stun_shaped=False)
+            return
+        except struct.error:
+            # STUN-shaped but malformed: aioice parses attributes with
+            # struct.unpack, which raises struct.error (NOT a ValueError
+            # subclass) on a short fixed-width attribute. StunProtocol only
+            # catches ValueError, so handing this to protocol.datagram_received
+            # would let the same struct.error escape the loop callback. Deliver
+            # straight to the ICE connection's data path instead (DTLS/SCTP
+            # discard garbage) so a crafted packet can neither raise here nor
+            # log-flood.
+            self._route_by_addr(data, norm, stun_shaped=True)
+            return
+
+        # Only BINDING REQUESTs carry USERNAME (``local:remote``); responses
+        # and indications must be routed by address.
+        username: str = msg.attributes.get("USERNAME", "")
+        ufrag = username.split(":")[0]
+        protocol = self._by_ufrag.get(ufrag) if ufrag else None
+        if protocol is not None:
+            # Learn the peer address from its STUN checks so post-ICE DTLS/SCTP
+            # from that address routes even if it races ahead of our own ICE
+            # "completed" transition (the controlling dialer sends its DTLS
+            # ClientHello as soon as *it* nominates). Same approach as pion's
+            # UDPMux. A spoofed STUN with a known ufrag can only cause the
+            # attacker's bytes to be fed to that connection's DTLS, which
+            # discards them.
+            self._learn_addr(norm, protocol)
+            protocol.datagram_received(data, norm)
+            return
+        is_first_contact = (
+            ufrag != ""
+            and msg.message_class == _stun.Class.REQUEST
+            and msg.message_method == _stun.Method.BINDING
+        )
+        if is_first_contact and self._unknown_stun_handler is not None:
             # First contact: an inbound BINDING REQUEST for an unregistered
             # ufrag. A WebRTC-Direct listener registers a handler to create the
             # connection (add_ice_connection) and replay this datagram.
-            if self._unknown_stun_handler is not None:
-                self._unknown_stun_handler(ufrag, data, norm)
-                return
-            logger.debug("UdpMux: no handler for ufrag %r from %s", ufrag, norm)
-        except (ValueError, struct.error):
-            # Not valid STUN. aioice raises ValueError for non-STUN framing, but
-            # a STUN-shaped packet with a malformed/short fixed-width attribute
-            # makes its struct.unpack raise struct.error (NOT a ValueError
-            # subclass). Both mean "not usable STUN" and must fall through to
-            # addr-based routing rather than escape datagram_received — a remote
-            # peer must not be able to crash or log-flood the mux with crafted
-            # packets.
-            # Non-STUN (DTLS handshake, SCTP frames after ICE): route by addr.
-            protocol = self._by_addr.get(norm)
-            if protocol is not None:
-                protocol.datagram_received(data, norm)
-                return
+            self._unknown_stun_handler(username, data, norm)
+            return
+        protocol = self._by_addr.get(norm)
+        if protocol is not None:
+            protocol.datagram_received(data, norm)
+            return
+        logger.debug("UdpMux: no handler for STUN ufrag %r from %s", ufrag, norm)
+
+    def _learn_addr(self, addr: tuple[str, int], protocol: _HasConnectionLost) -> None:
+        """
+        Map *addr* -> *protocol* for non-STUN routing.
+
+        Latest wins (like pion's UDPMux): a peer that redials from the same
+        (ip, port) with a new ufrag must reach its *new* connection, not the
+        stale one still being torn down. Learned addresses are capped per
+        protocol because inbound STUN is unauthenticated at this layer — a
+        flood of requests carrying a live ufrag from many source ports must
+        not grow the table without bound.
+        """
+        current = self._by_addr.get(addr)
+        if current is protocol:
+            return
+        n = self._addr_count.get(id(protocol), 0)
+        if n >= self._MAX_ADDRS_PER_PROTOCOL:
+            return
+        if current is not None:
+            self._addr_count[id(current)] = self._addr_count.get(id(current), 1) - 1
+        self._by_addr[addr] = protocol
+        self._addr_count[id(protocol)] = n + 1
+
+    def _route_by_addr(
+        self, data: bytes, norm: tuple[str, int], *, stun_shaped: bool
+    ) -> None:
+        protocol = self._by_addr.get(norm)
+        if protocol is None:
             logger.debug("UdpMux: no handler for non-STUN datagram from %s", norm)
+            return
+        if not stun_shaped:
+            protocol.datagram_received(data, norm)
+            return
+        # Bypass StunProtocol's parser (see datagram_received); StunProtocol
+        # exposes the owning aioice.Connection as ``receiver``.
+        receiver = getattr(protocol, "receiver", None)
+        if receiver is not None and hasattr(receiver, "data_received"):
+            receiver.data_received(data, 1)
+        else:
+            logger.debug("UdpMux: dropped malformed STUN-shaped datagram from %s", norm)
 
     def error_received(self, exc: Exception) -> None:
         logger.warning("UdpMux socket error: %s", exc)
@@ -202,13 +294,26 @@ class UdpMux(asyncio.DatagramProtocol):
         self, addr: tuple[str, int], protocol: _HasConnectionLost
     ) -> None:
         """Route non-STUN packets from *addr* to *protocol* (call after ICE)."""
+        current = self._by_addr.get(addr)
+        if current is not None and current is not protocol:
+            self._addr_count[id(current)] = self._addr_count.get(id(current), 1) - 1
+        if current is not protocol:
+            self._addr_count[id(protocol)] = self._addr_count.get(id(protocol), 0) + 1
         self._by_addr[addr] = protocol
 
     def unregister(self, ufrag: str) -> None:
-        self._by_ufrag.pop(ufrag, None)
+        """Drop *ufrag* and every address learned/registered for its protocol."""
+        protocol = self._by_ufrag.pop(ufrag, None)
+        if protocol is None:
+            return
+        for addr in [a for a, p in self._by_addr.items() if p is protocol]:
+            del self._by_addr[addr]
+        self._addr_count.pop(id(protocol), None)
 
     def unregister_addr(self, addr: tuple[str, int]) -> None:
-        self._by_addr.pop(addr, None)
+        protocol = self._by_addr.pop(addr, None)
+        if protocol is not None:
+            self._addr_count[id(protocol)] = self._addr_count.get(id(protocol), 1) - 1
 
     def set_unknown_stun_handler(
         self, handler: Callable[[str, bytes, tuple[str, int]], None] | None
@@ -216,9 +321,11 @@ class UdpMux(asyncio.DatagramProtocol):
         """
         Register a callback for STUN packets whose ufrag is not yet registered.
 
-        The callback receives ``(ufrag, data, addr)``. For WebRTC-Direct this is
-        how a listener observes the *first* inbound BINDING REQUEST from a new
-        dialer — it can create and register the connection via
+        The callback receives ``(username, data, addr)`` where ``username`` is
+        the full STUN ``USERNAME`` (``local_ufrag:remote_ufrag``) of an inbound
+        BINDING REQUEST whose local ufrag is unregistered. For WebRTC-Direct
+        this is how a listener observes the *first* packet from a new dialer —
+        it can create and register the connection via
         :meth:`add_ice_connection` and replay ``data``. Called from the asyncio
         event-loop thread; keep it non-blocking (e.g. hand off to a queue).
         Pass ``None`` to clear.
@@ -235,6 +342,7 @@ class UdpMux(asyncio.DatagramProtocol):
         local_password: str,
         *,
         host: str,
+        ice_lite: bool = False,
     ) -> _ice.Connection:
         """
         Create an ``aioice.Connection`` backed by this mux (no own UDP socket).
@@ -246,14 +354,19 @@ class UdpMux(asyncio.DatagramProtocol):
         caller must **not** call ``conn.gather_candidates()`` — doing so binds
         additional UDP sockets and defeats the shared-port design.
 
+        Pass ``ice_lite=True`` for the WebRTC-Direct listener path so the
+        connection is a true ICE-Lite agent (respond-only, always controlled);
+        see :func:`make_connection_ice_lite`. Default ``False`` keeps a full
+        controlled agent for tests and non-listener callers.
+
         The caller must:
         1. For each of the dialer's candidates, ``await conn.add_remote_candidate(c)``,
            then ``await conn.add_remote_candidate(None)`` to signal end-of-candidates.
         2. Await ``conn.connect()`` to complete ICE negotiation.
-        3. Call ``register_addr(remote_addr, conn._protocols[0])`` once ICE
-           selects a candidate pair so that post-ICE DTLS/SCTP is routed.
-        4. Call ``unregister(local_username)`` and
-           ``unregister_addr(remote_addr)`` on teardown.
+        3. (Optional) call ``register_addr(remote_addr, conn._protocols[0])``
+           once ICE selects a candidate pair; the mux already learns the peer's
+           address from its STUN checks.
+        4. Call ``unregister(local_username)`` on teardown.
         """
         if not _HAS_AIOICE:
             raise RuntimeError("aioice is required (install py-libp2p[webrtc])")
@@ -266,7 +379,7 @@ class UdpMux(asyncio.DatagramProtocol):
             local_password=local_password,
         )
 
-        muxed_transport = _MuxedTransport(self._transport, self._local_addr)
+        muxed_transport = _MuxedTransport(self._transport, self._local_addr, self)
         protocol = _ice.StunProtocol(conn)
         # Wire the fake transport so aioice can send responses.
         protocol.transport = muxed_transport  # type: ignore[assignment]
@@ -286,13 +399,30 @@ class UdpMux(asyncio.DatagramProtocol):
         protocol.local_candidate = local_candidate
 
         # Inject into aioice's internal protocol list, bypassing gather_candidates
-        # (which would bind extra UDP sockets). Also mark gathering complete and
-        # expose the candidate so Connection.connect() proceeds instead of raising
-        # "Local candidates gathering was not performed".
+        # (which would bind extra UDP sockets). Mark gathering both *started*
+        # and *complete*: ``_end`` lets Connection.connect() proceed instead of
+        # raising "Local candidates gathering was not performed"; ``_start``
+        # makes a later gather_candidates() call — which aiortc's
+        # RTCIceGatherer.gather() issues unconditionally from
+        # setLocalDescription — a no-op instead of binding fresh sockets and
+        # appending their candidates to ours.
+        # Guard the private-slot writes: a renamed/dropped aioice attribute
+        # would otherwise be a silent no-op (a new attribute aioice never
+        # reads) and only fail far downstream.
+        for attr in (
+            "_protocols",
+            "_local_candidates",
+            "_local_candidates_start",
+            "_local_candidates_end",
+        ):
+            assert hasattr(conn, attr), f"aioice Connection has no {attr!r}"
         conn._protocols.append(protocol)
         conn._local_candidates = [local_candidate]
+        conn._local_candidates_start = True
         conn._local_candidates_end = True
         self.register(local_username, protocol)  # type: ignore[arg-type]
+        if ice_lite:
+            make_connection_ice_lite(conn)
         return conn
 
     # ------------------------------------------------------------------
@@ -312,4 +442,63 @@ class UdpMux(asyncio.DatagramProtocol):
         # dispatched to a half-torn-down protocol.
         self._by_ufrag.clear()
         self._by_addr.clear()
+        self._addr_count.clear()
         self._unknown_stun_handler = None
+
+
+def make_connection_ice_lite(conn: _ice.Connection) -> None:
+    """
+    Turn a muxed listener connection into a true ICE-Lite agent (respond-only).
+
+    Per the WebRTC-Direct spec the publicly-reachable server "acts as an ICE
+    Lite agent": it binds a port, answers the controlling dialer's STUN checks,
+    and never initiates its own (RFC 8445 §2.1 — a Lite agent performs no
+    connectivity checks and offers only host candidates).
+
+    aioice has no local lite mode (only ``remote_is_lite``), so its controlled
+    agent still sends connectivity checks. ``check_start`` is aioice's *sole*
+    sender of connectivity-check requests (``pair.protocol.request`` at
+    ice.py:889/927). Replacing it with a respond-only version makes the agent
+    genuinely Lite: it never puts a check on the wire, marks the pair valid, and
+    honours the dialer's nomination so the incoming ``USE-CANDIDATE`` still
+    completes ICE. This mirrors the success tail of aioice's own ``check_start``
+    minus the network round trip; ``check_incoming`` handles the other ordering
+    (nomination arriving after the pair is already ``SUCCEEDED``). Binding
+    *responses* (``request_received`` → ``send_stun``) and consent-freshness
+    liveness are left untouched — the latter matching pion's Lite, which keeps
+    consent.
+
+    A Lite agent is also always in the *controlled* role and never switches
+    (RFC 8445 §6.1.1). aioice's ``request_received`` performs role-conflict
+    repair (ice.py:1127-1132): a peer that sends an ``ICE-CONTROLLED`` attribute
+    would flip this agent to controlling, after which the respond-only override
+    can no longer self-nominate and ICE fails. Pinning ``switch_role`` to a
+    no-op keeps the agent controlled — a no-op for conformant dialers (which are
+    controlling and never send ``ICE-CONTROLLED``) and correct against one that
+    does.
+
+    Touches aioice 0.10.x internals; the asserts fail loudly on a bump that
+    renames a slot rather than silently reverting to a full checking agent.
+    """
+    assert not conn.ice_controlling, (
+        "ICE-Lite requires a controlled agent (ice_controlling=False)"
+    )
+    assert hasattr(conn, "check_start"), "aioice Connection has no check_start"
+    assert hasattr(conn, "switch_role"), "aioice Connection has no switch_role"
+    _succeeded = _ice.CandidatePair.State.SUCCEEDED
+
+    async def _lite_check_start(pair: _ice.CandidatePair) -> None:
+        if pair.remote_nominated:
+            pair.nominated = True
+        conn.check_state(pair, _succeeded)
+        conn.check_complete(pair)
+
+    def _stay_controlled(ice_controlling: bool) -> None:
+        # RFC 8445 §6.1.1: a Lite agent is always controlled; never switch.
+        return None
+
+    # Instance attributes shadow the bound methods; aioice calls
+    # ``self.check_start(pair)`` / ``self.switch_role(...)`` throughout, so both
+    # route here.
+    conn.check_start = _lite_check_start  # type: ignore[method-assign]
+    conn.switch_role = _stay_controlled  # type: ignore[method-assign]

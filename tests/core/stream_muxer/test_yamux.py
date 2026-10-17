@@ -474,6 +474,114 @@ async def test_yamux_go_away_with_error(yamux_pair):
 
 
 @pytest.mark.trio
+async def test_yamux_backlog_slot_released_on_stream_close(yamux_pair):
+    """
+    Closed streams must release their backlog slot so a connection can open
+    more than ``stream_backlog_limit`` streams over its lifetime.
+
+    Regression test for the bitswap large-file transfer hang: the bitswap
+    client opens one wantlist stream per batch, and a 2GB file needs 250+
+    batches. Previously every stream consumed a permanent slot in the 256-slot
+    ``stream_backlog_semaphore``, so ``open_stream`` blocked forever once the
+    limit was reached.
+    """
+    client_yamux, server_yamux = yamux_pair
+
+    # Open and fully close more streams than the backlog limit (256).
+    with trio.fail_after(30):
+        for _ in range(300):
+            client_stream = await client_yamux.open_stream()
+            server_stream = await server_yamux.accept_stream()
+            await client_stream.close()
+            await server_stream.close()
+
+        # The slot is released on local close, so opening more streams must
+        # not block on an exhausted semaphore.
+        client_stream = await client_yamux.open_stream()
+        server_stream = await server_yamux.accept_stream()
+        await client_stream.close()
+        await server_stream.close()
+
+    # Sanity: the connection is still healthy and the semaphore has capacity.
+    assert client_yamux.stream_backlog_semaphore.value > 0
+    logging.debug("test_yamux_backlog_slot_released_on_stream_close complete")
+
+
+@pytest.mark.trio
+async def test_yamux_stream_bookkeeping_removed_on_full_close(yamux_pair):
+    """
+    A fully closed stream (FIN in both directions) is removed from the
+    connection's stream/buffer/event bookkeeping, so long-lived connections do
+    not accumulate dead stream entries.
+    """
+    client_yamux, server_yamux = yamux_pair
+    client_stream = await client_yamux.open_stream()
+    server_stream = await server_yamux.accept_stream()
+    sid = client_stream.stream_id
+
+    # Exchange data so there is a non-empty receive buffer to drain first.
+    await client_stream.write(b"hello")
+    assert await server_stream.read(5) == b"hello"
+
+    # Close both directions.
+    await client_stream.close()
+    await server_stream.close()
+    # Give the FIN frames time to propagate to both sides.
+    await trio.sleep(0.2)
+
+    async with client_yamux.streams_lock:
+        assert sid not in client_yamux.streams
+        assert sid not in client_yamux.stream_buffers
+        assert sid not in client_yamux.stream_events
+    logging.debug("test_yamux_stream_bookkeeping_removed_on_full_close complete")
+
+
+@pytest.mark.trio
+async def test_yamux_stale_stream_swept_after_grace_period(yamux_pair):
+    """
+    A fully-closed stream that still holds unread buffered data keeps its
+    bookkeeping (so readers can drain it) but is reclaimed by the stale-stream
+    sweeper once the grace period elapses — otherwise long-lived connections
+    would accumulate one dead entry per abandoned stream.
+    """
+    client_yamux, server_yamux = yamux_pair
+    client_stream = await client_yamux.open_stream()
+    server_stream = await server_yamux.accept_stream()
+    sid = client_stream.stream_id
+
+    # Server sends data that the client never reads — it stays buffered.
+    await server_stream.write(b"unread-data")
+    await trio.sleep(0.1)
+    # Close both directions (server FIN first, so the client's close() sees
+    # recv_closed=True and fully closes the stream).
+    await server_stream.close()
+    await trio.sleep(0.1)
+    await client_stream.close()
+    await trio.sleep(0.1)
+
+    async with client_yamux.streams_lock:
+        stream = client_yamux.streams[sid]
+        # Fully closed, but the buffered data keeps the entry alive...
+        assert stream.closed
+        assert client_yamux.stream_buffers[sid]
+        assert stream._closed_at > 0
+        # ...and within the grace period the sweeper leaves it alone.
+        assert client_yamux._sweep_stale_streams(now=trio.current_time()) == 0
+
+    # Once the grace period has elapsed, the entry is reclaimed.
+    async with client_yamux.streams_lock:
+        stream = client_yamux.streams[sid]
+        assert client_yamux._sweep_stale_streams(now=stream._closed_at + 1000) == 1
+        assert sid not in client_yamux.streams
+        assert sid not in client_yamux.stream_buffers
+        assert sid not in client_yamux.stream_events
+
+    # The backlog slot was released on local close regardless of buffering.
+    assert client_yamux.stream_backlog_semaphore.value == 256
+    logging.debug("test_yamux_stale_stream_swept_after_grace_period complete")
+
+
+@pytest.mark.trio
 async def test_yamux_backpressure(yamux_pair):
     logging.debug("Starting test_yamux_backpressure")
     client_yamux, server_yamux = yamux_pair

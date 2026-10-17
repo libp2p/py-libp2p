@@ -296,6 +296,47 @@ class TestPatternXXHandshake:
             assert isinstance(init_error, PeerIDMismatchesPubkey)
 
     @pytest.mark.trio
+    async def test_handshake_outbound_without_expected_peer(
+        self, pattern_setup, nursery
+    ):
+        """
+        ``remote_peer=None`` skips only the peer-ID equality check.
+
+        The initiator still authenticates the responder via its signed
+        handshake payload and learns its peer ID from the connection.
+        """
+        initiator_pattern, libp2p_keypair, noise_keypair = pattern_setup
+
+        responder_keypair = create_new_key_pair()
+        responder_peer = ID.from_pubkey(responder_keypair.public_key)
+        responder_pattern = PatternXX(
+            local_peer=responder_peer,
+            libp2p_privkey=responder_keypair.private_key,
+            noise_static_key=noise_static_key_factory(),
+        )
+
+        from tests.utils.factories import raw_conn_factory
+
+        async with raw_conn_factory(nursery) as (init_conn, resp_conn):
+            results: dict[str, ID] = {}
+
+            async def do_initiator():
+                secure = await initiator_pattern.handshake_outbound(init_conn, None)
+                results["init_sees"] = secure.get_remote_peer()
+
+            async def do_responder():
+                secure = await responder_pattern.handshake_inbound(resp_conn)
+                results["resp_sees"] = secure.get_remote_peer()
+
+            with trio.fail_after(10):
+                async with trio.open_nursery() as handshake_nursery:
+                    handshake_nursery.start_soon(do_initiator)
+                    handshake_nursery.start_soon(do_responder)
+
+            assert results["init_sees"] == responder_peer
+            assert results["resp_sees"] == ID.from_pubkey(libp2p_keypair.public_key)
+
+    @pytest.mark.trio
     async def test_handshake_not_finished(self, pattern_setup, nursery):
         """Test handshake failure when connection closes before completion."""
         responder_pattern, libp2p_keypair, noise_keypair = pattern_setup

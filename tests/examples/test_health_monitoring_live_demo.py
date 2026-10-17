@@ -1,0 +1,120 @@
+"""Smoke tests for the live health-monitoring demo."""
+
+from __future__ import annotations
+
+import pytest
+
+from examples.health_monitoring.live_demo import (
+    ALL_SCENARIOS,
+    build_parser,
+    parse_scenarios,
+    run_live_demo,
+)
+
+
+def test_parse_scenarios_all() -> None:
+    assert parse_scenarios("all") == ALL_SCENARIOS
+    assert parse_scenarios("") == ALL_SCENARIOS
+    assert parse_scenarios(["all"]) == ALL_SCENARIOS
+
+
+def test_parse_scenarios_subset_and_unknown() -> None:
+    assert parse_scenarios("healthy,protect") == ("healthy", "protect")
+    assert parse_scenarios("churn healthy") == ("churn", "healthy")
+    with pytest.raises(ValueError, match="Unknown scenario"):
+        parse_scenarios("healthy,nope")
+
+
+def test_parser_defaults() -> None:
+    args = build_parser().parse_args([])
+    assert args.peers == 25
+    assert args.scenario == "all"
+    assert args.gui == "none"
+    assert args.gui_port == 8765
+
+
+def test_parser_gui_options() -> None:
+    args = build_parser().parse_args(["--gui", "web", "--gui-port", "9000"])
+    assert args.gui == "web"
+    assert args.gui_port == 9000
+
+
+def test_health_view_imports() -> None:
+    from examples.health_monitoring import health_view, tui, web_gui
+
+    assert callable(health_view.build_peer_table)
+    assert callable(tui.run_health_tui)
+    assert callable(web_gui.run_health_web)
+
+
+def test_web_gui_html_escapes_peer_id() -> None:
+    from examples.health_monitoring.web_gui import _html_page
+
+    html = _html_page(
+        [
+            {
+                "peer_id": "<script>alert(1)</script>",
+                "connections": 1,
+                "score": 0.9,
+                "latency_ms": 1.5,
+                "success_rate": 1.0,
+                "protected": False,
+                "unhealthy": 0,
+            }
+        ],
+        {
+            "total_peers": 1,
+            "total_connections": 1,
+            "average_peer_health": 0.9,
+        },
+    ).decode("utf-8")
+
+    assert "<script>" not in html
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+
+
+@pytest.mark.trio
+async def test_live_health_demo_connects_and_reports() -> None:
+    result = await run_live_demo(
+        peers=4,
+        scenarios="all",
+        wait_for_monitor=1.2,
+        protect_count=1,
+        churn_count=1,
+        streams_per_peer=2,
+    )
+
+    assert result["peers"] == 4
+    assert result["scenarios"] == list(ALL_SCENARIOS)
+    assert result["echoed"] == b"health-demo"
+    assert result["protected"] is True
+
+    healthy = result["healthy"]
+    assert healthy["echo_ok"] == 3
+    assert healthy["total_connections"] >= 3
+    assert healthy["monitor_status"].get("enabled") is True
+    assert healthy["network_health"].get("total_connections", 0) >= 3
+    assert "average_peer_health" in healthy["network_health"]
+    assert "average_health_score" in healthy["peer_health"]
+
+    assert result["protect"]["protected_count"] == 1
+    assert result["traffic"]["echo_ok"] == 6
+    assert result["churn"]["churned"] == 1
+    assert result["churn"]["connections_after"] < result["churn"]["connections_before"]
+    assert result["disabled"]["observer_health"] == {}
+    assert result["disabled"]["observer_connections"] >= 1
+
+
+@pytest.mark.trio
+async def test_live_health_demo_healthy_only() -> None:
+    result = await run_live_demo(
+        peers=3,
+        scenarios="healthy",
+        wait_for_monitor=1.0,
+    )
+
+    assert result["scenarios"] == ["healthy"]
+    assert result["total_connections"] >= 2
+    assert result["monitor_status"].get("enabled") is True
+    assert "protect" not in result
+    assert "churn" not in result

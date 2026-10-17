@@ -211,11 +211,27 @@ class ConnectionTracker:
                 self.established_per_peer[peer_id] = set()
             self.established_per_peer[peer_id].add(connection_id)
 
-            # Update connection info
-            if connection_id in self._connections:
-                self._connections[connection_id].state = "established"
-                self._connections[connection_id].peer_id = peer_id
-                self._connections[connection_id].established_at = time.time()
+            # Update connection info.  Create it when missing: the swarm's
+            # add_conn() admits straight into established (it never calls the
+            # pending handlers), so an entry can reach this method without a
+            # ConnectionInfo.  Storing the info (with timestamps) is what
+            # allows the lifecycle reconcile to detect phantom entries.
+            now = time.time()
+            info = self._connections.get(connection_id)
+            if info is None:
+                info = ConnectionInfo(
+                    connection_id=connection_id,
+                    peer_id=peer_id,
+                    direction="inbound",
+                    state="established",
+                    created_at=now,
+                    established_at=now,
+                )
+                self._connections[connection_id] = info
+            else:
+                info.state = "established"
+                info.peer_id = peer_id
+                info.established_at = now
 
             self._stats["total_connections_established"] += 1
             self._stats["peak_established_inbound"] = max(
@@ -245,11 +261,27 @@ class ConnectionTracker:
                 self.established_per_peer[peer_id] = set()
             self.established_per_peer[peer_id].add(connection_id)
 
-            # Update connection info
-            if connection_id in self._connections:
-                self._connections[connection_id].state = "established"
-                self._connections[connection_id].peer_id = peer_id
-                self._connections[connection_id].established_at = time.time()
+            # Update connection info.  Create it when missing: the swarm's
+            # add_conn() admits straight into established (it never calls the
+            # pending handlers), so an entry can reach this method without a
+            # ConnectionInfo.  Storing the info (with timestamps) is what
+            # allows the lifecycle reconcile to detect phantom entries.
+            now = time.time()
+            info = self._connections.get(connection_id)
+            if info is None:
+                info = ConnectionInfo(
+                    connection_id=connection_id,
+                    peer_id=peer_id,
+                    direction="outbound",
+                    state="established",
+                    created_at=now,
+                    established_at=now,
+                )
+                self._connections[connection_id] = info
+            else:
+                info.state = "established"
+                info.peer_id = peer_id
+                info.established_at = now
 
             self._stats["total_connections_established"] += 1
             self._stats["peak_established_outbound"] = max(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from pathlib import Path
 import ssl
@@ -18,6 +19,7 @@ from cryptography.hazmat.primitives import serialization
 from libp2p.transport.quic.transport import QUICTransport
 from libp2p.transport.quic.config import QUICTransportConfig
 from collections.abc import (
+    Callable,
     Mapping,
     Sequence,
 )
@@ -55,6 +57,7 @@ from libp2p.custom_types import (
     TSecurityOptions,
 )
 from libp2p.host.basic_host import (
+    AddrsFactory,
     BasicHost,
 )
 from libp2p.host.routed_host import (
@@ -98,6 +101,18 @@ from libp2p.security.noise.transport import (
 from libp2p.security.tls.transport import (
     PROTOCOL_ID as TLS_PROTOCOL_ID,
     TLSTransport
+)
+from libp2p.identity_utils import (
+    create_identity_from_seed,
+    identity_exists,
+    load_identity,
+    save_identity,
+)
+from libp2p.crypto.keystore import (
+    FileSystemKeyStore,
+    provider_from_keystore,
+    provider_from_path,
+    provider_new_ed25519,
 )
 
 import libp2p.security.secio.transport as secio
@@ -150,10 +165,12 @@ def set_default_muxer(muxer_name: Literal["YAMUX", "MPLEX"]) -> None:
 
 def save_keypair(key_pair: KeyPair, type: str= "ed25519") -> None:
     """
-    Persist a private key to disk in PEM format.
+    Persist a private key to disk in PEM format (legacy helper).
 
-    Currently supports only Ed25519 keys. Writes the key to a predefined
-    path for later retrieval.
+    Currently supports only Ed25519 keys and writes to a fixed path
+    (``libp2p.utils.paths.ED25519_PATH``). For general identity persistence
+    prefer ``save_identity`` / ``load_identity`` or ``FileSystemKeyStore``,
+    which use the libp2p protobuf private-key format and caller-chosen paths.
 
     :param key_pair: KeyPair object containing private and public keys.
     :param type: Type of key to save (default: "ed25519").
@@ -180,10 +197,11 @@ def save_keypair(key_pair: KeyPair, type: str= "ed25519") -> None:
 
 def load_keypair(type: str = "ed25519") -> KeyPair | None:
     """
-    Load a private key from disk and reconstruct its KeyPair.
+    Load a private key from disk and reconstruct its KeyPair (legacy helper).
 
-    Currently supports only Ed25519 keys. Returns None if the key file does
-    not exist.
+    Currently supports only Ed25519 keys from the fixed PEM path used by
+    ``save_keypair``. Prefer ``load_identity`` or ``FileSystemKeyStore.get``
+    for protobuf-based persistence at arbitrary paths.
 
     :param type: Type of key to load (default: "ed25519").
     :return: KeyPair object if found, or None.
@@ -266,8 +284,69 @@ def generate_new_ed25519_identity() -> KeyPair:
 
 
 def generate_peer_id_from(key_pair: KeyPair) -> ID:
+    """
+    Generate a deterministic peer ID from a keypair.
+
+    The peer ID is derived from the public key, so the same keypair will
+    always produce the same peer ID. This enables identity persistence:
+    if you save and reuse the same keypair, you'll get the same peer ID.
+
+    :param key_pair: The keypair to generate a peer ID from
+    :return: A deterministic peer ID
+    """
     public_key = key_pair.public_key
     return ID.from_pubkey(public_key)
+
+
+def _resolve_host_key_pair(
+    key_pair: KeyPair | None = None,
+    key_pair_provider: Callable[[], KeyPair] | None = None,
+    keystore: FileSystemKeyStore | None = None,
+    identity_name: str = "default",
+    auto_persist: bool | None = None,
+) -> KeyPair:
+    """
+    Resolve the host identity from explicit key, provider, or keystore.
+
+    At most one of ``key_pair``, ``key_pair_provider``, or ``keystore`` may be
+    supplied. When only ``keystore`` is set, an existing ``identity_name`` is
+    loaded; otherwise a new Ed25519 identity is generated and optionally
+    persisted (``auto_persist`` defaults to ``True`` when a keystore is set).
+
+    :param key_pair: Explicit keypair.
+    :param key_pair_provider: Callable that returns a ``KeyPair``.
+    :param keystore: Optional filesystem keystore.
+    :param identity_name: Key name within ``keystore`` (default ``\"default\"``).
+    :param auto_persist: Persist newly generated keys when using ``keystore``.
+    :return: Resolved ``KeyPair``.
+    :raises ValueError: If more than one identity source is provided.
+    """
+    sources = [
+        key_pair is not None,
+        key_pair_provider is not None,
+        keystore is not None,
+    ]
+    if sum(sources) > 1:
+        raise ValueError(
+            "Provide at most one of key_pair, key_pair_provider, or keystore"
+        )
+
+    if key_pair is not None:
+        return key_pair
+
+    if key_pair_provider is not None:
+        return key_pair_provider()
+
+    if keystore is not None:
+        should_persist = True if auto_persist is None else auto_persist
+        if keystore.has(identity_name):
+            return keystore.get(identity_name)
+        generated = generate_new_ed25519_identity()
+        if should_persist:
+            keystore.put(identity_name, generated)
+        return generated
+
+    return generate_new_ed25519_identity()
 
 
 def get_default_muxer_options() -> TMuxerOptions:
@@ -287,6 +366,7 @@ def _build_transports_for_swarm(
     transports: Sequence[ITransport] | None,
     enable_quic: bool,
     enable_webrtc: bool,
+    enable_webtransport: bool,
     enable_tcp: bool,
     enable_websocket: bool,
     enable_autotls: bool,
@@ -312,6 +392,7 @@ def _build_transports_for_swarm(
     :param transports: Explicit transport list, or ``None`` to auto-build.
     :param enable_quic: Whether to create a QUIC transport when auto-building.
     :param enable_webrtc: Whether to create a WebRTC transport when auto-building.
+    :param enable_webtransport: Whether to create a WebTransport transport.
     :param enable_tcp: Whether to include a TCP transport when auto-building.
     :param enable_websocket: Whether to include a WebSocket transport.
     :param enable_autotls: Whether to enable AutoTLS in QUIC/WebSocket transports.
@@ -338,6 +419,15 @@ def _build_transports_for_swarm(
 
             if "tcp" in protocols and "ws" not in protocols and "wss" not in protocols:
                 transport_obj = TCP()
+            elif "webtransport" in protocols:
+                from libp2p.transport.webtransport import WebTransportTransport
+
+                if key_pair is None:
+                    logger.warning(
+                        "WebTransport transport requires key_pair (private_key)"
+                    )
+                    continue
+                transport_obj = WebTransportTransport(private_key=key_pair.private_key)
             elif "quic" in protocols or "quic-v1" in protocols:
                 if key_pair is None:
                     logger.warning("QUIC transport requires key_pair (private_key)")
@@ -417,6 +507,17 @@ def _build_transports_for_swarm(
                 logger.warning("WebRTC transport requires key_pair (private_key)")
             else:
                 result.append(WebRTCDirectTransport(private_key=key_pair.private_key))
+        if enable_webtransport:
+            from libp2p.transport.webtransport import WebTransportTransport
+
+            if key_pair is None:
+                logger.warning(
+                    "WebTransport transport requires key_pair (private_key)"
+                )
+            else:
+                result.append(
+                    WebTransportTransport(private_key=key_pair.private_key)
+                )
         if enable_tcp or not result:
             result.append(TCP())
 
@@ -425,6 +526,10 @@ def _build_transports_for_swarm(
 
 def new_swarm(
     key_pair: KeyPair | None = None,
+    key_pair_provider: Callable[[], KeyPair] | None = None,
+    keystore: FileSystemKeyStore | None = None,
+    identity_name: str = "default",
+    auto_persist: bool | None = None,
     muxer_opt: TMuxerOptions | None = None,
     sec_opt: TSecurityOptions | None = None,
     peerstore_opt: IPeerStore | None = None,
@@ -435,6 +540,7 @@ def new_swarm(
     # Backward-compat flags
     enable_quic: bool = False,
     enable_webrtc: bool = False,
+    enable_webtransport: bool = False,
     enable_autotls: bool = False,
     # NEW: convenience flags for auto-building transports
     enable_tcp: bool = True,
@@ -464,7 +570,14 @@ def new_swarm(
        provided (``enable_quic``, ``enable_websocket``, ``enable_tcp``).
     4. **Default fallback** — TCP only.
 
-    :param key_pair: optional choice of the ``KeyPair``
+    :param key_pair: optional explicit ``KeyPair`` (mutually exclusive with
+        ``key_pair_provider`` and ``keystore``)
+    :param key_pair_provider: optional ``Callable[[], KeyPair]`` used to obtain
+        the host identity (issue #312)
+    :param keystore: optional ``FileSystemKeyStore`` for named identity load/save
+    :param identity_name: key name within ``keystore`` (default ``\"default\"``)
+    :param auto_persist: when using ``keystore``, persist newly generated keys
+        (defaults to ``True`` if ``keystore`` is set)
     :param muxer_opt: optional choice of stream muxer
     :param sec_opt: optional choice of security upgrade
     :param peerstore_opt: optional peerstore
@@ -511,11 +624,21 @@ def new_swarm(
     Note: Ed25519 keys are used by default for better interoperability with
           other libp2p implementations (Rust, Go) which often disable RSA support.
     """
-    if key_pair is None:
-        # Use Ed25519 by default for better interoperability with Rust/Go libp2p
-        # which often compile without RSA support
-        key_pair = generate_new_ed25519_identity()
+    # Identity resolution (opt-in persistence; default remains random Ed25519):
+    # 1. explicit key_pair
+    # 2. key_pair_provider()
+    # 3. keystore get/create(+persist) under identity_name
+    # 4. otherwise generate a new random Ed25519 keypair
+    key_pair = _resolve_host_key_pair(
+        key_pair=key_pair,
+        key_pair_provider=key_pair_provider,
+        keystore=keystore,
+        identity_name=identity_name,
+        auto_persist=auto_persist,
+    )
 
+    # Generate deterministic peer ID from keypair
+    # Same keypair always produces the same peer ID
     id_opt = generate_peer_id_from(key_pair)
 
     quic_transport_opt = connection_config if isinstance(connection_config, QUICTransportConfig) else None
@@ -574,6 +697,7 @@ def new_swarm(
         transports=transports,
         enable_quic=enable_quic,
         enable_webrtc=enable_webrtc,
+        enable_webtransport=enable_webtransport,
         enable_tcp=enable_tcp,
         enable_websocket=enable_websocket,
         enable_autotls=enable_autotls,
@@ -669,6 +793,10 @@ def new_swarm(
 
 def new_host(
     key_pair: KeyPair | None = None,
+    key_pair_provider: Callable[[], KeyPair] | None = None,
+    keystore: FileSystemKeyStore | None = None,
+    identity_name: str = "default",
+    auto_persist: bool | None = None,
     muxer_opt: TMuxerOptions | None = None,
     sec_opt: TSecurityOptions | None = None,
     peerstore_opt: IPeerStore | None = None,
@@ -683,6 +811,7 @@ def new_host(
     negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     enable_quic: bool = False,
     enable_webrtc: bool = False,
+    enable_webtransport: bool = False,
     quic_transport_opt: QUICTransportConfig | None = None,
     tls_client_config: ssl.SSLContext | None = None,
     tls_server_config: ssl.SSLContext | None = None,
@@ -693,6 +822,8 @@ def new_host(
     bootstrap_dns_max_retries: int = 3,
     connection_config: ConnectionConfig | None = None,
     announce_addrs: Sequence[multiaddr.Multiaddr] | None = None,
+    addrs_factory: AddrsFactory | None = None,
+    disable_identify_address_discovery: bool = False,
     # NEW: explicit transport list — highest priority
     transports: Sequence[ITransport] | None = None,
     # NEW: convenience flags
@@ -712,7 +843,14 @@ def new_host(
     3. ``enable_*`` flags.
     4. Default: TCP only.
 
-    :param key_pair: optional choice of the ``KeyPair``
+    :param key_pair: optional explicit ``KeyPair`` (mutually exclusive with
+        ``key_pair_provider`` and ``keystore``)
+    :param key_pair_provider: optional ``Callable[[], KeyPair]`` used to obtain
+        the host identity (issue #312)
+    :param keystore: optional ``FileSystemKeyStore`` for named identity load/save
+    :param identity_name: key name within ``keystore`` (default ``\"default\"``)
+    :param auto_persist: when using ``keystore``, persist newly generated keys
+        (defaults to ``True`` if ``keystore`` is set)
     :param muxer_opt: optional choice of stream muxer
     :param sec_opt: optional choice of security upgrade
     :param peerstore_opt: optional peerstore
@@ -734,7 +872,17 @@ def new_host(
     :param bootstrap_dns_timeout: DNS resolution timeout in seconds per attempt
     :param bootstrap_dns_max_retries: max DNS resolution retries with backoff
     :param connection_config: optional connection configuration for connection manager
+        and health monitoring. When both connection_config and quic_transport_opt
+        are provided, all ConnectionConfig attributes are merged into the QUIC config.
     :param announce_addrs: if set, these replace listen addrs in get_addrs()
+        (mutually exclusive with ``addrs_factory``)
+    :param addrs_factory: optional callable matching go-libp2p ``AddrsFactory``;
+        receives the live candidate address list and returns addresses to
+        advertise (mutually exclusive with ``announce_addrs``)
+    :param disable_identify_address_discovery: if True, do not record Identify
+        observed addresses for local discovery (go
+        ``DisableIdentifyAddressDiscovery``). Identify itself still runs for
+        peer metadata; only observed-address discovery is skipped.
     :param transports: explicit list of transport instances to register.  When
         provided, all ``enable_*`` flags and ``listen_addrs``-based detection
         are bypassed.
@@ -767,13 +915,32 @@ def new_host(
     effective_config: ConnectionConfig | QUICTransportConfig | None
     if enable_quic and quic_transport_opt is not None:
         effective_config = quic_transport_opt
+        # When both connection_config and quic_transport_opt are provided,
+        # merge all ConnectionConfig attributes (including health fields such as
+        # critical_health_threshold) so new ConnectionConfig fields are never missed.
+        if connection_config is not None:
+            connection_config_attrs = [
+                f.name for f in dataclasses.fields(ConnectionConfig)  # type: ignore[arg-type]
+            ]
+            for attr in connection_config_attrs:
+                if hasattr(connection_config, attr):
+                    setattr(quic_transport_opt, attr, getattr(connection_config, attr))
+            logger.debug(
+                "Merged all ConnectionConfig attributes from "
+                "connection_config into QUIC config"
+            )
     else:
         effective_config = connection_config
 
     swarm = new_swarm(
         enable_quic=enable_quic,
         enable_webrtc=enable_webrtc,
+        enable_webtransport=enable_webtransport,
         key_pair=key_pair,
+        key_pair_provider=key_pair_provider,
+        keystore=keystore,
+        identity_name=identity_name,
+        auto_persist=auto_persist,
         muxer_opt=muxer_opt,
         sec_opt=sec_opt,
         peerstore_opt=peerstore_opt,
@@ -804,6 +971,8 @@ def new_host(
             bootstrap_dns_timeout=bootstrap_dns_timeout,
             bootstrap_dns_max_retries=bootstrap_dns_max_retries,
             announce_addrs=announce_addrs,
+            addrs_factory=addrs_factory,
+            disable_identify_address_discovery=disable_identify_address_discovery,
         )
     return BasicHost(
         network=swarm,
@@ -817,6 +986,8 @@ def new_host(
         bootstrap_dns_timeout=bootstrap_dns_timeout,
         bootstrap_dns_max_retries=bootstrap_dns_max_retries,
         announce_addrs=announce_addrs,
+        addrs_factory=addrs_factory,
+        disable_identify_address_discovery=disable_identify_address_discovery,
     )
 
 __version__ = __version("libp2p")

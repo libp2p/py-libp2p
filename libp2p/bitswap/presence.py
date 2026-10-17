@@ -35,6 +35,14 @@ class BlockPresenceManager:
         if cid in self._dont_have:
             del self._dont_have[cid]
 
+    def remove_peer(self, peer_id: PeerID) -> None:
+        """Drop all presence state recorded for a peer (e.g. on disconnect)."""
+        self._have.pop(peer_id, None)
+        for cid in list(self._dont_have.keys()):
+            self._dont_have[cid].pop(peer_id, None)
+            if not self._dont_have[cid]:
+                del self._dont_have[cid]
+
     def get_expected_peers(self, cid: CIDObject) -> set[PeerID]:
         """Get peers that are expected to have the block."""
         return {p for p in self._have if cid in self._have[p]}

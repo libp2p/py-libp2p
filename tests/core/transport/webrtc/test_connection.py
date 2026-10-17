@@ -108,7 +108,7 @@ class TestAcceptStream:
 
         async with trio.open_nursery() as nursery:
             nursery.start_soon(_accept)
-            await trio.sleep(0.01)
+            await trio.testing.wait_all_tasks_blocked()
             conn.on_datachannel(1)
 
     @pytest.mark.trio

@@ -139,8 +139,12 @@ class QUICTransport(ITransport):
                 is_client=False,
                 alpn_protocols=get_alpn_protocols(),
                 verify_mode=self._config.verify_mode,
-                max_datagram_frame_size=self._config.max_datagram_size,
+                max_datagram_size=self._config.max_datagram_size,
                 idle_timeout=self._config.idle_timeout,
+                max_data=self._config.CONNECTION_FLOW_CONTROL_WINDOW,
+                max_stream_data=self._config.STREAM_FLOW_CONTROL_WINDOW,
+                congestion_control_algorithm=self._config.congestion_control_algorithm,
+                initial_rtt=self._config.initial_rtt,
             )
 
             # Base client configuration
@@ -148,8 +152,12 @@ class QUICTransport(ITransport):
                 is_client=True,
                 alpn_protocols=get_alpn_protocols(),
                 verify_mode=self._config.verify_mode,
-                max_datagram_frame_size=self._config.max_datagram_size,
+                max_datagram_size=self._config.max_datagram_size,
                 idle_timeout=self._config.idle_timeout,
+                max_data=self._config.CONNECTION_FLOW_CONTROL_WINDOW,
+                max_stream_data=self._config.STREAM_FLOW_CONTROL_WINDOW,
+                congestion_control_algorithm=self._config.congestion_control_algorithm,
+                initial_rtt=self._config.initial_rtt,
             )
 
             # Apply TLS configuration
@@ -325,9 +333,18 @@ class QUICTransport(ITransport):
 
             return connection
 
-        except Exception as e:
-            logger.error(f"Failed to dial QUIC connection to {maddr}: {e}")
-            raise QUICDialError(f"Dial failed: {e}") from e
+        except BaseException as e:
+            if connection is not None:
+                with trio.CancelScope() as close_scope:
+                    close_scope.shield = True
+                    try:
+                        await connection.close()
+                    except Exception:
+                        pass
+            if not isinstance(e, trio.Cancelled):
+                logger.error(f"Failed to dial QUIC connection to {maddr}: {e}")
+                raise QUICDialError(f"Dial failed: {e}") from e
+            raise
 
     async def _verify_peer_identity(
         self, connection: QUICConnection, expected_peer_id: ID
@@ -480,12 +497,20 @@ class QUICTransport(ITransport):
     async def _cleanup_terminated_connection(
         self, connection: "QUICConnection"
     ) -> None:
-        """Clean up a terminated connection from all listeners."""
+        """Clean up a terminated connection from transport and all listeners."""
         try:
+            # Remove from transport connection tracking
+            keys_to_remove = [
+                k for k, v in self._connections.items() if v == connection
+            ]
+            for k in keys_to_remove:
+                self._connections.pop(k, None)
+
             for listener in self._listeners:
                 await listener._remove_connection_by_object(connection)
             logger.debug(
-                "✅ TRANSPORT: Cleaned up terminated connection from all listeners"
+                "✅ TRANSPORT: Cleaned up terminated connection from "
+                "transport and all listeners"
             )
         except Exception as e:
             logger.error(f"❌ TRANSPORT: Error cleaning up terminated connection: {e}")
