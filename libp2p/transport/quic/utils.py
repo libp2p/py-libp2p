@@ -329,6 +329,7 @@ def create_server_config_from_base(
         copyable_attrs = [
             "alpn_protocols",
             "verify_mode",
+            "max_datagram_size",
             "max_datagram_frame_size",
             "idle_timeout",
             "max_concurrent_streams",
@@ -337,6 +338,8 @@ def create_server_config_from_base(
             "max_stream_data",
             "stateless_retry",
             "quantum_readiness_test",
+            "congestion_control_algorithm",
+            "initial_rtt",
         ]
 
         for attr in copyable_attrs:
@@ -386,10 +389,12 @@ def create_server_config_from_base(
                 server_config.idle_timeout = getattr(
                     transport_config, "idle_timeout", 30.0
                 )
-            if server_config.max_datagram_frame_size is None:
-                server_config.max_datagram_frame_size = getattr(
-                    transport_config, "max_datagram_size", 1200
-                )
+            # UDP MTU (not the DATAGRAM extension frame size).
+            server_config.max_datagram_size = transport_config.max_datagram_size
+            server_config.congestion_control_algorithm = (
+                transport_config.congestion_control_algorithm
+            )
+            server_config.initial_rtt = transport_config.initial_rtt
             apply_flow_control_windows(server_config, transport_config)
         # Ensure we have ALPN protocols
         if not server_config.alpn_protocols:
@@ -420,6 +425,7 @@ def create_client_config_from_base(
         copyable_attrs = [
             "alpn_protocols",
             "verify_mode",
+            "max_datagram_size",
             "max_datagram_frame_size",
             "idle_timeout",
             "max_concurrent_streams",
@@ -427,6 +433,8 @@ def create_client_config_from_base(
             "max_data",
             "max_stream_data",
             "quantum_readiness_test",
+            "congestion_control_algorithm",
+            "initial_rtt",
         ]
 
         for attr in copyable_attrs:
@@ -474,10 +482,12 @@ def create_client_config_from_base(
                 client_config.idle_timeout = getattr(
                     transport_config, "idle_timeout", 30.0
                 )
-            if client_config.max_datagram_frame_size is None:
-                client_config.max_datagram_frame_size = getattr(
-                    transport_config, "max_datagram_size", 1200
-                )
+            # UDP MTU (not the DATAGRAM extension frame size).
+            client_config.max_datagram_size = transport_config.max_datagram_size
+            client_config.congestion_control_algorithm = (
+                transport_config.congestion_control_algorithm
+            )
+            client_config.initial_rtt = transport_config.initial_rtt
             apply_flow_control_windows(client_config, transport_config)
 
         # Ensure we have ALPN protocols

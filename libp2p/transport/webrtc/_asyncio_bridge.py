@@ -169,6 +169,14 @@ class AsyncioBridge:
 
             await trio.to_thread.run_sync(_join_thread)
 
+            # Close the stopped loop so Python does not emit
+            # ResourceWarning: unclosed event loop on GC (#1498).
+            try:
+                if not loop.is_closed():
+                    loop.close()
+            except Exception:
+                logger.debug("Error closing asyncio loop", exc_info=True)
+
             with self._state_lock:
                 self._loop = None
                 self._thread = None

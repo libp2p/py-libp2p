@@ -1,1 +1,0 @@
-Replaced bare ``print()`` calls in test modules with logger-based output so test verbosity is configurable and consistent with project conventions.

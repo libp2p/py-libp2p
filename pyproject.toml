@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "libp2p"
-version = "0.7.0"
+version = "0.8.0"
 description = "libp2p: The Python implementation of the libp2p networking stack"
 readme = "README.md"
 requires-python = ">=3.10, <4.0"
@@ -63,7 +63,7 @@ classifiers = [
 Homepage = "https://github.com/libp2p/py-libp2p"
 
 [project.optional-dependencies]
-webrtc = ["aiortc>=1.15,<2.0"]
+webrtc = ["aiortc>=1.15,<2.0", "aioice>=0.10.0,<0.11"]
 health-demo = ["rich>=13.0"]
 
 [project.scripts]
@@ -180,6 +180,7 @@ warn_unused_ignores = false
 addopts = "-v --showlocals --durations 50 --maxfail 10"
 log_date_format = "%m-%d %H:%M:%S"
 log_format = "%(levelname)8s  %(asctime)s  %(filename)20s  %(message)s"
+filterwarnings = ["error::ResourceWarning"]
 markers = [
     "slow: mark test as slow",
     "flaky: mark test as flaky (may fail intermittently)",
@@ -245,7 +246,7 @@ name = "Removals"
 showcontent = true
 
 [tool.bumpversion]
-current_version = "0.6.0"
+current_version = "0.8.0"
 parse = """
     (?P<major>\\d+)
     \\.(?P<minor>\\d+)

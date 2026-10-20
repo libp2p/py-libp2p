@@ -126,6 +126,8 @@ class TestBitswapProtocolVersions:
                 Path(tmp_file_path).unlink()
                 await provider_bitswap.stop()
                 await client_bitswap.stop()
+                await provider_host.close()
+                await client_host.close()
 
     @pytest.mark.trio
     async def test_large_file_transfer_v100(self):
@@ -215,6 +217,8 @@ class TestBitswapProtocolVersions:
                 Path(tmp_file_path).unlink()
                 await provider_bitswap.stop()
                 await client_bitswap.stop()
+                await provider_host.close()
+                await client_host.close()
 
     @pytest.mark.trio
     async def test_bidirectional_exchange_v100(self):
@@ -300,6 +304,8 @@ class TestBitswapProtocolVersions:
                 # Cleanup
                 await node1_bitswap.stop()
                 await node2_bitswap.stop()
+                await node1_host.close()
+                await node2_host.close()
 
 
 class TestProtocolNegotiation:
@@ -406,6 +412,8 @@ class TestProtocolNegotiation:
                 # Cleanup
                 await provider_bitswap.stop()
                 await client_bitswap.stop()
+                await provider_host.close()
+                await client_host.close()
 
 
 class TestProtocolFeatures:
@@ -475,6 +483,8 @@ class TestProtocolFeatures:
                 # Cleanup
                 await provider_bitswap.stop()
                 await client_bitswap.stop()
+                await provider_host.close()
+                await client_host.close()
 
     @pytest.mark.trio
     async def test_v120_block_presence(self):
@@ -532,3 +542,5 @@ class TestProtocolFeatures:
                 # Cleanup
                 await provider_bitswap.stop()
                 await client_bitswap.stop()
+                await provider_host.close()
+                await client_host.close()

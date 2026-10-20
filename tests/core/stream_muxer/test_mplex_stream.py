@@ -1,20 +1,27 @@
+import os
+
 import pytest
 import trio
 from trio.testing import (
     wait_all_tasks_blocked,
 )
 
+from libp2p.stream_muxer.mplex.constants import (
+    CHUNK_SIZE,
+    MAX_MESSAGE_SIZE,
+    RECEIVE_TIMEOUT_SECS,
+)
 from libp2p.stream_muxer.mplex.exceptions import (
     MplexStreamClosed,
     MplexStreamEOF,
     MplexStreamReset,
     MuxedConnUnavailable,
 )
-from libp2p.stream_muxer.mplex.mplex import (
-    MPLEX_MESSAGE_CHANNEL_SIZE,
-)
 from libp2p.tools.constants import (
     MAX_READ_LEN,
+)
+from libp2p.utils import (
+    encode_uvarint,
 )
 
 DATA = b"data_123"
@@ -30,23 +37,105 @@ async def test_mplex_stream_read_write(mplex_stream_pair):
 @pytest.mark.trio
 async def test_mplex_stream_full_buffer(mplex_stream_pair):
     stream_0, stream_1 = mplex_stream_pair
-    # Test: The message channel is of size `MPLEX_MESSAGE_CHANNEL_SIZE`.
-    #   It should be fine to read even there are already `MPLEX_MESSAGE_CHANNEL_SIZE`
-    #   messages arriving.
-    for _ in range(MPLEX_MESSAGE_CHANNEL_SIZE):
-        await stream_0.write(DATA)
+    # With go-mplex-style flow control (channel depth 1 + blocking delivery),
+    # a slow reader does not immediately reset. Writes that fit in the
+    # channel complete; the reader can still drain them.
+    await stream_0.write(DATA)
     await wait_all_tasks_blocked()
-    # Sanity check
-    assert MAX_READ_LEN >= MPLEX_MESSAGE_CHANNEL_SIZE * len(DATA)
-    assert (await stream_1.read(MAX_READ_LEN)) == MPLEX_MESSAGE_CHANNEL_SIZE * DATA
+    assert (await stream_1.read(MAX_READ_LEN)) == DATA
 
-    # Test: Read after `MPLEX_MESSAGE_CHANNEL_SIZE + 1` messages has arrived, which
-    #   exceeds the channel size. The stream should have been reset.
-    for _ in range(MPLEX_MESSAGE_CHANNEL_SIZE + 1):
-        await stream_0.write(DATA)
+    # A large write is chunked and must round-trip without resetting.
+    # Reader must run concurrently — channel depth 1 applies backpressure.
+    large = DATA * 500  # well above CHUNK_SIZE / channel depth
+    received = bytearray()
+
+    async def reader() -> None:
+        while len(received) < len(large):
+            received.extend(await stream_1.read(65536))
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(reader)
+        await stream_0.write(large)
+    assert bytes(received) == large
+
+
+@pytest.mark.trio
+async def test_mplex_write_chunks_large_payload(mplex_stream_pair):
+    stream_0, stream_1 = mplex_stream_pair
+    payload = b"x" * (CHUNK_SIZE * 3 + 100)
+    frame_sizes: list[int] = []
+    original = stream_0.muxed_conn.send_message
+
+    async def counting_send(flag, data, stream_id):
+        if data:
+            frame_sizes.append(len(data))
+        return await original(flag, data, stream_id)
+
+    stream_0.muxed_conn.send_message = counting_send  # type: ignore[method-assign]
+    received = bytearray()
+
+    async def reader() -> None:
+        while len(received) < len(payload):
+            received.extend(await stream_1.read(65536))
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(reader)
+        await stream_0.write(payload)
+    assert frame_sizes
+    assert all(size <= CHUNK_SIZE for size in frame_sizes)
+    assert sum(frame_sizes) == len(payload)
+    assert bytes(received) == payload
+
+
+@pytest.mark.trio
+async def test_mplex_large_write_read_roundtrip(mplex_stream_pair):
+    stream_0, stream_1 = mplex_stream_pair
+    payload = os.urandom(900 * 1024)
+    received = bytearray()
+
+    async def reader() -> None:
+        while len(received) < len(payload):
+            received.extend(await stream_1.read(65536))
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(reader)
+        await stream_0.write(payload)
+    assert bytes(received) == payload
+
+
+@pytest.mark.trio
+async def test_mplex_receive_timeout_resets_stream(mplex_stream_pair, autojump_clock):
+    stream_0, stream_1 = mplex_stream_pair
+    # Occupy the depth-1 channel so the next frame blocks in _handle_message.
+    await stream_0.write(DATA)
     await wait_all_tasks_blocked()
+
+    async def blocked_write() -> None:
+        await stream_0.write(DATA)
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(blocked_write)
+        await wait_all_tasks_blocked()
+        # Advance past go-mplex ReceiveTimeout so the blocked delivery resets.
+        await trio.sleep(RECEIVE_TIMEOUT_SECS + 0.1)
+        nursery.cancel_scope.cancel()
+
     with pytest.raises(MplexStreamReset):
         await stream_1.read(MAX_READ_LEN)
+
+
+@pytest.mark.trio
+async def test_mplex_read_rejects_oversize_frame(mplex_conn_pair):
+    mplex_0, mplex_1 = mplex_conn_pair
+    # Craft a MessageInitiator frame whose length prefix exceeds MaxMessageSize.
+    # Header: (channel_id << 3) | flag; flag 2 = MessageInitiator.
+    header = encode_uvarint((0 << 3) | 2)
+    oversize_len = encode_uvarint(MAX_MESSAGE_SIZE + 1)
+    await mplex_0.secured_conn.write(header + oversize_len)
+    # Peer mux should tear down on MessageTooLarge → MplexUnavailable.
+    with trio.fail_after(5):
+        await mplex_1.event_closed.wait()
+    assert mplex_1.is_closed
 
 
 @pytest.mark.trio
