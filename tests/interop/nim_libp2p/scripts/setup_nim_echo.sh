@@ -42,7 +42,10 @@ main() {
         log_info "libp2p already installed, skipping installation"
     else
         log_info "Installing nim-libp2p globally..."
-        nimble install -y libp2p
+        # Pin nim-libp2p: v2.x removed the public HmacDrbgContext, so a floating
+        # install broke the interop build. Bump this deliberately (and update
+        # nim_echo_server.nim if the rng/switch API shifts) rather than unpinning.
+        nimble install -y "libp2p@#v2.4.1"
     fi
 
     log_info "Building nim echo server..."
