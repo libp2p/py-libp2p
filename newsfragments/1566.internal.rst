@@ -1,0 +1,1 @@
+Fix the Nim interop build: use nim-libp2p v2.x public ``Rng`` type instead of the removed ``HmacDrbgContext``, and pin ``nimble install`` to ``libp2p@#v2.4.1`` so the ``interop`` tox jobs are reproducible and stop breaking on upstream API drift.
