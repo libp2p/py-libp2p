@@ -1,1 +1,0 @@
-Enforce go-mplex MaxMessageSize (1 MiB) on mplex frame reads, chunk large writes, and apply receive-timeout backpressure so oversized frames cannot exhaust memory.

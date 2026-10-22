@@ -1,1 +1,0 @@
-Install the ``webrtc`` extra (``aiortc``) in the tox test environments so the WebRTC transport tests run in CI instead of being skipped.

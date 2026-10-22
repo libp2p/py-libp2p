@@ -359,8 +359,12 @@ class WebRTCDirectListener(IListener):
             _, server_ufrag, client_ufrag, client_pwd = parse_direct_username(username)
             # Both versions: the dialer's synthetic answer carries
             # ufrag == pwd == server_ufrag, so that is our local credential.
+            # Spec: publicly-reachable server = ICE-Lite (#1512).
             conn = mux.add_ice_connection(
-                server_ufrag, server_ufrag, host=self._candidate_host
+                server_ufrag,
+                server_ufrag,
+                host=self._candidate_host,
+                ice_lite=True,
             )
         except (WebRTCConnectionError, ValueError):
             logger.debug("WebRTC Direct: rejected first contact from %s", addr)
@@ -483,7 +487,13 @@ class WebRTCDirectListener(IListener):
         bridge: AsyncioBridge,
         rtc_cert: Any,
     ) -> Callable[..., Any]:
-        """Build the async handler called for each incoming SDP offer."""
+        """
+        Build the async handler called for each incoming SDP offer.
+
+        Experimental ``POST /sdp`` harness only (py↔py). ICE-Lite applies on the
+        STUN/spec path via ``add_ice_connection(..., ice_lite=True)``; this
+        harness uses a normal aiortc ICE agent and is not interop-facing.
+        """
 
         async def _handle_offer(offer_sdp: str) -> str:
             from aiortc import RTCSessionDescription
