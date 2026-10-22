@@ -258,6 +258,14 @@ async def raw_conn_factory(
         assert conn_0 is not None and conn_1 is not None
         yield conn_0, conn_1
     finally:
+        # Close both ends: conn_0 is the dial side, conn_1 the accepted server
+        # side. Closing the listener cancels the handler task but does not
+        # release conn_1's accepted socket, so close it explicitly too.
+        if conn_0 is not None:
+            await conn_0.close()
+        if conn_1 is not None:
+            await conn_1.close()
+
         await listener.close()
 
 
@@ -491,7 +499,14 @@ class SwarmFactory(factory.Factory):
         swarm = cls(**optional_kwargs)
         async with background_trio_service(swarm):
             await swarm.listen(LISTEN_MADDR)
-            yield swarm
+            try:
+                yield swarm
+            finally:
+                # Deterministic teardown: close the swarm (and its live
+                # connections + listeners) instead of relying on the service
+                # manager cancelling tasks, which leaves dialed sockets open
+                # (#1485). Idempotent with the manager stop that follows.
+                await swarm.close()
 
     @classmethod
     @asynccontextmanager
@@ -547,7 +562,11 @@ class HostFactory(factory.Factory):
             connection_config=connection_config,
         ) as swarms:
             hosts = tuple(BasicHost(swarm) for swarm in swarms)
-            yield hosts
+            try:
+                yield hosts
+            finally:
+                for host in hosts:
+                    await host.close()
 
 
 class DummyRouter(IPeerRouting):
@@ -652,9 +671,22 @@ class PubsubFactory(factory.Factory):
         sweep_interval: int,
         strict_signing: bool,
         msg_id_constructor: Callable[[rpc_pb2.Message], bytes] | None = None,
+        max_subscriptions_per_rpc: int | None = None,
+        max_subscriptions_per_peer: int | None = None,
+        max_inbound_rpc_size: int | None = None,
+        allowed_topics: frozenset[str] | set[str] | None = None,
     ) -> AsyncIterator[Pubsub]:
         if msg_id_constructor is None:
             msg_id_constructor = get_peer_and_seqno_msg_id
+        pubsub_limit_kwargs: dict[str, int] = {}
+        if max_subscriptions_per_rpc is not None:
+            pubsub_limit_kwargs["max_subscriptions_per_rpc"] = max_subscriptions_per_rpc
+        if max_subscriptions_per_peer is not None:
+            pubsub_limit_kwargs["max_subscriptions_per_peer"] = (
+                max_subscriptions_per_peer
+            )
+        if max_inbound_rpc_size is not None:
+            pubsub_limit_kwargs["max_inbound_rpc_size"] = max_inbound_rpc_size
         pubsub = Pubsub(
             host=host,
             router=router,
@@ -663,6 +695,8 @@ class PubsubFactory(factory.Factory):
             sweep_interval=sweep_interval,
             strict_signing=strict_signing,
             msg_id_constructor=msg_id_constructor,
+            allowed_topics=allowed_topics,
+            **pubsub_limit_kwargs,
         )
         async with background_trio_service(pubsub):
             await pubsub.wait_until_ready()
@@ -681,6 +715,10 @@ class PubsubFactory(factory.Factory):
         security_protocol: TProtocol | None = None,
         muxer_opt: TMuxerOptions | None = None,
         msg_id_constructor: Callable[[rpc_pb2.Message], bytes] | None = None,
+        max_subscriptions_per_rpc: int | None = None,
+        max_subscriptions_per_peer: int | None = None,
+        max_inbound_rpc_size: int | None = None,
+        allowed_topics: frozenset[str] | set[str] | None = None,
     ) -> AsyncIterator[tuple[Pubsub, ...]]:
         async with HostFactory.create_batch_and_listen(
             number, security_protocol=security_protocol, muxer_opt=muxer_opt
@@ -697,6 +735,10 @@ class PubsubFactory(factory.Factory):
                             sweep_interval,
                             strict_signing,
                             msg_id_constructor,
+                            max_subscriptions_per_rpc=max_subscriptions_per_rpc,
+                            max_subscriptions_per_peer=max_subscriptions_per_peer,
+                            max_inbound_rpc_size=max_inbound_rpc_size,
+                            allowed_topics=allowed_topics,
                         )
                     )
                     for host, router in zip(hosts, routers)
@@ -767,6 +809,10 @@ class PubsubFactory(factory.Factory):
         muxer_opt: TMuxerOptions | None = None,
         msg_id_constructor: None
         | (Callable[[rpc_pb2.Message], bytes]) = get_peer_and_seqno_msg_id,
+        max_subscriptions_per_rpc: int | None = None,
+        max_subscriptions_per_peer: int | None = None,
+        max_inbound_rpc_size: int | None = None,
+        allowed_topics: frozenset[str] | set[str] | None = None,
     ) -> AsyncIterator[tuple[Pubsub, ...]]:
         if protocols is not None:
             gossipsubs = GossipsubFactory.create_batch(
@@ -825,6 +871,10 @@ class PubsubFactory(factory.Factory):
             security_protocol=security_protocol,
             muxer_opt=muxer_opt,
             msg_id_constructor=msg_id_constructor,
+            max_subscriptions_per_rpc=max_subscriptions_per_rpc,
+            max_subscriptions_per_peer=max_subscriptions_per_peer,
+            max_inbound_rpc_size=max_inbound_rpc_size,
+            allowed_topics=allowed_topics,
         ) as pubsubs:
             async with AsyncExitStack() as stack:
                 for router in gossipsubs:

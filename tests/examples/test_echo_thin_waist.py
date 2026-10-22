@@ -11,15 +11,15 @@ from multiaddr.protocols import P_IP4, P_IP6, P_P2P, P_TCP
 # pytestmark = pytest.mark.timeout(20)  # Temporarily disabled for debugging
 
 # This test is intentionally lightweight and can be marked as 'integration'.
-# It ensures the echo example runs and prints the new Thin Waist lines using
-# Trio primitives.
+# It runs the echo example as a subprocess and checks it prints the Thin Waist
+# lines (peer id + dialable multiaddr) on startup.
 
 current_file = Path(__file__)
 project_root = current_file.parent.parent.parent
 EXAMPLES_DIR: Path = project_root / "examples" / "echo"
 
 
-def test_echo_example_starts_and_prints_thin_waist(monkeypatch, tmp_path):
+def test_echo_example_starts_and_prints_thin_waist():
     """Run echo server and validate printed multiaddr and peer id."""
     # Run echo example as server via module so imports resolve correctly
     cmd = [sys.executable, "-u", "-m", "examples.echo.echo", "-p", "0"]
@@ -59,10 +59,22 @@ def test_echo_example_starts_and_prints_thin_waist(monkeypatch, tmp_path):
                 saw_waiting = True
                 break
     finally:
+        # Reap the child cleanly so its listener socket and our stdout pipe are
+        # released. Under the error::ResourceWarning CI guard a leaked pipe/
+        # socket fails the test (notably on Windows). Send SIGTERM and give the
+        # server a moment to shut down gracefully, escalate to SIGKILL only if
+        # it does not exit, then close our read end of the pipe.
         with contextlib.suppress(ProcessLookupError):
             proc.terminate()
-        with contextlib.suppress(ProcessLookupError):
-            proc.kill()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                proc.wait(timeout=5)
+        finally:
+            out_stream.close()
 
     assert peer_id, "Did not capture peer ID line"
     assert printed_multiaddr, "Did not capture multiaddr line"

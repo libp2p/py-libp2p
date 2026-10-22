@@ -390,11 +390,14 @@ class TestDataChannelIdParity:
             # A closed channel's id is recycled rather than burnt.
             first = created[0][0]
             first_id = first.id
+            closed = asyncio.Event()
+
+            @first.on("close")  # type: ignore[misc,untyped-decorator]
+            def _on_close() -> None:
+                closed.set()
+
             first.close()
-            for _ in range(300):
-                if first.readyState == "closed":
-                    break
-                await asyncio.sleep(0.05)
+            await asyncio.wait_for(closed.wait(), timeout=15.0)
             assert first.readyState == "closed"
             await conn_a._create_channel_cb(6, "")
             await _wait_channel_open(created[0][-1], timeout=15.0)

@@ -143,6 +143,35 @@ _IDENTIFY_PROTOCOLS: set[TProtocol] = {
 }
 
 
+def _is_relayed_connection(conn: Any) -> bool:
+    """
+    Return True if a connection is relayed (circuit relay).
+
+    Observations received over relayed connections describe the relay
+    pipe endpoint rather than our externally dialable address and must
+    not feed the observed-address manager.
+    """
+    try:
+        get_addrs = getattr(conn, "get_transport_addresses", None)
+        if not callable(get_addrs):
+            return False
+        addrs: Any = get_addrs() or []
+    except Exception:
+        return False
+    # Use protocol-code inspection rather than string repr: the repr format is
+    # an implementation detail of python-multiaddr and could change silently.
+    for a in addrs:
+        try:
+            if any(p.name == "p2p-circuit" for p in a.protocols()):
+                return True
+        except Exception:
+            # Fall back to string check if Multiaddr.protocols() is unavailable
+            # (e.g. raw bytes or a mock in tests).
+            if "/p2p-circuit" in str(a):
+                return True
+    return False
+
+
 class _IdentifyNotifee(INotifee):
     """
     Network notifee that triggers automatic outbound Identify when new
@@ -360,6 +389,7 @@ class BasicHost(IHost):
         self._identified_peers: dict[ID, str] = {}
         self._identify_tasks: set[trio.CancelScope] = set()
         self._network.register_notifee(_IdentifyNotifee(self))
+        self._closed = False
 
         # Metrics
         self.metric_recv_channel = metric_recv_channel
@@ -578,18 +608,44 @@ class BasicHost(IHost):
                         yield
                     finally:
                         nursery.cancel_scope.cancel()
-                        if self.mDNS is not None:
-                            self.mDNS.stop()
-                    if self.upnp and self.upnp.get_external_ip():
-                        upnp_manager = self.upnp
-                        logger.debug("Removing UPnP port mappings")
-                        for addr in self.get_transport_addrs():
-                            if port := addr.value_for_protocol("tcp"):
-                                await upnp_manager.remove_port_mapping(int(port), "TCP")
-                    if self.bootstrap is not None:
-                        self.bootstrap.stop()
+                await self._shutdown_background_services()
 
         return _run()
+
+    async def _shutdown_background_services(self) -> None:
+        """
+        Best-effort stop of mDNS, UPnP, and bootstrap.
+
+        Safe to call multiple times: service references are cleared after stop
+        so a second call is a no-op (avoids double ``zeroconf.close()``).
+        """
+        if self.mDNS is not None:
+            try:
+                logger.debug("Stopping mDNS Discovery")
+                self.mDNS.stop()
+            except Exception as e:
+                logger.warning(f"Error stopping mDNS during shutdown: {e}")
+            self.mDNS = None
+
+        upnp_manager = self.upnp
+        if upnp_manager is not None:
+            self.upnp = None
+            try:
+                if upnp_manager.get_external_ip():
+                    logger.debug("Removing UPnP port mappings")
+                    for addr in self.get_transport_addrs():
+                        if port := addr.value_for_protocol("tcp"):
+                            await upnp_manager.remove_port_mapping(int(port), "TCP")
+            except Exception as e:
+                logger.warning(f"Error removing UPnP mappings during shutdown: {e}")
+
+        if self.bootstrap is not None:
+            try:
+                logger.debug("Stopping Bootstrap Discovery")
+                self.bootstrap.stop()
+            except Exception as e:
+                logger.warning(f"Error stopping bootstrap during shutdown: {e}")
+            self.bootstrap = None
 
     def set_stream_handler(
         self, protocol_id: TProtocol, stream_handler: StreamHandlerFn
@@ -1107,6 +1163,18 @@ class BasicHost(IHost):
         await self._network.close_peer(peer_id)
 
     async def close(self) -> None:
+        """
+        Close the host and its underlying network service.
+
+        Cleanup order is intentional: stop background services, cancel
+        inflight identify tasks, then close the network. Idempotent.
+        """
+        if self._closed:
+            return
+        self._closed = True
+
+        await self._shutdown_background_services()
+
         for cs in self._identify_tasks:
             cs.cancel()
         self._identify_tasks.clear()
@@ -1227,15 +1295,29 @@ class BasicHost(IHost):
                 else:
                     try:
                         our_observed = multiaddr.Multiaddr(identify_msg.observed_addr)
-                        logger.debug(
-                            "Identify[%s]: recording observed_addr %s from peer %s",
-                            reason,
-                            our_observed,
-                            peer_id,
-                        )
-                        self._observed_addr_manager.record_observation(
-                            swarm_conn, our_observed, self.get_transport_addrs()
-                        )
+                        if _is_relayed_connection(swarm_conn):
+                            # Observations over relayed connections report the
+                            # relay pipe endpoint (the relay's own address),
+                            # not our external address. Recording them
+                            # poisons hole punching (peers would dial the
+                            # relay instead of our NAT mapping).
+                            logger.debug(
+                                "Identify[%s]: ignoring observed_addr %s from peer %s "
+                                "(relayed connection)",
+                                reason,
+                                our_observed,
+                                peer_id,
+                            )
+                        else:
+                            logger.debug(
+                                "Identify[%s]: recording observed_addr %s from peer %s",
+                                reason,
+                                our_observed,
+                                peer_id,
+                            )
+                            self._observed_addr_manager.record_observation(
+                                swarm_conn, our_observed, self.get_transport_addrs()
+                            )
                     except MultiaddrError as exc:
                         # Malformed observed_addr bytes or unknown protocols from a
                         # misbehaving peer. Expected at low rates; log quietly.
@@ -1308,6 +1390,14 @@ class BasicHost(IHost):
         self._identify_inflight.discard(peer_id)
         if self._observed_addr_manager is not None:
             self._observed_addr_manager.remove_conn(conn)
+        # C2: notify DCUtR so it evicts stale _direct_connections /
+        # _initiate_locks entries for this peer on disconnect.
+        dcutr = getattr(self, "_dcutr_protocol", None)
+        if dcutr is not None and hasattr(dcutr, "on_peer_disconnected"):
+            try:
+                dcutr.on_peer_disconnected(peer_id)
+            except Exception:
+                pass  # non-fatal; eviction is best-effort
 
     def _get_first_connection(self, peer_id: ID) -> INetConn | None:
         connections = self._network.get_connections(peer_id)

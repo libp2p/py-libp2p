@@ -8,6 +8,7 @@ Examples
    examples.identify
    examples.identify_push
    examples.chat
+   examples.dht_chat
    examples.echo
    examples.echo_quic
    examples.ping

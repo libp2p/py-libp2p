@@ -9,7 +9,6 @@ from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-import trio
 
 from libp2p.peer.peerinfo import PeerInfo
 from libp2p.pubsub.gossipsub import GossipSub
@@ -107,12 +106,24 @@ class TestGossipSubSignedPeerRecords:
             await connect(host0, host1)
             await connect(host1, host2)
             await connect(host0, host2)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_peer(host1.get_id(), timeout=10)
+            await pubsubs[1].wait_for_peer(host0.get_id(), timeout=10)
+            await pubsubs[1].wait_for_peer(host2.get_id(), timeout=10)
+            await pubsubs[2].wait_for_peer(host1.get_id(), timeout=10)
+            await pubsubs[0].wait_for_peer(host2.get_id(), timeout=10)
+            await pubsubs[2].wait_for_peer(host0.get_id(), timeout=10)
 
             topic = "test_emit_prune_signed_records"
             for pubsub in pubsubs:
                 await pubsub.subscribe(topic)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_subscription(host1.get_id(), topic, timeout=10)
+            await pubsubs[0].wait_for_subscription(host2.get_id(), topic, timeout=10)
+            await pubsubs[1].wait_for_subscription(host0.get_id(), topic, timeout=10)
+            await pubsubs[1].wait_for_subscription(host2.get_id(), topic, timeout=10)
+            await pubsubs[2].wait_for_subscription(host0.get_id(), topic, timeout=10)
+            await pubsubs[2].wait_for_subscription(host1.get_id(), topic, timeout=10)
+            await pubsubs[0].wait_for_mesh(host1.get_id(), topic, timeout=10)
+            await pubsubs[1].wait_for_mesh(host0.get_id(), topic, timeout=10)
 
             # Mock the peerstore to return a signed record for host2
             assert gsub0.pubsub is not None
@@ -161,7 +172,8 @@ class TestGossipSubSignedPeerRecords:
 
             # Connect hosts
             await connect(host0, host1)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_peer(host1.get_id(), timeout=10)
+            await pubsubs[1].wait_for_peer(host0.get_id(), timeout=10)
 
             # Create mock signed peer record
             mock_envelope = MagicMock()
@@ -378,7 +390,8 @@ class TestGossipSubSignedPeerRecords:
 
             # Connect hosts
             await connect(host0, host1)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_peer(host1.get_id(), timeout=10)
+            await pubsubs[1].wait_for_peer(host0.get_id(), timeout=10)
 
             # Create PX peer info for already connected peer
             px_peer = rpc_pb2.PeerInfo()
@@ -406,7 +419,8 @@ class TestGossipSubSignedPeerRecords:
 
             # Connect hosts
             await connect(host0, host1)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_peer(host1.get_id(), timeout=10)
+            await pubsubs[1].wait_for_peer(host0.get_id(), timeout=10)
 
             # Mock maybe_consume_signed_record to return False (invalid record)
             with patch(
@@ -439,7 +453,8 @@ class TestGossipSubSignedPeerRecords:
 
             # Connect hosts
             await connect(host0, host1)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_peer(host1.get_id(), timeout=10)
+            await pubsubs[1].wait_for_peer(host0.get_id(), timeout=10)
 
             # Mock env_to_send_in_RPC
             with patch("libp2p.pubsub.gossipsub.env_to_send_in_RPC") as mock_env:
@@ -477,7 +492,8 @@ class TestGossipSubSignedPeerRecords:
 
             # Connect hosts
             await connect(host0, host1)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_peer(host1.get_id(), timeout=10)
+            await pubsubs[1].wait_for_peer(host0.get_id(), timeout=10)
 
             # Mock env_to_send_in_RPC
             with patch("libp2p.pubsub.gossipsub.env_to_send_in_RPC") as mock_env:

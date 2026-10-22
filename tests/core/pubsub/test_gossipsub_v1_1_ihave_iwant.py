@@ -10,12 +10,20 @@ from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-import trio
 
 from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.pb import rpc_pb2
 from libp2p.tools.utils import connect
 from tests.utils.factories import PubsubFactory
+
+
+async def _wait_pair_ready(pubsubs, topic: str) -> None:
+    await pubsubs[0].wait_for_peer(pubsubs[1].my_id)
+    await pubsubs[1].wait_for_peer(pubsubs[0].my_id)
+    await pubsubs[0].wait_for_subscription(pubsubs[1].my_id, topic)
+    await pubsubs[1].wait_for_subscription(pubsubs[0].my_id, topic)
+    await pubsubs[0].wait_for_mesh(pubsubs[1].my_id, topic)
+    await pubsubs[1].wait_for_mesh(pubsubs[0].my_id, topic)
 
 
 @pytest.mark.trio
@@ -29,13 +37,14 @@ async def test_ihave_triggers_iwant_for_missing_messages():
 
         # Connect hosts
         await connect(host0, host1)
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(pubsubs[1].my_id)
+        await pubsubs[1].wait_for_peer(pubsubs[0].my_id)
 
         # Both subscribe to the same topic
         topic = "test_ihave_iwant"
         await pubsubs[0].subscribe(topic)
         await pubsubs[1].subscribe(topic)
-        await trio.sleep(1.0)  # Allow time for mesh formation
+        await _wait_pair_ready(pubsubs, topic)
 
         # Create a message ID that gsub0 doesn't have (opaque bytes)
         missing_msg_id = b"peer456" + b"seqno123"
@@ -70,13 +79,14 @@ async def test_iwant_retrieves_missing_messages():
 
         # Connect hosts
         await connect(host0, host1)
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(pubsubs[1].my_id)
+        await pubsubs[1].wait_for_peer(pubsubs[0].my_id)
 
         # Both subscribe to the same topic
         topic = "test_iwant_retrieval"
         await pubsubs[0].subscribe(topic)
         await pubsubs[1].subscribe(topic)
-        await trio.sleep(1.0)  # Allow time for mesh formation
+        await _wait_pair_ready(pubsubs, topic)
 
         # Create a message that gsub1 has but gsub0 doesn't
         seqno = b"seqno123"
@@ -106,9 +116,6 @@ async def test_iwant_retrieves_missing_messages():
         # Simulate gsub0 sending IWANT to gsub1
         await gsub1.handle_iwant(iwant_msg, host0.get_id())
 
-        # Wait for async operations
-        await trio.sleep(0.5)
-
         # Verify that gsub1's message cache was queried
         gsub1.mcache.get.assert_called_once()
 
@@ -133,13 +140,14 @@ async def test_ihave_rate_limiting():
 
         # Connect hosts
         await connect(host0, host1)
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(pubsubs[1].my_id)
+        await pubsubs[1].wait_for_peer(pubsubs[0].my_id)
 
         # Both subscribe to the same topic
         topic = "test_ihave_rate_limiting"
         await pubsubs[0].subscribe(topic)
         await pubsubs[1].subscribe(topic)
-        await trio.sleep(1.0)  # Allow time for mesh formation
+        await _wait_pair_ready(pubsubs, topic)
 
         # Create multiple message IDs
         msg_ids = [f"peer_{i}".encode() + f"seqno_{i}".encode() for i in range(100)]
@@ -178,13 +186,19 @@ async def test_no_infinite_gossip_loops():
         await connect(host0, host1)
         await connect(host1, host2)
         await connect(host0, host2)
-        await trio.sleep(0.5)
+        for i, j in ((0, 1), (1, 2), (0, 2)):
+            await pubsubs[i].wait_for_peer(pubsubs[j].my_id)
+            await pubsubs[j].wait_for_peer(pubsubs[i].my_id)
 
         # All subscribe to the same topic
         topic = "test_gossip_loops"
         for pubsub in pubsubs:
             await pubsub.subscribe(topic)
-        await trio.sleep(1.0)  # Allow time for mesh formation
+        for i, j in ((0, 1), (1, 2), (0, 2)):
+            await pubsubs[i].wait_for_subscription(pubsubs[j].my_id, topic)
+            await pubsubs[j].wait_for_subscription(pubsubs[i].my_id, topic)
+            await pubsubs[i].wait_for_mesh(pubsubs[j].my_id, topic)
+            await pubsubs[j].wait_for_mesh(pubsubs[i].my_id, topic)
 
         # Create a message ID that would be in the seen cache
         seqno = b"seqno123"
@@ -228,13 +242,23 @@ async def test_dropping_gossip_triggers_iwant():
         # This means host0 and host2 are not directly connected
         await connect(host0, host1)
         await connect(host1, host2)
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(pubsubs[1].my_id)
+        await pubsubs[1].wait_for_peer(pubsubs[0].my_id)
+        await pubsubs[1].wait_for_peer(pubsubs[2].my_id)
+        await pubsubs[2].wait_for_peer(pubsubs[1].my_id)
 
         # All subscribe to the same topic
         topic = "test_dropping_gossip"
         for pubsub in pubsubs:
             await pubsub.subscribe(topic)
-        await trio.sleep(1.0)  # Allow time for mesh formation
+        await pubsubs[0].wait_for_subscription(pubsubs[1].my_id, topic)
+        await pubsubs[1].wait_for_subscription(pubsubs[0].my_id, topic)
+        await pubsubs[1].wait_for_subscription(pubsubs[2].my_id, topic)
+        await pubsubs[2].wait_for_subscription(pubsubs[1].my_id, topic)
+        await pubsubs[0].wait_for_mesh(pubsubs[1].my_id, topic)
+        await pubsubs[1].wait_for_mesh(pubsubs[0].my_id, topic)
+        await pubsubs[1].wait_for_mesh(pubsubs[2].my_id, topic)
+        await pubsubs[2].wait_for_mesh(pubsubs[1].my_id, topic)
 
         # Create a message ID that gsub0 doesn't have
         seqno = b"seqno123"

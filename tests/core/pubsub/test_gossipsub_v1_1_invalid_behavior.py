@@ -10,13 +10,39 @@ from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
-import trio
 
 from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.pb import rpc_pb2
 from libp2p.pubsub.score import ScoreParams, TopicScoreParams
 from libp2p.tools.utils import connect
 from tests.utils.factories import PubsubFactory
+
+
+async def _wait_line_mesh_ready(pubsubs, topic: str) -> None:
+    """Wait for peer/subscription/mesh readiness on a 0-1-2 line topology."""
+    await pubsubs[0].wait_for_peer(pubsubs[1].my_id)
+    await pubsubs[1].wait_for_peer(pubsubs[0].my_id)
+    await pubsubs[1].wait_for_peer(pubsubs[2].my_id)
+    await pubsubs[2].wait_for_peer(pubsubs[1].my_id)
+
+    await pubsubs[0].wait_for_subscription(pubsubs[1].my_id, topic)
+    await pubsubs[1].wait_for_subscription(pubsubs[0].my_id, topic)
+    await pubsubs[1].wait_for_subscription(pubsubs[2].my_id, topic)
+    await pubsubs[2].wait_for_subscription(pubsubs[1].my_id, topic)
+
+    await pubsubs[0].wait_for_mesh(pubsubs[1].my_id, topic)
+    await pubsubs[1].wait_for_mesh(pubsubs[0].my_id, topic)
+    await pubsubs[1].wait_for_mesh(pubsubs[2].my_id, topic)
+    await pubsubs[2].wait_for_mesh(pubsubs[1].my_id, topic)
+
+
+async def _wait_pair_mesh_ready(pubsubs, topic: str) -> None:
+    await pubsubs[0].wait_for_peer(pubsubs[1].my_id)
+    await pubsubs[1].wait_for_peer(pubsubs[0].my_id)
+    await pubsubs[0].wait_for_subscription(pubsubs[1].my_id, topic)
+    await pubsubs[1].wait_for_subscription(pubsubs[0].my_id, topic)
+    await pubsubs[0].wait_for_mesh(pubsubs[1].my_id, topic)
+    await pubsubs[1].wait_for_mesh(pubsubs[0].my_id, topic)
 
 
 @pytest.mark.trio
@@ -40,7 +66,6 @@ async def test_invalid_signatures_rejected():
         # Connect hosts in a line: 0 - 1 - 2
         await connect(hosts[0], hosts[1])
         await connect(hosts[1], hosts[2])
-        await trio.sleep(0.5)
 
         # All peers subscribe to the topic
         topic = "test_invalid_signatures"
@@ -49,7 +74,7 @@ async def test_invalid_signatures_rejected():
         for i in range(len(pubsubs)):
             await pubsubs[i].subscribe(topic)
 
-        await trio.sleep(1.0)  # Allow time for mesh formation
+        await _wait_line_mesh_ready(pubsubs, topic)
 
         # Get the peer ID of host 0
         peer_id = hosts[0].get_id()
@@ -72,9 +97,6 @@ async def test_invalid_signatures_rejected():
         # Simulate an invalid signature by directly applying a penalty
         # This is what would happen when an invalid signature is detected
         gsubs[1].scorer.on_invalid_message(peer_id, topic)
-
-        # Allow time for processing
-        await trio.sleep(0.1)
 
         # Check that the score decreased
         final_score = gsubs[1].scorer.score(peer_id, [topic])
@@ -103,7 +125,6 @@ async def test_malformed_payloads_rejected():
         # Connect hosts in a line: 0 - 1 - 2
         await connect(hosts[0], hosts[1])
         await connect(hosts[1], hosts[2])
-        await trio.sleep(0.5)
 
         # All peers subscribe to the topic
         topic = "test_malformed_payloads"
@@ -112,7 +133,7 @@ async def test_malformed_payloads_rejected():
         for i in range(len(pubsubs)):
             await pubsubs[i].subscribe(topic)
 
-        await trio.sleep(1.0)  # Allow time for mesh formation
+        await _wait_line_mesh_ready(pubsubs, topic)
 
         # Get the peer ID of host 0
         peer_id = hosts[0].get_id()
@@ -135,9 +156,6 @@ async def test_malformed_payloads_rejected():
         # Directly simulate an invalid message penalty
         # This is what would happen when a malformed message is detected
         gsubs[1].scorer.on_invalid_message(peer_id, topic)
-
-        # Allow time for processing
-        await trio.sleep(0.1)
 
         # Check that the score of peer 0 decreased
         final_score = gsubs[1].scorer.score(peer_id, [topic])
@@ -163,14 +181,13 @@ async def test_excessive_ihave_iwant_spam_penalized():
 
         # Connect the hosts
         await connect(hosts[0], hosts[1])
-        await trio.sleep(0.5)
 
         # Both peers subscribe to the topic
         topic = "test_ihave_iwant_spam"
         for pubsub in pubsubs:
             await pubsub.subscribe(topic)
 
-        await trio.sleep(1.0)  # Allow time for mesh formation
+        await _wait_pair_mesh_ready(pubsubs, topic)
 
         # Get the peer ID of host 1
         peer_id = hosts[1].get_id()
@@ -210,9 +227,6 @@ async def test_excessive_ihave_iwant_spam_penalized():
         # This is what would happen if peer1 sent excessive IHAVE messages
         gsubs[0].scorer.penalize_behavior(peer_id, 1.0)
 
-        # Allow time for processing
-        await trio.sleep(1.0)
-
         # No need to check if handle_ihave was called since we directly simulated
         # the penalty
 
@@ -244,14 +258,13 @@ async def test_repeated_invalid_messages_lead_to_graylist():
 
         # Connect the hosts
         await connect(hosts[0], hosts[1])
-        await trio.sleep(0.5)
 
         # Both peers subscribe to the topic
         topic = "test_graylist"
         for pubsub in pubsubs:
             await pubsub.subscribe(topic)
 
-        await trio.sleep(1.0)  # Allow time for mesh formation
+        await _wait_pair_mesh_ready(pubsubs, topic)
 
         # Get the peer ID of host 1
         peer_id = hosts[1].get_id()
@@ -273,9 +286,6 @@ async def test_repeated_invalid_messages_lead_to_graylist():
         # Apply enough penalties to cross the graylist threshold
         for i in range(10):  # More invalid messages to ensure we cross the threshold
             gsubs[0].scorer.on_invalid_message(peer_id, topic)
-
-        # Allow time for score updates
-        await trio.sleep(0.1)
 
         # Configure the mock for final state (graylisted)
         score = -20.0  # A very negative score

@@ -11,6 +11,7 @@ stress.
 from __future__ import annotations
 
 import asyncio
+import threading
 
 import pytest
 import trio
@@ -301,8 +302,8 @@ class TestCancellation:
 
             assert scope.cancelled_caught, "Cancel scope did not fire"
 
-            # Give the asyncio loop a moment to clean up the cancelled future
-            await trio.sleep(0.05)
+            # Yield to the asyncio loop so the cancelled future can settle.
+            await bridge.run_coro(asyncio.sleep(0))
 
             # Bridge should still work
             result = await bridge.run_coro(_return_42())
@@ -318,25 +319,32 @@ class TestFireAndForget:
     @pytest.mark.trio
     async def test_fire_and_forget_runs(self):
         async with AsyncioBridge() as bridge:
-            flag: list[bool] = []
+            # Fire-and-forget runs on the asyncio thread; signal with a
+            # thread-safe Event (do not set trio.Event from that thread).
+            done = threading.Event()
 
             async def _set_flag() -> None:
-                flag.append(True)
+                done.set()
 
             bridge.schedule_fire_and_forget(_set_flag())
-            await trio.sleep(0.1)  # Give it time to run
-            assert flag == [True]
+            with trio.fail_after(5):
+                await trio.to_thread.run_sync(done.wait)
 
     @pytest.mark.trio
     async def test_fire_and_forget_error_is_logged_not_raised(self):
         async with AsyncioBridge() as bridge:
+            done = threading.Event()
 
             async def _explode() -> None:
-                raise RuntimeError("kaboom")
+                try:
+                    raise RuntimeError("kaboom")
+                finally:
+                    done.set()
 
             # Should not raise
             bridge.schedule_fire_and_forget(_explode())
-            await trio.sleep(0.1)
+            with trio.fail_after(5):
+                await trio.to_thread.run_sync(done.wait)
             # Bridge still alive
             assert bridge.is_running
 

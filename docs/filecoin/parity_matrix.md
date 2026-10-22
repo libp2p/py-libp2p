@@ -3,6 +3,9 @@
 This page captures value/constant parity. For runtime protocol support, example
 coverage, and prioritized gaps, see the
 [`Filecoin protocol support matrix`](../filecoin_protocol_support_matrix.rst).
+For defaults parity, connection lifecycle notes, and reproducible interop probe
+workflows, see
+[`Filecoin network parity and interop`](../filecoin_network_parity_and_interop.rst).
 
 | Concern                                    | Lotus reference                              | Forest reference                                          | py-libp2p mapping                                  | Status      | Notes                                                                 |
 | ------------------------------------------ | -------------------------------------------- | --------------------------------------------------------- | -------------------------------------------------- | ----------- | --------------------------------------------------------------------- |

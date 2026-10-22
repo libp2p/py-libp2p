@@ -229,6 +229,81 @@ async def test_dial_listen_open_stream_echo(harness, version):
 
 
 @pytest.mark.trio
+async def test_listener_is_ice_lite_respond_only(monkeypatch):
+    """
+    The listener is a true ICE-Lite agent (#1512): it answers the dialer's STUN
+    connectivity checks but never initiates its own. We tag the listener's muxed
+    connections (they alone go through ``make_connection_ice_lite``) and count
+    outbound STUN binding requests from them — during ICE establishment it must
+    be zero.
+
+    Consent freshness (``query_consent``) is intentionally kept in production but
+    also sends binding requests once ICE completes; we neutralise it here so the
+    count reflects *establishment* checks only and the assertion is deterministic
+    rather than resting on a wall-clock margin before the first consent probe.
+    """
+    import aioice.ice as _ice
+    from multiaddr import Multiaddr
+
+    from libp2p.peer.id import ID
+    import libp2p.transport.webrtc._udp_mux as _udp_mux
+
+    async def _no_consent(self):  # type: ignore[no-untyped-def]
+        return None
+
+    monkeypatch.setattr(_ice.Connection, "query_consent", _no_consent)
+
+    lite_conn_ids: set[int] = set()
+    real_make_lite = _udp_mux.make_connection_ice_lite
+
+    def _tracking_make_lite(conn):  # type: ignore[no-untyped-def]
+        lite_conn_ids.add(id(conn))
+        real_make_lite(conn)
+
+    monkeypatch.setattr(_udp_mux, "make_connection_ice_lite", _tracking_make_lite)
+
+    outbound = {"listener_checks": 0}
+    real_request = _ice.StunProtocol.request
+
+    async def _counting_request(self, *a, **k):  # type: ignore[no-untyped-def]
+        owner = getattr(self, "receiver", None)
+        if owner is not None and id(owner) in lite_conn_ids:
+            outbound["listener_checks"] += 1
+        return await real_request(self, *a, **k)
+
+    monkeypatch.setattr(_ice.StunProtocol, "request", _counting_request)
+
+    server, server_kp = _transport()
+    dialer, _ = _transport(webrtc_direct_dial_version=1)
+    server_id = ID.from_pubkey(server_kp.public_key)
+
+    handler_fired = trio.Event()
+
+    async def handler(conn) -> None:  # type: ignore[no-untyped-def]
+        handler_fired.set()
+        await trio.sleep_forever()
+
+    listener = server.create_listener(handler)
+    await listener.listen(Multiaddr(LISTEN_ADDR))
+    (maddr,) = listener.get_addrs()
+    try:
+        with trio.fail_after(30):
+            conn = await dialer.dial(maddr)
+            assert conn.peer_id == server_id
+            await handler_fired.wait()
+            assert lite_conn_ids, "listener never built a muxed ICE-Lite connection"
+            assert outbound["listener_checks"] == 0, (
+                f"ICE-Lite listener sent {outbound['listener_checks']} outbound "
+                "connectivity checks; a Lite agent must be respond-only"
+            )
+            await conn.close()
+    finally:
+        await listener.close()
+        await dialer.close()
+        await server.close()
+
+
+@pytest.mark.trio
 async def test_concurrent_dials_share_one_udp_port():
     """Two dialers hit the same advertised port; the mux demuxes by ufrag."""
     from multiaddr import Multiaddr
@@ -393,6 +468,16 @@ async def test_v2_short_pwd_suffix_is_rejected():
     (maddr,) = listener.get_addrs()
     host, port = _host_port(maddr)
     bridge = await server._ensure_bridge()
+    handled = asyncio.Event()
+    real = listener._on_unknown_stun
+
+    def _wrap(username: str, data: bytes, addr: tuple[str, int]) -> None:
+        try:
+            real(username, data, addr)
+        finally:
+            handled.set()
+
+    listener._mux.set_unknown_stun_handler(_wrap)
 
     async def _poke() -> None:
         loop = asyncio.get_running_loop()
@@ -402,7 +487,7 @@ async def test_v2_short_pwd_suffix_is_rejected():
         try:
             username = "libp2p+webrtc+v2/" + "a" * 21 + ":cli1"
             transport.sendto(_stun_binding_request(username), (host, port))
-            await asyncio.sleep(0.2)
+            await asyncio.wait_for(handled.wait(), timeout=5.0)
         finally:
             transport.close()
 
@@ -431,6 +516,21 @@ async def test_unknown_version_prefix_is_rejected():
     (maddr,) = listener.get_addrs()
     host, port = _host_port(maddr)
     bridge = await server._ensure_bridge()
+    usernames = ("noprefix1:cli1", "libp2p+webrtc+v9/abcd:cli1", "x:y")
+    seen = 0
+    done = asyncio.Event()
+    real = listener._on_unknown_stun
+
+    def _wrap(username: str, data: bytes, addr: tuple[str, int]) -> None:
+        nonlocal seen
+        try:
+            real(username, data, addr)
+        finally:
+            seen += 1
+            if seen >= len(usernames):
+                done.set()
+
+    listener._mux.set_unknown_stun_handler(_wrap)
 
     async def _poke() -> None:
         # Fresh UDP endpoint on the asyncio thread; send crafted requests.
@@ -439,9 +539,9 @@ async def test_unknown_version_prefix_is_rejected():
             asyncio.DatagramProtocol, local_addr=("0.0.0.0", 0)
         )
         try:
-            for username in ("noprefix1:cli1", "libp2p+webrtc+v9/abcd:cli1", "x:y"):
+            for username in usernames:
                 transport.sendto(_stun_binding_request(username), (host, port))
-            await asyncio.sleep(0.2)
+            await asyncio.wait_for(done.wait(), timeout=5.0)
         finally:
             transport.close()
 
@@ -470,6 +570,21 @@ async def test_in_flight_cap_drops_excess_first_contacts():
     (maddr,) = listener.get_addrs()
     host, port = _host_port(maddr)
     bridge = await server._ensure_bridge()
+    n_pokes = 3
+    seen = 0
+    done = asyncio.Event()
+    real = listener._on_unknown_stun
+
+    def _wrap(username: str, data: bytes, addr: tuple[str, int]) -> None:
+        nonlocal seen
+        try:
+            real(username, data, addr)
+        finally:
+            seen += 1
+            if seen >= n_pokes:
+                done.set()
+
+    listener._mux.set_unknown_stun_handler(_wrap)
 
     async def _poke() -> None:
         loop = asyncio.get_running_loop()
@@ -477,10 +592,10 @@ async def test_in_flight_cap_drops_excess_first_contacts():
             asyncio.DatagramProtocol, local_addr=("0.0.0.0", 0)
         )
         try:
-            for i in range(3):
+            for i in range(n_pokes):
                 cred = f"libp2p+webrtc+v1/{'a' * 20}{i}"
                 transport.sendto(_stun_binding_request(f"{cred}:{cred}"), (host, port))
-            await asyncio.sleep(0.3)
+            await asyncio.wait_for(done.wait(), timeout=5.0)
         finally:
             transport.close()
 
@@ -563,10 +678,12 @@ async def test_handler_exception_does_not_crash_listener():
     server, _ = _transport()
     dialer, _ = _transport()
     calls = 0
+    first_call = trio.Event()
 
     async def bad_handler(conn) -> None:  # type: ignore[no-untyped-def]
         nonlocal calls
         calls += 1
+        first_call.set()
         raise RuntimeError("boom")
 
     listener = server.create_listener(bad_handler)
@@ -577,8 +694,7 @@ async def test_handler_exception_does_not_crash_listener():
         # when a datagram write is in flight at close) — give this one room.
         with trio.fail_after(60):
             conn = await dialer.dial(maddr)  # handshake completes before handler
-            while calls == 0:
-                await trio.sleep(0.01)
+            await first_call.wait()
             await conn.close()
             # Listener still alive and usable.
             conn2 = await dialer.dial(maddr)
@@ -651,6 +767,20 @@ async def test_first_contact_rate_limit_per_source_ip():
     host, port = _host_port(maddr)
     bridge = await server._ensure_bridge()
     n = STUN_FIRST_CONTACT_BURST * 4
+    seen = 0
+    done = asyncio.Event()
+    real = listener._on_unknown_stun
+
+    def _wrap(username: str, data: bytes, addr: tuple[str, int]) -> None:
+        nonlocal seen
+        try:
+            real(username, data, addr)
+        finally:
+            seen += 1
+            if seen >= n:
+                done.set()
+
+    listener._mux.set_unknown_stun_handler(_wrap)
 
     async def _flood() -> None:
         loop = asyncio.get_running_loop()
@@ -661,14 +791,14 @@ async def test_first_contact_rate_limit_per_source_ip():
             for i in range(n):
                 cred = f"libp2p+webrtc+v1/{'a' * 20}{i:03d}"
                 transport.sendto(_stun_binding_request(f"{cred}:{cred}"), (host, port))
-            await asyncio.sleep(0.3)
+            await asyncio.wait_for(done.wait(), timeout=5.0)
         finally:
             transport.close()
 
     try:
         await bridge.run_coro(_flood())
-        # Burst tokens (plus at most a refill's worth over 0.3s) got through;
-        # the rest were dropped before any parse/ICE allocation.
+        # Burst tokens (plus at most a refill's worth over processing) got
+        # through; the rest were dropped before any parse/ICE allocation.
         accepted = len(listener._mux._by_ufrag)
         assert 1 <= accepted <= STUN_FIRST_CONTACT_BURST + 2, accepted
         assert accepted < n
@@ -678,35 +808,35 @@ async def test_first_contact_rate_limit_per_source_ip():
 
 
 @pytest.mark.trio
-async def test_harness_retries_when_tcp_port_collides():
+async def test_harness_retries_when_udp_collides_after_tcp():
     """
-    Harness mode binds TCP on the UDP port number; if that TCP bind fails
-    (Windows reserves port ranges per protocol) the listener must pick a
-    fresh UDP port and try again rather than fail.
+    Ephemeral harness mode binds TCP first, then UDP on that port. If UDP
+    fails (port busy / reserved), the listener must close the TCP server and
+    retry with a fresh ephemeral TCP port rather than fail.
     """
     from unittest.mock import patch
 
     from multiaddr import Multiaddr
 
-    import libp2p.transport.webrtc._aiortc_helpers as helpers
+    from libp2p.transport.webrtc import _udp_mux as udp_mux_mod
 
-    real = helpers.run_signaling_server
-    calls: list[int] = []
+    real_create = udp_mux_mod.UdpMux.create
+    udp_ports: list[int] = []
 
-    async def flaky(host, port, on_offer):  # type: ignore[no-untyped-def]
-        calls.append(port)
-        if len(calls) == 1:
-            raise OSError(13, "port reserved")
-        return await real(host, port, on_offer)
+    async def flaky_create(host, port):  # type: ignore[no-untyped-def]
+        udp_ports.append(port)
+        if len(udp_ports) == 1:
+            raise OSError(48, "Address already in use")
+        return await real_create(host, port)
 
     server, _ = _transport(enable_sdp_http_harness=True)
     listener = server.create_listener(lambda conn: trio.sleep_forever())
     try:
-        with patch.object(helpers, "run_signaling_server", flaky):
+        with patch.object(udp_mux_mod.UdpMux, "create", flaky_create):
             await listener.listen(Multiaddr(LISTEN_ADDR))
         (maddr,) = listener.get_addrs()
         _, port = _host_port(maddr)
-        assert len(calls) == 2 and calls[1] == port  # second attempt won
+        assert len(udp_ports) == 2 and udp_ports[1] == port
         assert listener._signaling_server is not None
     finally:
         await listener.close()

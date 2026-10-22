@@ -309,7 +309,7 @@ class TestRecentMessageReplayGate:
             pubsub.handle_subscription(
                 peer_id, rpc_pb2.RPC.SubOpts(subscribe=False, topicid=self.TOPIC)
             )
-            assert peer_id not in pubsub.peer_topics[self.TOPIC]
+            assert peer_id not in pubsub.peer_topics.get(self.TOPIC, set())
 
             pubsub.peer_topics[self.TOPIC] = {peer_id}
             await pubsub._send_recent_messages_to_new_peer(peer_id)
@@ -325,7 +325,7 @@ class TestRecentMessageReplayGate:
 
             await pubsub._send_recent_messages_to_new_peer(peer_id)
             pubsub._handle_dead_peer(peer_id)
-            assert peer_id not in pubsub.peer_topics[self.TOPIC]
+            assert peer_id not in pubsub.peer_topics.get(self.TOPIC, set())
             assert peer_id not in pubsub._replayed_recent_topics
 
             pubsub.peer_topics[self.TOPIC] = {peer_id}
@@ -582,15 +582,13 @@ async def test_three_nodes_publish_before_full_mesh():
         # Publish immediately from A
         await pubsubs[0].publish(topic, data)
 
-        # Wait for propagation through the chain
-        await trio.sleep(4)
-
+        # Wait for multi-hop propagation through the chain (event-driven)
         received = False
-        with trio.move_on_after(3):
-            async for msg in sub_c:
-                if msg.data == data:
-                    received = True
-                    break
+        try:
+            await wait_for_pubsub_payload(sub_c, data, timeout=10.0)
+            received = True
+        except AssertionError:
+            received = False
 
         # Note: multi-hop propagation before full mesh is timing-dependent.
         # We intentionally do NOT assert here; the primary regression test
