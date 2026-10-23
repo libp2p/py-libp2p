@@ -1,0 +1,1 @@
+Added runnable Gossipsub version demos (v1.0–v2.0) and a multi-version comparison example under ``examples/pubsub/gossipsub/``.
