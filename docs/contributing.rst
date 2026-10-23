@@ -60,7 +60,9 @@ Install the development dependencies using a virtual environment:
 
 **Option 2: Using uv (recommended, same as CI):**
 
-First, install ``uv`` if you haven't already:
+First, install ``uv`` if you haven't already (use ``uv`` >= 0.13.4 after the
+eMudhra/emSign CA incident; see
+`Discussion #1570 <https://github.com/libp2p/py-libp2p/discussions/1570>`_):
 
 .. code:: sh
 
@@ -70,7 +72,7 @@ Or using pip:
 
 .. code:: sh
 
-    pip install uv
+    pip install "uv>=0.13.4"
 
 Then set up the development environment:
 
@@ -87,11 +89,14 @@ Then set up the development environment:
     cd py-libp2p
     python3 -m venv .venv
     . .venv/bin/activate
-    pip install --upgrade pip  # Ensure pip >= 25.1 for PEP 735 support
+    pip install --upgrade "pip>=26.2.2"  # PEP 735 needs >= 25.1; emSign CA fix needs >= 26.2.2
     pip install --group dev -e .
     pre-commit install
 
 **Note:** This project uses PEP 735 ``[dependency-groups]`` which requires pip >= 25.1.
+After the eMudhra/emSign CA certificate incident, use pip >= 26.2.2 and
+certifi >= 2026.10.19 (and uv >= 0.13.4 when using uv). See
+`Discussion #1570 <https://github.com/libp2p/py-libp2p/discussions/1570>`_.
 If you have an older pip version, upgrade it first.
 
 An alternative using ``virtualenv``:
@@ -137,7 +142,9 @@ Install the development dependencies using a virtual environment:
 
 **Option 2: Using uv (recommended, same as CI):**
 
-First, install ``uv`` if you haven't already:
+First, install ``uv`` if you haven't already (use ``uv`` >= 0.13.4 after the
+eMudhra/emSign CA incident; see
+`Discussion #1570 <https://github.com/libp2p/py-libp2p/discussions/1570>`_):
 
 .. code:: sh
 
@@ -153,7 +160,7 @@ Or using pip:
 
 .. code:: sh
 
-    pip install uv
+    pip install "uv>=0.13.4"
 
 Then set up the development environment:
 
@@ -170,7 +177,7 @@ Then set up the development environment:
     cd py-libp2p
     python3 -m venv .venv
     . .venv/bin/activate
-    pip install --upgrade pip  # Ensure pip >= 25.1 for PEP 735 support
+    pip install --upgrade "pip>=26.2.2"  # PEP 735 needs >= 25.1; emSign CA fix needs >= 26.2.2
     CFLAGS="$(pkg-config --cflags gmp)" LDFLAGS="$(pkg-config --libs gmp)" pip install --group dev -e .
     pre-commit install
 
@@ -254,12 +261,14 @@ Setup Steps
 
    **Option A: Using uv (recommended, same as CI):**
 
-   First, install ``uv`` if you haven't already:
+   First, install ``uv`` if you haven't already (use ``uv`` >= 0.13.4 after the
+   eMudhra/emSign CA incident; see
+   `Discussion #1570 <https://github.com/libp2p/py-libp2p/discussions/1570>`_):
 
    .. code:: powershell
 
         # Using pip
-        pip install uv
+        pip install "uv>=0.13.4"
 
         # Or using winget
         winget install --id=astral-sh.uv
@@ -275,7 +284,7 @@ Setup Steps
 
    .. code:: powershell
 
-        pip install --upgrade pip  # Ensure pip >= 25.1 for PEP 735 support
+        pip install --upgrade "pip>=26.2.2"  # PEP 735 needs >= 25.1; emSign CA fix needs >= 26.2.2
         pip install --group dev -e .
         pre-commit install
 

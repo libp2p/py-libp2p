@@ -1,0 +1,1 @@
+Required ``certifi>=2026.10.19`` and hardened CI/Docker install tooling after the eMudhra/emSign CA certificate compromise to reduce MITM risk when fetching packages or making HTTPS requests.
