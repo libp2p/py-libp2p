@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # tests/interop/nim_libp2p/scripts/setup_nim_echo.sh
-# Cache-aware setup that skips installation if packages exist
+# Cache-aware setup that skips rebuild if the binary already exists.
+# Always installs the pinned nim-libp2p version so CI does not drift on upstream API changes.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="${SCRIPT_DIR}/.."
+
+# Pin to a known-good nim-libp2p release (v2 Rng API). Override with NIM_LIBP2P_REF if needed.
+NIM_LIBP2P_REF="${NIM_LIBP2P_REF:-#v2.4.2}"
 
 # Colors
 GREEN='\033[0;32m'
@@ -37,13 +41,9 @@ main() {
         return 0
     fi
 
-    # Check if libp2p is already installed (cache-aware)
-    if nimble list -i | grep -q "libp2p"; then
-        log_info "libp2p already installed, skipping installation"
-    else
-        log_info "Installing nim-libp2p globally..."
-        nimble install -y libp2p
-    fi
+    # Always install the pinned version so a cached older libp2p cannot break the build
+    log_info "Installing nim-libp2p (${NIM_LIBP2P_REF})..."
+    nimble install -y "libp2p@${NIM_LIBP2P_REF}"
 
     log_info "Building nim echo server..."
     # Compile the echo server
