@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 from libp2p.abc import (
     IHost,
 )
+from libp2p.custom_types import TProtocol
 from libp2p.kad_dht.utils import (
     xor_distance,
 )
@@ -42,6 +43,7 @@ from .common import (
     BUCKET_SIZE,
     MAX_PEERS_PER_SUBNET,
     MAXIMUM_BUCKETS,
+    PROTOCOL_ID,
     STALE_PEER_THRESHOLD,
     SUBNET_PREFIX_LEN_V4,
     SUBNET_PREFIX_LEN_V6,
@@ -445,6 +447,7 @@ class RoutingTable:
         host: IHost,
         max_peers_per_subnet: int | None = None,
         max_peers_per_subnet_table: int = 0,
+        protocol_id: TProtocol = PROTOCOL_ID,
     ) -> None:
         """
         Initialize the routing table.
@@ -458,10 +461,13 @@ class RoutingTable:
             subnet across all buckets (issue #1421). ``0`` (default) disables it.
             go-libp2p defaults its equivalent (``maxForTable``) to 3; we default
             to ``0`` for backward compatibility.
+        :param protocol_id: The Kademlia protocol id a peer must speak to count
+            as a server (default: ``/ipfs/kad/1.0.0``).
 
         """
         self.local_id = local_id
         self.host = host
+        self.protocol_id = protocol_id
         self.max_peers_per_subnet = max_peers_per_subnet
         self.max_peers_per_subnet_table = max_peers_per_subnet_table
         self.buckets = [
@@ -530,12 +536,10 @@ class RoutingTable:
             # populated protocol info for this peer.
             if not skip_server_mode_check:
                 try:
-                    from .common import PROTOCOL_ID
-
                     peer_protocols = self.host.get_peerstore().get_protocols(peer_id)
                     if peer_protocols is not None and len(peer_protocols) > 0:
                         # Identify has run — check if peer supports KAD
-                        if str(PROTOCOL_ID) not in peer_protocols:
+                        if str(self.protocol_id) not in peer_protocols:
                             logger.debug(
                                 "Peer %s does not support KAD protocol, "
                                 "not adding to routing table (client mode)",

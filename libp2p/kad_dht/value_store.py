@@ -51,13 +51,20 @@ class ValueStore:
     Values are stored with a timestamp and optional expiration time.
     """
 
-    def __init__(self, host: IHost, local_peer_id: ID, persist_path: str | None = None):
+    def __init__(
+        self,
+        host: IHost,
+        local_peer_id: ID,
+        persist_path: str | None = None,
+        protocol_id: TProtocol = PROTOCOL_ID,
+    ):
         """
         Initialize an empty value store.
 
         :param host: The libp2p host instance.
         :param local_peer_id: The local peer ID to ignore in peer requests.
         :param persist_path: Optional file path for JSON persistence
+        :param protocol_id: Kademlia protocol id to dial (default: ``/ipfs/kad/1.0.0``)
 
         """
         # Store format: {key: (value, validity)}
@@ -65,6 +72,7 @@ class ValueStore:
         # Store references to the host and local peer ID for making requests
         self.host = host
         self.local_peer_id = local_peer_id
+        self.protocol_id = protocol_id
         # Track keys that were locally put (for republishing)
         self.local_keys: set[bytes] = set()
         # Track when each key was last republished
@@ -299,7 +307,7 @@ class ValueStore:
             logger.debug(f"Storing value for key {key.hex()} at peer {peer_id}")
 
             # Open a stream to the peer
-            stream = await self.host.new_stream(peer_id, [PROTOCOL_ID])
+            stream = await self.host.new_stream(peer_id, [self.protocol_id])
             logger.debug(f"Opened stream to peer {peer_id}")
 
             # Create the PUT_VALUE message with protobuf
@@ -446,7 +454,7 @@ class ValueStore:
             logger.debug(f"Getting value for key {key.hex()} from peer {peer_id}")
 
             # Open a stream to the peer
-            stream = await self.host.new_stream(peer_id, [TProtocol(PROTOCOL_ID)])
+            stream = await self.host.new_stream(peer_id, [self.protocol_id])
             logger.debug(f"Opened stream to peer {peer_id} for GET_VALUE")
 
             # Create the GET_VALUE message using protobuf
