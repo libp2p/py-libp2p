@@ -7,6 +7,32 @@ Follow the steps below to install `py-libp2p` on your platform.
 
     py-libp2p installation is currently supported on Python versions ``<= 3.13``.
 
+.. warning::
+
+    **CA certificate security incident (October 2026).** Private keys for the
+    eMudhra / emSign root and intermediate CAs were found to be insecure, so
+    they have been removed from CA bundles. Upgrade your tooling *before*
+    installing py-libp2p:
+
+    - ``pip >= 26.2.2``. pip always adds its own bundled certifi on top of the
+      system trust store, so an older pip keeps trusting the compromised
+      certificates even when the OS store is fixed. Upgrade with
+      ``python -m pip install --upgrade "pip>=26.2.2"``, or bootstrap from the
+      checksummed wheel published in the PSF announcement.
+    - ``uv >= 0.13.4``. Upgrade with ``UV_SYSTEM_CERTS=true uv self update``.
+    - ``certifi >= 2026.10.19``. py-libp2p requires this version, so installing
+      or upgrading py-libp2p pulls a CA bundle without the compromised
+      certificates.
+    - ``sigstore >= 4.5.1``, ``conda >= 26.9.4`` and ``pixi >= 0.82.1`` if you
+      use them to install or verify packages.
+
+    Rebuild container images with layer caching disabled so that the updated
+    ``ca-certificates`` package is picked up. See the Python announcement
+    `Information for Python users regarding the eMudhra / emSign CA certificate
+    security incident
+    <https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576>`__
+    for the full advisory.
+
 Using uv (recommended)
 ~~~~~~~~~~~~~~~~~~~~~~
 
