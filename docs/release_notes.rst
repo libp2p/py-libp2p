@@ -3,6 +3,39 @@ Release Notes
 
 .. towncrier release notes start
 
+py-libp2p v0.8.1 (2026-10-23)
+-----------------------------
+
+Breaking Changes
+~~~~~~~~~~~~~~~~
+
+- A ``wss`` dial with no explicit TLS client configuration now verifies the server
+  certificate against the system trust store and checks the hostname, matching
+  go-libp2p and js-libp2p. Previously the default client context set
+  ``verify_mode = CERT_NONE`` and ``check_hostname = False``, so any certificate
+  was accepted. Set ``WebsocketConfig(insecure_skip_verify=True)`` to dial a
+  self-signed endpoint you trust, or pass your own ``tls_client_config``. (`#1550 <https://github.com/libp2p/py-libp2p/issues/1550>`__)
+
+
+Bugfixes
+~~~~~~~~
+
+- The WebSocket transport dials ``/dns``, ``/dns4`` and ``/dns6`` addresses by name, so the TLS server name and the ``Host`` header carry the name and peers behind a TLS-terminating proxy (a CDN edge, a tunnel) can be reached; only ``/dnsaddr`` is resolved before dialing, and ``dns_resolution_timeout`` / ``dns_max_retries`` apply only to that ``/dnsaddr`` resolution. (`#1548 <https://github.com/libp2p/py-libp2p/issues/1548>`__)
+- A failed WebSocket dial now reports why it failed and closes its socket. The
+  TLS handshake and the WebSocket upgrade run in the dialing task instead of the
+  Swarm background nursery, so a refused certificate raises
+  ``OpenConnectionError`` naming the ``ssl`` error instead of
+  ``WebSocket handshake timeout`` after the full ``handshake_timeout``, and the
+  TCP connection is closed on every failure path rather than left open for the
+  lifetime of the Swarm. (`#1554 <https://github.com/libp2p/py-libp2p/issues/1554>`__)
+
+
+Features
+~~~~~~~~
+
+- The WebRTC-Direct listener now acts as a true ICE-Lite agent: it answers the dialer's STUN connectivity checks but never initiates its own, matching the spec (the publicly-reachable server "acts as an ICE Lite agent") and go-libp2p / rust-libp2p, whose ICE stacks flip a native lite flag. aioice has no local lite mode, so the muxed listener connection's ``check_start`` is replaced with a respond-only version that completes ICE on the controlling dialer's nomination. (`#1512 <https://github.com/libp2p/py-libp2p/issues/1512>`__)
+
+
 py-libp2p v0.8.0 (2026-09-26)
 -----------------------------
 
