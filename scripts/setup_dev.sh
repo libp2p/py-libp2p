@@ -75,7 +75,13 @@ else
     fi
 
     echo -e "${GREEN}Using pip for installation...${NC}"
-    pip install --group dev -e .
+    # fastecdsa needs the GMP headers on macOS, same as the uv branch above;
+    # without these flags the source build fails with "gmp.h file not found".
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        CFLAGS="$(pkg-config --cflags gmp)" LDFLAGS="$(pkg-config --libs gmp)" pip install --group dev -e .
+    else
+        pip install --group dev -e .
+    fi
 
     # Install pre-commit hooks
     echo -e "${GREEN}Installing pre-commit hooks...${NC}"
