@@ -1,6 +1,7 @@
-Require ``certifi >= 2026.10.19``, the first release without the compromised
-eMudhra/emSign CA certificates, so installing or upgrading py-libp2p replaces a
-vulnerable CA bundle. Users must also upgrade the installer itself:
+Require ``certifi >= 2026.10.19``, the first release that removes the compromised
+eMudhra/emSign CA certificates while keeping the unaffected emSign roots for
+compatibility, so installing or upgrading py-libp2p replaces a vulnerable CA
+bundle. Users must also upgrade the installer itself:
 ``pip >= 26.2.2`` (pip always loads its own bundled certifi in addition to the
 system store, so older versions keep trusting the compromised certificates even
 when the OS trust store is up to date) and ``uv >= 0.13.4``. CI, the developer

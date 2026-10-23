@@ -23,7 +23,8 @@ dependencies = [
     "base58>=1.0.3",
     "cbor2>=5.4.0",
     # certifi bundles the CA store used by httpx/aioquic; 2026.10.19 is the first
-    # release without the compromised eMudhra/emSign CA certificates
+    # release that removes the compromised eMudhra/emSign CA certificates while
+    # keeping the unaffected emSign roots for compatibility
     # (https://discuss.python.org/t/109576).
     "certifi>=2026.10.19",
     "coincurve==21.0.0",
