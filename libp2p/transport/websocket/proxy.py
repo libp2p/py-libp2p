@@ -73,6 +73,7 @@ class SOCKSConnectionManager:
         host: str,
         port: int,
         ssl_context: ssl.SSLContext | None = None,
+        server_hostname: str | None = None,
     ) -> Any:
         """
         Create a WebSocket connection through SOCKS proxy.
@@ -87,6 +88,8 @@ class SOCKSConnectionManager:
             host: Target WebSocket host
             port: Target WebSocket port
             ssl_context: Optional SSL context for WSS connections
+            server_hostname: TLS server name and Host header for the upgrade,
+                e.g. the name of a /tls/sni/<name>/ws address; defaults to host
 
         Returns:
             WebSocket connection object (trio-websocket)
