@@ -3,72 +3,99 @@
 isort:skip_file
 """
 
-import builtins
-import collections.abc
-import google.protobuf.descriptor
-import google.protobuf.internal.containers
-import google.protobuf.message
-import typing
+from collections import abc as _abc
+from google.protobuf import descriptor as _descriptor
+from google.protobuf import message as _message
+from google.protobuf.internal import containers as _containers
+import builtins as _builtins
+import sys
+import typing as _typing
 
-DESCRIPTOR: google.protobuf.descriptor.FileDescriptor
+if sys.version_info >= (3, 11):
+    from typing import TypeAlias as _TypeAlias, Never as _Never
+else:
+    from typing_extensions import TypeAlias as _TypeAlias, Never as _Never
 
-@typing.final
-class NoiseExtensions(google.protobuf.message.Message):
+DESCRIPTOR: _descriptor.FileDescriptor
+
+@_typing.final
+class NoiseExtensions(_message.Message):
     """NoiseExtensions contains optional extensions for the Noise handshake"""
 
-    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+    DESCRIPTOR: _descriptor.Descriptor
 
-    WEBTRANSPORT_CERTHASHES_FIELD_NUMBER: builtins.int
-    STREAM_MUXERS_FIELD_NUMBER: builtins.int
-    EARLY_DATA_FIELD_NUMBER: builtins.int
-    early_data: builtins.bytes
+    WEBTRANSPORT_CERTHASHES_FIELD_NUMBER: _builtins.int
+    STREAM_MUXERS_FIELD_NUMBER: _builtins.int
+    EARLY_DATA_FIELD_NUMBER: _builtins.int
+    SECURITY_PROTOCOLS_FIELD_NUMBER: _builtins.int
+    TRANSCRIPT_SIG_FIELD_NUMBER: _builtins.int
+    early_data: _builtins.bytes
     """Early data payload for 0-RTT support (Python extension)"""
-    @property
-    def webtransport_certhashes(self) -> google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.bytes]:
+    transcript_sig: _builtins.bytes
+    @_builtins.property
+    def webtransport_certhashes(self) -> _containers.RepeatedScalarFieldContainer[_builtins.bytes]:
         """WebTransport certificate hashes for WebTransport support"""
 
-    @property
-    def stream_muxers(self) -> google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.str]:
+    @_builtins.property
+    def stream_muxers(self) -> _containers.RepeatedScalarFieldContainer[_builtins.str]:
         """Stream multiplexers supported by this peer"""
+
+    @_builtins.property
+    def security_protocols(self) -> _containers.RepeatedScalarFieldContainer[_builtins.str]:
+        """The security protocols this peer has configured, in its own preference
+        order, together with a signature by the identity key that binds the list
+        to the Noise transcript. See libp2p/security/noise/transcript_binding.py.
+
+        Numbered 4 and 5 because field 3 was already taken by early_data here.
+        """
 
     def __init__(
         self,
         *,
-        webtransport_certhashes: collections.abc.Iterable[builtins.bytes] | None = ...,
-        stream_muxers: collections.abc.Iterable[builtins.str] | None = ...,
-        early_data: builtins.bytes | None = ...,
+        webtransport_certhashes: _abc.Iterable[_builtins.bytes] | None = ...,
+        stream_muxers: _abc.Iterable[_builtins.str] | None = ...,
+        early_data: _builtins.bytes | None = ...,
+        security_protocols: _abc.Iterable[_builtins.str] | None = ...,
+        transcript_sig: _builtins.bytes = ...,
     ) -> None: ...
-    def HasField(self, field_name: typing.Literal["_early_data", b"_early_data", "early_data", b"early_data"]) -> builtins.bool: ...
-    def ClearField(self, field_name: typing.Literal["_early_data", b"_early_data", "early_data", b"early_data", "stream_muxers", b"stream_muxers", "webtransport_certhashes", b"webtransport_certhashes"]) -> None: ...
-    def WhichOneof(self, oneof_group: typing.Literal["_early_data", b"_early_data"]) -> typing.Literal["early_data"] | None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["_early_data", b"_early_data", "early_data", b"early_data"]  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["_early_data", b"_early_data", "early_data", b"early_data", "security_protocols", b"security_protocols", "stream_muxers", b"stream_muxers", "transcript_sig", b"transcript_sig", "webtransport_certhashes", b"webtransport_certhashes"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    _WhichOneofReturnType__early_data: _TypeAlias = _typing.Literal["early_data"]  # noqa: Y015
+    _WhichOneofArgType__early_data: _TypeAlias = _typing.Literal["_early_data", b"_early_data"]  # noqa: Y015
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__early_data) -> _WhichOneofReturnType__early_data | None: ...
 
-global___NoiseExtensions = NoiseExtensions
+Global___NoiseExtensions: _TypeAlias = NoiseExtensions  # noqa: Y015
 
-@typing.final
-class NoiseHandshakePayload(google.protobuf.message.Message):
+@_typing.final
+class NoiseHandshakePayload(_message.Message):
     """NoiseHandshakePayload is the payload sent during Noise handshake"""
 
-    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+    DESCRIPTOR: _descriptor.Descriptor
 
-    IDENTITY_KEY_FIELD_NUMBER: builtins.int
-    IDENTITY_SIG_FIELD_NUMBER: builtins.int
-    EXTENSIONS_FIELD_NUMBER: builtins.int
-    identity_key: builtins.bytes
+    IDENTITY_KEY_FIELD_NUMBER: _builtins.int
+    IDENTITY_SIG_FIELD_NUMBER: _builtins.int
+    EXTENSIONS_FIELD_NUMBER: _builtins.int
+    identity_key: _builtins.bytes
     """The libp2p public key of the peer"""
-    identity_sig: builtins.bytes
+    identity_sig: _builtins.bytes
     """Signature of the noise static key by the libp2p private key"""
-    @property
-    def extensions(self) -> global___NoiseExtensions:
+    @_builtins.property
+    def extensions(self) -> Global___NoiseExtensions:
         """Optional extensions for advanced features"""
 
     def __init__(
         self,
         *,
-        identity_key: builtins.bytes = ...,
-        identity_sig: builtins.bytes = ...,
-        extensions: global___NoiseExtensions | None = ...,
+        identity_key: _builtins.bytes = ...,
+        identity_sig: _builtins.bytes = ...,
+        extensions: Global___NoiseExtensions | None = ...,
     ) -> None: ...
-    def HasField(self, field_name: typing.Literal["extensions", b"extensions"]) -> builtins.bool: ...
-    def ClearField(self, field_name: typing.Literal["extensions", b"extensions", "identity_key", b"identity_key", "identity_sig", b"identity_sig"]) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["extensions", b"extensions"]  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["extensions", b"extensions", "identity_key", b"identity_key", "identity_sig", b"identity_sig"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
-global___NoiseHandshakePayload = NoiseHandshakePayload
+Global___NoiseHandshakePayload: _TypeAlias = NoiseHandshakePayload  # noqa: Y015
