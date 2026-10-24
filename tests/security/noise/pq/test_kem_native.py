@@ -129,6 +129,40 @@ def _clear_backend_selection_cache() -> Generator[None, None, None]:
     _select_kem_class.cache_clear()
 
 
+class _LogCollector(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(level=logging.DEBUG)
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+
+@pytest.fixture
+def kem_backend_log_records() -> Generator[list[logging.LogRecord], None, None]:
+    """
+    Capture records from the KEM backend logger directly.
+
+    pytest's ``caplog`` attaches at the root logger, and
+    ``libp2p/utils/logging.py`` sets ``propagate = False`` on the ``libp2p``
+    hierarchy at import time, so records never reach it. Attaching a handler
+    to the target logger sidesteps that entirely.
+    """
+    target = logging.getLogger("libp2p.security.noise.pq.kem_backends")
+    handler = _LogCollector()
+    previous_level = target.level
+    previous_disabled = target.disabled
+    target.setLevel(logging.DEBUG)
+    target.disabled = False
+    target.addHandler(handler)
+    try:
+        yield handler.records
+    finally:
+        target.removeHandler(handler)
+        target.setLevel(previous_level)
+        target.disabled = previous_disabled
+
+
 def _matched_keypair() -> tuple[bytes, bytes, bytes]:
     """
     Build one ML-KEM-768 keypair in both backends' secret-key representations.
@@ -583,7 +617,9 @@ class TestMakeFastKemSelection:
         assert isinstance(make_fast_kem(), MLKEM768Kem)
 
     def test_the_fallback_is_logged_as_a_warning_naming_the_consequence(
-        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        kem_backend_log_records: list[logging.LogRecord],
     ) -> None:
         # kyber-py's own metadata says it must not be used for cryptographic
         # applications and is not constant time, so silently dropping onto it
@@ -596,12 +632,9 @@ class TestMakeFastKemSelection:
             "_load_native_mlkem",
             lambda: (_ for _ in ()).throw(ImportError("simulated")),
         )
-        with caplog.at_level(
-            logging.DEBUG, logger="libp2p.security.noise.pq.kem_backends"
-        ):
-            assert isinstance(make_fast_kem(), MLKEM768Kem)
+        assert isinstance(make_fast_kem(), MLKEM768Kem)
 
-        warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+        warnings = [r for r in kem_backend_log_records if r.levelno >= logging.WARNING]
         assert warnings, "falling back to kyber-py must not be a DEBUG-level event"
         text = " ".join(r.getMessage() for r in warnings)
         assert "kyber-py" in text
