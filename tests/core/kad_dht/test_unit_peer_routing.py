@@ -34,6 +34,7 @@ from libp2p.kad_dht.pb.kademlia_pb2 import (
 )
 from libp2p.kad_dht.peer_routing import (
     ALPHA,
+    BETA,
     MAX_PEER_LOOKUP_ROUNDS,
     MIN_PEERS_THRESHOLD,
     PROTOCOL_ID,
@@ -757,3 +758,115 @@ class TestPeerRouting:
         assert set(queried_peers[:ALPHA]) == set(group1), (
             "Round 1 should admit exactly the initial ALPHA peers"
         )
+
+    @pytest.mark.trio
+    async def test_round_batch_drawn_randomly_from_candidates(
+        self, peer_routing, mock_host
+    ):
+        """
+        Assert the first round draws its ALPHA peers at random from the whole
+        candidate window instead of always taking the strictly closest ALPHA.
+
+        A Sybil peer that occupies the closest XOR positions would otherwise be
+        queried first in every lookup and could steer the path from hop one
+        (#1384). With 2*ALPHA known candidates, repeated lookups must not keep
+        admitting the same ALPHA peers.
+        """
+        target_key = b"target_key"
+        candidates = [create_valid_peer_id(f"cand_{i}") for i in range(ALPHA * 2)]
+
+        first_batches: list[frozenset[ID]] = []
+
+        for _ in range(8):
+            queried: list[ID] = []
+
+            async def mock_query(peer, _target_key, _new_peers, _sink=queried):
+                # Discover nothing, so the candidate window stays as given.
+                _sink.append(peer)
+                await trio.sleep(0)
+
+            with patch.object(
+                peer_routing.routing_table,
+                "find_local_closest_peers",
+                return_value=list(candidates),
+            ):
+                mock_host.get_connected_peers.return_value = []
+                mock_host.get_peerstore().peer_ids.return_value = []
+                with patch.object(
+                    peer_routing,
+                    "_query_single_peer_for_closest",
+                    side_effect=mock_query,
+                ):
+                    await peer_routing.find_closest_peers_network(
+                        target_key, count=len(candidates)
+                    )
+
+            assert len(queried) >= ALPHA, "round 1 should admit ALPHA peers"
+            first_batches.append(frozenset(queried[:ALPHA]))
+
+        # Randomised selection: the same ALPHA peers must not be admitted every
+        # time, and across runs more than ALPHA distinct peers get queried first.
+        assert len(set(first_batches)) > 1, (
+            "round 1 batch was identical across 8 lookups - selection looks "
+            "deterministic"
+        )
+        assert len(set().union(*first_batches)) > ALPHA, (
+            "round 1 never reached beyond the same ALPHA closest candidates"
+        )
+
+    @pytest.mark.trio
+    async def test_beta_closest_queried_before_returning(self, peer_routing, mock_host):
+        """
+        Randomised admission must not let the lookup finish while the closest
+        known peers have never been contacted.
+
+        A round that only discovers peers farther than everything we know does
+        not improve the closest set. That alone must not end the lookup: with
+        random admission the BETA closest may still be unqueried, and returning
+        there would hand back peers we never talked to.
+        """
+        target_key = b"target_key"
+        candidates = [create_valid_peer_id(f"near_{i}") for i in range(ALPHA * 2)]
+        far_peer = create_valid_peer_id("far")
+
+        def fake_sort(_target_key, peers):
+            # Deterministic order: known candidates stay closest, far_peer last.
+            return [p for p in candidates if p in peers] + [
+                p for p in peers if p == far_peer
+            ]
+
+        for _ in range(12):
+            queried: list[ID] = []
+
+            async def mock_query(peer, _target_key, new_peers, _sink=queried):
+                _sink.append(peer)
+                await trio.sleep(0)
+                # Only ever discover a peer farther than everything known, so
+                # no round can improve the closest set.
+                new_peers.append(far_peer)
+
+            with patch.object(
+                peer_routing.routing_table,
+                "find_local_closest_peers",
+                return_value=list(candidates),
+            ):
+                mock_host.get_connected_peers.return_value = []
+                mock_host.get_peerstore().peer_ids.return_value = []
+                with patch(
+                    "libp2p.kad_dht.peer_routing.sort_peer_ids_by_distance",
+                    side_effect=fake_sort,
+                ):
+                    with patch.object(
+                        peer_routing,
+                        "_query_single_peer_for_closest",
+                        side_effect=mock_query,
+                    ):
+                        result = await peer_routing.find_closest_peers_network(
+                            target_key, count=len(candidates)
+                        )
+
+            unqueried = [p for p in result[:BETA] if p not in queried]
+            assert not unqueried, (
+                f"lookup returned with {len(unqueried)} of the BETA={BETA} "
+                "closest peers never queried"
+            )
