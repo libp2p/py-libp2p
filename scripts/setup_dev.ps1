@@ -110,7 +110,8 @@ function Get-VersionOrZero([string]$text) {
 
 function Get-SupportedPythonMinors {
     $pyproject = Join-Path $PSScriptRoot "..\pyproject.toml" | Resolve-Path
-    $text = Get-Content -Raw -Path $pyproject
+    # Force UTF-8: Windows PowerShell defaults can misread pyproject.toml.
+    $text = Get-Content -Raw -Path $pyproject -Encoding UTF8
     $minors = [System.Collections.Generic.List[string]]::new()
 
     foreach ($m in [regex]::Matches($text, 'Programming Language :: Python :: (3\.\d+)')) {
@@ -119,18 +120,36 @@ function Get-SupportedPythonMinors {
 
     $req = [regex]::Match($text, 'requires-python\s*=\s*"([^"]+)"')
     $minMinor = 10
+    # Exclusive upper bound on the 3.X minor (default: allow through 3.13).
     $maxExclusiveMinor = 14
     if ($req.Success) {
         $spec = $req.Groups[1].Value.Replace(" ", "")
         foreach ($part in $spec.Split(",")) {
             if ($part.StartsWith(">=")) {
                 $bits = $part.Substring(2).Split(".")
-                if ($bits.Length -ge 2) { $minMinor = [int]$bits[1] }
+                if ($bits.Length -ge 2 -and [int]$bits[0] -eq 3) {
+                    $minMinor = [int]$bits[1]
+                }
             }
-            elseif ($part.StartsWith("<") -and -not $part.StartsWith("<=")) {
+            elseif ($part.StartsWith("<=") ) {
+                $bits = $part.Substring(2).Split(".")
+                if ($bits.Length -ge 2 -and [int]$bits[0] -eq 3) {
+                    $maxExclusiveMinor = [int]$bits[1] + 1
+                }
+            }
+            elseif ($part.StartsWith("<")) {
+                # e.g. <4.0 means all 3.x are allowed — do NOT use bits[1] (0).
                 $bits = $part.Substring(1).Split(".")
-                if ($bits.Length -ge 2) { $maxExclusiveMinor = [int]$bits[1] }
-                elseif ($bits.Length -eq 1 -and $bits[0] -eq "4") { $maxExclusiveMinor = 14 }
+                $maj = [int]$bits[0]
+                if ($maj -gt 3) {
+                    $maxExclusiveMinor = 99
+                }
+                elseif ($maj -eq 3 -and $bits.Length -ge 2) {
+                    $maxExclusiveMinor = [int]$bits[1]
+                }
+                elseif ($maj -eq 3) {
+                    $maxExclusiveMinor = 0
+                }
             }
         }
     }
@@ -141,11 +160,17 @@ function Get-SupportedPythonMinors {
         }
     }
 
-    $filtered = $minors | Sort-Object -Unique | Where-Object {
-        $mm = [int]($_ -split "\.")[1]
-        ($mm -ge $minMinor) -and ($mm -lt $maxExclusiveMinor)
+    $filtered = @(
+        $minors | Sort-Object -Unique | Where-Object {
+            $mm = [int]($_ -split "\.")[1]
+            ($mm -ge $minMinor) -and ($mm -lt $maxExclusiveMinor)
+        }
+    )
+    if ($filtered.Count -eq 0) {
+        # Last-resort defaults matching current classifiers.
+        $filtered = @("3.10", "3.11", "3.12", "3.13")
     }
-    return @($filtered)
+    return $filtered
 }
 
 function Update-SessionPath {
