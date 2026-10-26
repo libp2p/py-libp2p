@@ -82,7 +82,7 @@ Python selection (default):
 Prerequisites (checked before install):
   - CMake on PATH (winget install --id Kitware.CMake -e)
   - uv >= 0.13.4 unless -Pip (auto-tries winget install astral-sh.uv;
-    no system Python required — uv downloads CPython)
+    no system Python required - uv downloads CPython)
   - Git recommended (winget install --id Git.Git -e)
   - With -Pip: a supported system Python on PATH and pip >= 26.2.2
     (eMudhra/emSign CA incident; Discussion #1570)
@@ -232,7 +232,7 @@ function Ensure-PythonVersion([string]$ver, [string]$viaLabel) {
     }
     if (-not $Pip -and (Get-Command uv -ErrorAction SilentlyContinue)) {
         Write-Host "Python $ver not on PATH; installing via uv..." -ForegroundColor Yellow
-        Write-Host "(No system Python required — uv will download CPython $ver.)" -ForegroundColor Yellow
+        Write-Host "(No system Python required - uv will download CPython $ver.)" -ForegroundColor Yellow
         & uv python install $ver
         if ($LASTEXITCODE -ne 0) { throw "uv python install $ver failed" }
         Update-SessionPath
@@ -322,7 +322,7 @@ function Test-SystemPrereqs {
         }
         if (-not $Pip -and -not (Get-Command uv -ErrorAction SilentlyContinue)) {
             Write-Host "Install uv with: winget install --id=astral-sh.uv"
-            Write-Host "Then re-run; uv will download Python — no system Python install needed."
+            Write-Host "Then re-run; uv will download Python - no system Python install needed."
             Write-Host "Or re-run with -Pip if you already have a supported system Python."
         }
         Write-Host "See docs/contributing.rst (Windows Development Setup)."
