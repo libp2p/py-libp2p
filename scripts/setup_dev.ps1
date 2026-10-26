@@ -178,14 +178,15 @@ function Resolve-Python([string[]]$supported, [string]$override) {
 }
 
 function Test-SystemPrereqs {
+    Write-Host "Checking system prerequisites..."
     $cmake = Get-Command cmake -ErrorAction SilentlyContinue
     if (-not $cmake) {
-        Write-Host "Missing prerequisite: cmake" -ForegroundColor Red
+        Write-Host "  cmake: MISSING" -ForegroundColor Red
         Write-Host "Install with: winget install --id Kitware.CMake -e"
         Write-Host "See docs/contributing.rst (Windows Development Setup)."
         exit 1
     }
-    Write-Host "System prerequisites OK (cmake)" -ForegroundColor Green
+    Write-Host "  cmake: OK ($($cmake.Source))" -ForegroundColor Green
 }
 
 function Ensure-Uv {

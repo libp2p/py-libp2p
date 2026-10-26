@@ -114,18 +114,31 @@ check_system_prereqs() {
         return 0
     fi
 
+    echo "Checking system prerequisites..."
     local missing=0
-    if ! command -v cmake >/dev/null 2>&1; then
-        echo -e "${RED}Missing prerequisite: cmake${NC}"
+    local cmake_bin pkg_bin
+
+    if cmake_bin="$(command -v cmake 2>/dev/null)"; then
+        echo -e "  cmake:      ${GREEN}OK${NC} (${cmake_bin})"
+    else
+        echo -e "  cmake:      ${RED}MISSING${NC}"
         missing=1
     fi
-    if ! command -v pkg-config >/dev/null 2>&1; then
-        echo -e "${RED}Missing prerequisite: pkg-config${NC}"
+    if pkg_bin="$(command -v pkg-config 2>/dev/null)"; then
+        echo -e "  pkg-config: ${GREEN}OK${NC} (${pkg_bin})"
+    else
+        echo -e "  pkg-config: ${RED}MISSING${NC}"
         missing=1
     fi
-    if ! pkg-config --exists gmp 2>/dev/null; then
-        echo -e "${RED}Missing prerequisite: GMP development files (pkg-config gmp)${NC}"
-        missing=1
+    if [[ "${missing}" -eq 0 ]] && pkg-config --exists gmp 2>/dev/null; then
+        echo -e "  GMP:        ${GREEN}OK${NC} (pkg-config gmp)"
+    else
+        # Only blame GMP when pkg-config itself is present; otherwise the
+        # missing pkg-config line above already explains the failure.
+        if command -v pkg-config >/dev/null 2>&1; then
+            echo -e "  GMP:        ${RED}MISSING${NC} (pkg-config gmp)"
+            missing=1
+        fi
     fi
 
     if [[ "${missing}" -ne 0 ]]; then
@@ -140,7 +153,6 @@ check_system_prereqs() {
         echo "See docs/contributing.rst (Prerequisites)."
         exit 1
     fi
-    echo -e "${GREEN}System prerequisites OK (cmake, pkg-config, GMP)${NC}"
 }
 
 # Print supported majors as lines: 3.10\n3.11\n...  Prefer classifiers ∩ requires-python.
