@@ -64,8 +64,10 @@ Python selection (default):
 
 Prerequisites:
   - CMake on PATH (winget install --id Kitware.CMake -e)
+  - uv >= 0.13.4 on PATH unless -Pip (winget install --id=astral-sh.uv)
   - Git recommended (winget install --id Git.Git -e)
-  - uv >= 0.13.4 or pip >= 26.2.2 (eMudhra/emSign CA incident; Discussion #1570)
+  - With -Pip: a supported system Python and pip >= 26.2.2
+    (eMudhra/emSign CA incident; Discussion #1570)
 
 If script execution is blocked:
   Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
@@ -174,19 +176,75 @@ function Resolve-Python([string[]]$supported, [string]$override) {
             return @{ Version = $s; Bin = $bin }
         }
     }
-    throw "No supported Python installed. Need one of: $($supported -join ', ')"
+    $newest = $supported[$supported.Count - 1]
+    if (-not $Pip) {
+        $uvCmd = Get-Command uv -ErrorAction SilentlyContinue
+        if ($uvCmd) {
+            Write-Host "No supported Python on PATH; installing $newest via uv..." -ForegroundColor Yellow
+            & uv python install $newest
+            if ($LASTEXITCODE -ne 0) {
+                throw "uv python install $newest failed"
+            }
+            $bin = Find-PythonBin $newest
+            if ($bin) {
+                Write-Host "Selected Python $newest ($bin) via uv python install" -ForegroundColor Green
+                return @{ Version = $newest; Bin = $bin }
+            }
+            throw "Installed Python $newest with uv but could not locate it. Try: uv python find $newest"
+        }
+    }
+    $hint = "No supported Python installed. Need one of: $($supported -join ', ')."
+    if ($Pip) {
+        $hint += " Install Python $newest from python.org or the Microsoft Store."
+    }
+    else {
+        $hint += " Install uv (winget install --id=astral-sh.uv) then re-run."
+    }
+    throw $hint
 }
 
 function Test-SystemPrereqs {
     Write-Host "Checking system prerequisites..."
+    $missing = $false
     $cmake = Get-Command cmake -ErrorAction SilentlyContinue
     if (-not $cmake) {
         Write-Host "  cmake: MISSING" -ForegroundColor Red
-        Write-Host "Install with: winget install --id Kitware.CMake -e"
+        $missing = $true
+    }
+    else {
+        Write-Host "  cmake: OK ($($cmake.Source))" -ForegroundColor Green
+    }
+
+    $uv = Get-Command uv -ErrorAction SilentlyContinue
+    if ($uv) {
+        $raw = (& uv --version) | Out-String
+        $ver = Get-VersionOrZero $raw
+        if ($ver -ge $MinUvVersion) {
+            Write-Host "  uv: OK ($($uv.Source), $ver)" -ForegroundColor Green
+        }
+        else {
+            Write-Host "  uv: TOO OLD ($ver < $MinUvVersion)" -ForegroundColor Red
+            if (-not $Pip) { $missing = $true }
+            else { Write-Host "       (-Pip: continuing without upgrading uv)" -ForegroundColor Yellow }
+        }
+    }
+    else {
+        Write-Host "  uv: MISSING" -ForegroundColor Red
+        if (-not $Pip) { $missing = $true }
+        else { Write-Host "       (-Pip: continuing without uv)" -ForegroundColor Yellow }
+    }
+
+    if ($missing) {
+        if (-not $cmake) {
+            Write-Host "Install cmake with: winget install --id Kitware.CMake -e"
+        }
+        if (-not $Pip -and -not (Get-Command uv -ErrorAction SilentlyContinue)) {
+            Write-Host "Install uv with: winget install --id=astral-sh.uv"
+            Write-Host "Or re-run with -Pip if you already have a supported system Python."
+        }
         Write-Host "See docs/contributing.rst (Windows Development Setup)."
         exit 1
     }
-    Write-Host "  cmake: OK ($($cmake.Source))" -ForegroundColor Green
 }
 
 function Ensure-Uv {
@@ -223,9 +281,12 @@ $resolved = Resolve-Python -supported $supported -override $Python
 $pyVer = $resolved.Version
 $pyBin = $resolved.Bin
 
-$useUv = -not $Pip -and (Ensure-Uv)
-
-if ($useUv) {
+if (-not $Pip) {
+    if (-not (Ensure-Uv)) {
+        Write-Host "uv is required (or pass -Pip)." -ForegroundColor Red
+        Write-Host "Install with: winget install --id=astral-sh.uv"
+        exit 1
+    }
     Write-Host "Using uv for installation (recommended)..." -ForegroundColor Green
     & uv sync --python $pyVer --group dev
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -236,10 +297,6 @@ if ($useUv) {
     }
 }
 else {
-    if (-not $Pip) {
-        Write-Host "uv not found; falling back to pip" -ForegroundColor Yellow
-        Write-Host "Install uv with: winget install --id=astral-sh.uv"
-    }
     $venvPython = Join-Path $repoRoot ".venv\Scripts\python.exe"
     if (-not (Test-Path $venvPython)) {
         Write-Host "Creating virtual environment with $pyBin..." -ForegroundColor Yellow

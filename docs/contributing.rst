@@ -65,10 +65,12 @@ Install the development dependencies using a virtual environment:
     # optional: ./scripts/setup_dev.sh --help
     # optional: ./scripts/setup_dev.sh --python 3.12
 
-The script checks for ``cmake``, ``pkg-config``, and GMP before installing, keeps
-``uv`` / ``pip`` at the floors required by the eMudhra/emSign CA advisory, and
-selects the newest **installed** Python that appears in ``pyproject.toml``
-classifiers and satisfies ``requires-python`` (currently ``3.10``–``3.13``).
+The script checks for ``cmake``, ``pkg-config``, GMP, and ``uv`` (``>= 0.13.4``,
+required unless ``--pip``) before installing, keeps ``pip`` at the
+eMudhra/emSign CA floor on the ``--pip`` path, and selects the newest
+**installed** Python that appears in ``pyproject.toml`` classifiers and
+satisfies ``requires-python`` (currently ``3.10``–``3.13``). If none is on
+``PATH``, it runs ``uv python install`` for the newest supported version.
 
 .. note::
 
@@ -276,9 +278,11 @@ Setup Steps
         # optional: .\scripts\setup_dev.ps1 -Help
         # optional: .\scripts\setup_dev.ps1 -Python 3.12
 
-   ``setup_dev.ps1`` checks for ``cmake``, selects the newest supported Python from
-   ``pyproject.toml`` classifiers (``3.10``–``3.13``), prefers ``uv`` (``>= 0.13.4``)
-   or floors ``pip`` (``>= 26.2.2``), and installs the ``dev`` dependency group.
+   ``setup_dev.ps1`` checks for ``cmake`` and ``uv`` (``>= 0.13.4``, required
+   unless ``-Pip``), selects the newest supported Python from
+   ``pyproject.toml`` classifiers (``3.10``–``3.13``; installs via
+   ``uv python install`` when missing), or floors ``pip`` (``>= 26.2.2``) on the
+   ``-Pip`` path, and installs the ``dev`` dependency group.
    GMP is not required on Windows (``fastecdsa`` is skipped on ``win32``).
 
    Activate afterwards:

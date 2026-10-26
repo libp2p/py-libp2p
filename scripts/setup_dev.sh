@@ -40,19 +40,24 @@ Options:
                           Must be in the supported set from pyproject.toml.
   --pip                   Force the pip install path even if uv is available
   --skip-pre-commit       Do not run pre-commit install
-  --skip-system-checks    Skip cmake/pkg-config/GMP checks (not recommended)
+  --skip-system-checks    Skip cmake/pkg-config/GMP/uv checks (not recommended)
 
 Python selection (default):
   Parse requires-python and Programming Language :: Python :: 3.X classifiers
   from pyproject.toml. Use the intersection as the supported set (today:
-  3.10–3.13). Pick the newest installed interpreter in that set.
+  3.10–3.13). Pick the newest installed interpreter in that set. If none is
+  found and uv is available, install the newest supported version via
+  ``uv python install``.
 
 System prerequisites (checked before install):
   Linux:  sudo apt-get install cmake pkg-config libgmp-dev
   macOS:  brew install cmake pkgconfig gmp
+  uv >= 0.13.4 (required unless --pip):
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          then: export PATH="$HOME/.local/bin:$PATH"
 
-Also requires patched tooling after the eMudhra/emSign CA incident:
-  uv >= 0.13.4, pip >= 26.2.2 (see Discussion #1570).
+Also requires patched pip >= 26.2.2 on the --pip path (eMudhra/emSign CA;
+Discussion #1570).
 
 Windows: use scripts/setup_dev.ps1 instead.
 EOF
@@ -108,6 +113,16 @@ parse_args() {
     done
 }
 
+print_uv_install_hint() {
+    echo -e "${YELLOW}Install uv (>= ${MIN_UV_VERSION}):${NC}"
+    echo "  curl -LsSf https://astral.sh/uv/install.sh | sh"
+    echo "  export PATH=\"\$HOME/.local/bin:\$PATH\"   # if uv is not on PATH yet"
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        echo "  # or: brew install uv"
+    fi
+    echo "Or re-run with --pip if you already have a supported system Python."
+}
+
 check_system_prereqs() {
     if [[ "${SKIP_SYSTEM_CHECKS}" -eq 1 ]]; then
         echo -e "${YELLOW}Skipping system prerequisite checks${NC}"
@@ -116,7 +131,8 @@ check_system_prereqs() {
 
     echo "Checking system prerequisites..."
     local missing=0
-    local cmake_bin pkg_bin
+    local cmake_bin pkg_bin uv_bin
+    local uv_missing_or_old=0
 
     if cmake_bin="$(command -v cmake 2>/dev/null)"; then
         echo -e "  cmake:      ${GREEN}OK${NC} (${cmake_bin})"
@@ -130,14 +146,35 @@ check_system_prereqs() {
         echo -e "  pkg-config: ${RED}MISSING${NC}"
         missing=1
     fi
-    if [[ "${missing}" -eq 0 ]] && pkg-config --exists gmp 2>/dev/null; then
+    if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists gmp 2>/dev/null; then
         echo -e "  GMP:        ${GREEN}OK${NC} (pkg-config gmp)"
-    else
+    elif command -v pkg-config >/dev/null 2>&1; then
         # Only blame GMP when pkg-config itself is present; otherwise the
         # missing pkg-config line above already explains the failure.
-        if command -v pkg-config >/dev/null 2>&1; then
-            echo -e "  GMP:        ${RED}MISSING${NC} (pkg-config gmp)"
+        echo -e "  GMP:        ${RED}MISSING${NC} (pkg-config gmp)"
+        missing=1
+    fi
+
+    # uv is required on the default path (used both to sync deps and to
+    # install a supported Python when none is on PATH). --pip skips this.
+    if uv_bin="$(command -v uv 2>/dev/null)"; then
+        local uv_version
+        uv_version="$(uv --version | awk '{print $2}')"
+        if version_ge "${uv_version}" "${MIN_UV_VERSION}"; then
+            echo -e "  uv:         ${GREEN}OK${NC} (${uv_bin}, ${uv_version})"
+        else
+            echo -e "  uv:         ${RED}TOO OLD${NC} (${uv_version} < ${MIN_UV_VERSION})"
+            uv_missing_or_old=1
+        fi
+    else
+        echo -e "  uv:         ${RED}MISSING${NC}"
+        uv_missing_or_old=1
+    fi
+    if [[ "${uv_missing_or_old}" -ne 0 ]]; then
+        if [[ "${FORCE_PIP}" -eq 0 ]]; then
             missing=1
+        else
+            echo -e "             ${YELLOW}(--pip: continuing without uv)${NC}"
         fi
     fi
 
@@ -149,6 +186,10 @@ check_system_prereqs() {
         else
             echo -e "${YELLOW}Install on Debian/Ubuntu:${NC}"
             echo "  sudo apt-get install cmake pkg-config libgmp-dev"
+        fi
+        if [[ "${uv_missing_or_old}" -ne 0 && "${FORCE_PIP}" -eq 0 ]]; then
+            echo
+            print_uv_install_hint
         fi
         echo "See docs/contributing.rst (Prerequisites)."
         exit 1
@@ -332,8 +373,35 @@ resolve_python() {
         fi
     done
 
+    local newest="${supported[${#supported[@]} - 1]}"
+    if [[ "${FORCE_PIP}" -eq 0 ]] && command -v uv >/dev/null 2>&1; then
+        echo -e "${YELLOW}No supported Python on PATH; installing ${newest} via uv...${NC}"
+        uv python install "${newest}" || {
+            echo -e "${RED}uv python install ${newest} failed${NC}" >&2
+            exit 1
+        }
+        if PY_BIN="$(find_python_bin "${newest}")"; then
+            PY_VER="${newest}"
+            echo -e "${GREEN}Selected Python ${PY_VER} (${PY_BIN}) via uv python install${NC}"
+            return 0
+        fi
+        echo -e "${RED}Installed Python ${newest} with uv but could not locate it on PATH${NC}" >&2
+        echo "Try: uv python find ${newest}" >&2
+        exit 1
+    fi
+
     echo -e "${RED}No supported Python installed. Need one of: ${supported[*]}${NC}" >&2
-    echo "Install e.g. python3.13 or: uv python install 3.13" >&2
+    if [[ "${FORCE_PIP}" -eq 0 ]]; then
+        echo "Install uv first, then re-run (it can fetch Python for you):" >&2
+        print_uv_install_hint >&2
+    else
+        echo "Install a system interpreter, e.g.:" >&2
+        if [[ "$(uname -s)" == "Darwin" ]]; then
+            echo "  brew install python@${newest}" >&2
+        else
+            echo "  sudo apt-get install python${newest} python${newest}-venv" >&2
+        fi
+    fi
     exit 1
 }
 
@@ -404,12 +472,15 @@ main() {
     check_system_prereqs
     resolve_python
 
-    if [[ "${FORCE_PIP}" -eq 0 ]] && ensure_uv; then
+    if [[ "${FORCE_PIP}" -eq 0 ]]; then
+        # uv was already validated in check_system_prereqs (unless skipped).
+        if ! ensure_uv; then
+            echo -e "${RED}uv is required (or pass --pip).${NC}" >&2
+            print_uv_install_hint >&2
+            exit 1
+        fi
         run_uv_setup
     else
-        if [[ "${FORCE_PIP}" -eq 0 ]]; then
-            echo -e "${YELLOW}uv not found; falling back to pip${NC}"
-        fi
         run_pip_setup
     fi
 
