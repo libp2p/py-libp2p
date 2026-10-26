@@ -87,9 +87,12 @@ Prerequisites (checked before install):
     (eMudhra/emSign CA incident; Discussion #1570)
   - GMP is not required on Windows (fastecdsa is skipped on win32)
 
-If script execution is blocked:
-  Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-  or: pwsh -File scripts\setup_dev.ps1
+If script execution is blocked (common on Windows 11 Restricted policy):
+  One-shot (no policy change):
+    .\scripts\setup_dev.cmd
+    # or: pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup_dev.ps1
+  Permanent for your user (then .\scripts\setup_dev.ps1 and dot-source work):
+    Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
 Linux/macOS: use scripts/setup_dev.sh instead.
 "@

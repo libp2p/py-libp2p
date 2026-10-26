@@ -275,11 +275,14 @@ Setup Steps
 
    .. code:: powershell
 
-        # If scripts are blocked: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+        # If scripts are blocked (Windows 11 Restricted policy), either:
+        #   Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+        # or one-shot without changing policy:
+        #   .\scripts\setup_dev.cmd
         # Recommended: dot-source so .venv is activated in this session
         . .\scripts\setup_dev.ps1
         # optional: . .\scripts\setup_dev.ps1 -Python 3.12
-        # or run without activating: pwsh -File .\scripts\setup_dev.ps1
+        # or: pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup_dev.ps1
 
    ``setup_dev.ps1`` checks for ``cmake`` and ``uv`` (``>= 0.13.4``, required
    unless ``-Pip``), selects the newest supported Python from
