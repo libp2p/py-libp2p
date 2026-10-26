@@ -442,11 +442,27 @@ Write-Host "Setup complete! Run 'make pr' (Git Bash) or pytest via the venv." -F
 # Dot-sourcing can activate in this session; running as a program cannot.
 $dotSourced = $MyInvocation.InvocationName -eq '.'
 $activatePs1 = Join-Path $repoRoot ".venv\Scripts\Activate.ps1"
+$activateBat = Join-Path $repoRoot ".venv\Scripts\activate.bat"
 if ($dotSourced -and (Test-Path $activatePs1)) {
-    . $activatePs1
-    Write-Host "Activated .venv in the current session ($((Get-Command python).Source))" -ForegroundColor Green
+    # Restricted policy still blocks Activate.ps1 even when we were launched via .cmd Bypass.
+    try {
+        . $activatePs1
+        Write-Host "Activated .venv in the current session ($((Get-Command python).Source))" -ForegroundColor Green
+    } catch {
+        Write-Host "Could not activate (execution policy). For this session run:" -ForegroundColor Yellow
+        Write-Host "  Set-ExecutionPolicy -Scope Process Bypass" -ForegroundColor Yellow
+        Write-Host "  . .\.venv\Scripts\Activate.ps1" -ForegroundColor Yellow
+        Write-Host "Or use cmd: .\.venv\Scripts\activate.bat" -ForegroundColor Yellow
+        Write-Host "Permanent: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned" -ForegroundColor Yellow
+    }
 }
 else {
-    Write-Host "Activate with: .\.venv\Scripts\Activate.ps1" -ForegroundColor Yellow
-    Write-Host "Or next time auto-activate via: . .\scripts\setup_dev.ps1" -ForegroundColor Yellow
+    Write-Host "Activate (pick one):" -ForegroundColor Yellow
+    Write-Host "  Set-ExecutionPolicy -Scope Process Bypass; . .\.venv\Scripts\Activate.ps1" -ForegroundColor Yellow
+    Write-Host "  .\.venv\Scripts\activate.bat          # works under Restricted policy" -ForegroundColor Yellow
+    Write-Host "Permanent unlock: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned" -ForegroundColor Yellow
+    Write-Host "Then next time: . .\scripts\setup_dev.ps1  (auto-activates)" -ForegroundColor Yellow
+    if (Test-Path $activateBat) {
+        # no-op: path documented above
+    }
 }

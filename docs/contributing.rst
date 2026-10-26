@@ -291,11 +291,16 @@ Setup Steps
    ``-Pip`` path, and installs the ``dev`` dependency group.
    GMP is not required on Windows (``fastecdsa`` is skipped on ``win32``).
 
-   If you ran the script without dot-sourcing, activate afterwards:
+   If you ran the script without dot-sourcing, activate afterwards. Under the
+   default Windows 11 Restricted policy, either unlock scripts for this session
+   or use ``activate.bat``:
 
    .. code:: powershell
 
-        .\.venv\Scripts\Activate.ps1
+        Set-ExecutionPolicy -Scope Process Bypass
+        . .\.venv\Scripts\Activate.ps1
+        # or (cmd / Restricted-safe): .\.venv\Scripts\activate.bat
+        # permanent: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
 3. **Manual alternative (uv or pip)**
 
