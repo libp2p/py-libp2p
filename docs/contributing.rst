@@ -52,11 +52,17 @@ Install the development dependencies using a virtual environment:
 
     cd py-libp2p
     ./scripts/setup_dev.sh
+    # optional: ./scripts/setup_dev.sh --help
+    # optional: ./scripts/setup_dev.sh --python 3.12
+
+The script checks for ``cmake``, ``pkg-config``, and GMP before installing, keeps
+``uv`` / ``pip`` at the floors required by the eMudhra/emSign CA advisory, and
+selects the newest **installed** Python that appears in ``pyproject.toml``
+classifiers and satisfies ``requires-python`` (currently ``3.10``–``3.13``).
 
 .. note::
 
-    On Linux, if you are not already in a virtual environment, the script will create one
-    automatically and instruct you to activate it.
+    Activate the environment afterwards with ``. .venv/bin/activate``.
 
 **Option 2: Using uv (recommended, same as CI):**
 
@@ -70,7 +76,7 @@ Or using pip:
 
 .. code:: sh
 
-    pip install uv
+    pip install "uv>=0.13.4"
 
 Then set up the development environment:
 
@@ -134,6 +140,11 @@ Install the development dependencies using a virtual environment:
 
     cd py-libp2p
     ./scripts/setup_dev.sh
+    # optional: ./scripts/setup_dev.sh --help
+    # optional: ./scripts/setup_dev.sh --python 3.12
+
+Same behaviour as on Linux: prerequisite checks, supported-Python selection, and
+patched ``uv`` / ``pip`` floors. Activate with ``. .venv/bin/activate``.
 
 **Option 2: Using uv (recommended, same as CI):**
 
@@ -153,7 +164,7 @@ Or using pip:
 
 .. code:: sh
 
-    pip install uv
+    pip install "uv>=0.13.4"
 
 Then set up the development environment:
 
@@ -242,32 +253,36 @@ Setup Steps
         git clone git@github.com:your-github-username/py-libp2p.git
         cd py-libp2p
 
-2. **Create a Virtual Environment**
-   - In PowerShell:
+2. **Install dependencies with the setup script (recommended)**
+
+   From PowerShell in the repo root:
 
    .. code:: powershell
 
-        python -m venv venv
-        .\venv\Scripts\activate
+        # If scripts are blocked: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+        pwsh -File .\scripts\setup_dev.ps1
+        # optional: .\scripts\setup_dev.ps1 -Help
+        # optional: .\scripts\setup_dev.ps1 -Python 3.12
 
-3. **Install Dependencies**
+   ``setup_dev.ps1`` checks for ``cmake``, selects the newest supported Python from
+   ``pyproject.toml`` classifiers (``3.10``–``3.13``), prefers ``uv`` (``>= 0.13.4``)
+   or floors ``pip`` (``>= 26.2.2``), and installs the ``dev`` dependency group.
+   GMP is not required on Windows (``fastecdsa`` is skipped on ``win32``).
 
-   **Option A: Using uv (recommended, same as CI):**
-
-   First, install ``uv`` if you haven't already:
+   Activate afterwards:
 
    .. code:: powershell
 
-        # Using pip
-        pip install uv
+        .\.venv\Scripts\Activate.ps1
 
-        # Or using winget
+3. **Manual alternative (uv or pip)**
+
+   **Option A: Using uv:**
+
+   .. code:: powershell
+
         winget install --id=astral-sh.uv
-
-   Then set up the development environment:
-
-   .. code:: powershell
-
+        # or: pip install "uv>=0.13.4"
         uv sync --group dev
         uv run pre-commit install
 
@@ -275,12 +290,11 @@ Setup Steps
 
    .. code:: powershell
 
-        pip install --upgrade pip  # Ensure pip >= 25.1 for PEP 735 support
+        python -m venv .venv
+        .\.venv\Scripts\Activate.ps1
+        python -m pip install --upgrade "pip>=26.2.2"
         pip install --group dev -e .
         pre-commit install
-
-   **Note:** This project uses PEP 735 ``[dependency-groups]`` which requires pip >= 25.1.
-   If you have an older pip version, upgrade it first.
 
 4. **Verify Setup**
    - Run the tests to ensure everything works:
@@ -298,7 +312,8 @@ Setup Steps
 Notes
 """""
 
-- Use PowerShell, Command Prompt, or Git Bash as your shell.
+- Prefer native PowerShell with ``scripts/setup_dev.ps1``. WSL users can run
+  ``scripts/setup_dev.sh`` inside Linux instead.
 - Ensure all tools (Python, Git, CMake) are in your system PATH.
 
 Requirements
