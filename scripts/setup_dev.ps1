@@ -27,6 +27,10 @@
 
 .EXAMPLE
   .\scripts\setup_dev.ps1 -Python 3.12
+
+.EXAMPLE
+  # Dot-source to also activate .venv in the current session:
+  . .\scripts\setup_dev.ps1
 #>
 [CmdletBinding()]
 param(
@@ -47,7 +51,9 @@ $MinPipVersion = [version]"26.2.2"
 
 function Show-Help {
     @"
-Usage: .\scripts\setup_dev.ps1 [-Help] [-Python VERSION] [-Pip] [-SkipPreCommit]
+Usage:
+  .\scripts\setup_dev.ps1 [-Help] [-Python VERSION] [-Pip] [-SkipPreCommit]
+  . .\scripts\setup_dev.ps1 [...]   # also activates .venv in this session
 
 Set up a py-libp2p development environment on Windows.
 
@@ -56,6 +62,12 @@ Options:
   -Python VERSION     Force Python version (e.g. 3.12); must be supported
   -Pip                Force pip even if uv is available
   -SkipPreCommit      Do not run pre-commit install
+
+Activation:
+  Running the script as a program cannot change your current session. Dot-source
+  it to create the env and activate it in one step:
+    . .\scripts\setup_dev.ps1
+  Otherwise activate afterwards with: .\.venv\Scripts\Activate.ps1
 
 Python selection (default):
   Parse requires-python and Programming Language :: Python :: 3.X classifiers
@@ -324,4 +336,15 @@ else {
 }
 
 Write-Host "Setup complete! Run 'make pr' (Git Bash) or pytest via the venv." -ForegroundColor Green
-Write-Host "Activate with: .\.venv\Scripts\Activate.ps1" -ForegroundColor Yellow
+
+# Dot-sourcing can activate in this session; running as a program cannot.
+$dotSourced = $MyInvocation.InvocationName -eq '.'
+$activatePs1 = Join-Path $repoRoot ".venv\Scripts\Activate.ps1"
+if ($dotSourced -and (Test-Path $activatePs1)) {
+    . $activatePs1
+    Write-Host "Activated .venv in the current session ($((Get-Command python).Source))" -ForegroundColor Green
+}
+else {
+    Write-Host "Activate with: .\.venv\Scripts\Activate.ps1" -ForegroundColor Yellow
+    Write-Host "Or next time auto-activate via: . .\scripts\setup_dev.ps1" -ForegroundColor Yellow
+}

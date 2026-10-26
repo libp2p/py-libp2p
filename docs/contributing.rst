@@ -61,9 +61,10 @@ Install the development dependencies using a virtual environment:
 .. code:: sh
 
     cd py-libp2p
-    ./scripts/setup_dev.sh
-    # optional: ./scripts/setup_dev.sh --help
-    # optional: ./scripts/setup_dev.sh --python 3.12
+    # Recommended: source so .venv is activated in this shell afterwards
+    source ./scripts/setup_dev.sh
+    # optional: source ./scripts/setup_dev.sh --python 3.12
+    # or run without activating: ./scripts/setup_dev.sh
 
 The script checks for ``cmake``, ``pkg-config``, GMP, and ``uv`` (``>= 0.13.4``,
 required unless ``--pip``) before installing, keeps ``pip`` at the
@@ -74,7 +75,9 @@ satisfies ``requires-python`` (currently ``3.10``–``3.13``). If none is on
 
 .. note::
 
-    Activate the environment afterwards with ``. .venv/bin/activate``.
+    A subprocess cannot change your current shell. Prefer
+    ``source ./scripts/setup_dev.sh`` so ``.venv`` is activated automatically.
+    If you ran ``./scripts/setup_dev.sh``, activate with ``. .venv/bin/activate``.
 
 **Option 2: Using uv (recommended, same as CI):**
 
@@ -152,12 +155,11 @@ Install the development dependencies using a virtual environment:
 .. code:: sh
 
     cd py-libp2p
-    ./scripts/setup_dev.sh
-    # optional: ./scripts/setup_dev.sh --help
-    # optional: ./scripts/setup_dev.sh --python 3.12
+    source ./scripts/setup_dev.sh
+    # optional: source ./scripts/setup_dev.sh --python 3.12
 
-Same behaviour as on Linux: prerequisite checks, supported-Python selection, and
-patched ``uv`` / ``pip`` floors. Activate with ``. .venv/bin/activate``.
+Same behaviour as on Linux: prerequisite checks, supported-Python selection,
+patched ``uv`` / ``pip`` floors, and auto-activation when the script is sourced.
 
 **Option 2: Using uv (recommended, same as CI):**
 
@@ -274,9 +276,10 @@ Setup Steps
    .. code:: powershell
 
         # If scripts are blocked: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-        pwsh -File .\scripts\setup_dev.ps1
-        # optional: .\scripts\setup_dev.ps1 -Help
-        # optional: .\scripts\setup_dev.ps1 -Python 3.12
+        # Recommended: dot-source so .venv is activated in this session
+        . .\scripts\setup_dev.ps1
+        # optional: . .\scripts\setup_dev.ps1 -Python 3.12
+        # or run without activating: pwsh -File .\scripts\setup_dev.ps1
 
    ``setup_dev.ps1`` checks for ``cmake`` and ``uv`` (``>= 0.13.4``, required
    unless ``-Pip``), selects the newest supported Python from
@@ -285,7 +288,7 @@ Setup Steps
    ``-Pip`` path, and installs the ``dev`` dependency group.
    GMP is not required on Windows (``fastecdsa`` is skipped on ``win32``).
 
-   Activate afterwards:
+   If you ran the script without dot-sourcing, activate afterwards:
 
    .. code:: powershell
 

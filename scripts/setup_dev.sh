@@ -2,13 +2,10 @@
 # Setup script for py-libp2p development environment (Linux / macOS).
 # Installs dependency-groups via uv (preferred) or pip, after checking system
 # prerequisites and selecting a supported Python from pyproject.toml.
-
-set -euo pipefail
-
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
+#
+# A subprocess cannot activate a venv in the caller's shell. For auto-activate:
+#   source ./scripts/setup_dev.sh
+#   # or: . ./scripts/setup_dev.sh
 
 # Avoid depending on external `dirname` so PATH-restricted prereq checks still work.
 _SETUP_SRC="${BASH_SOURCE[0]}"
@@ -17,6 +14,24 @@ if [[ "${SCRIPT_DIR}" == "${_SETUP_SRC}" ]]; then
     SCRIPT_DIR="."
 fi
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# If sourced, re-run as a normal process (so `exit` cannot kill the login shell),
+# then activate .venv in *this* shell.
+if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    SETUP_DEV_SOURCED=1 bash "${_SETUP_SRC}" "$@" || return $?
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/.venv/bin/activate"
+    echo "Activated .venv in the current shell ($(command -v python))"
+    return 0
+fi
+
+set -euo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
 cd "${REPO_ROOT}"
 
 # Security: eMudhra/emSign CA incident (October 2026). See Discussion #1570.
@@ -30,7 +45,9 @@ PYTHON_OVERRIDE=""
 
 usage() {
     cat <<'EOF'
-Usage: ./scripts/setup_dev.sh [options]
+Usage:
+  ./scripts/setup_dev.sh [options]
+  source ./scripts/setup_dev.sh [options]   # also activates .venv in this shell
 
 Set up a py-libp2p development environment (Linux / macOS).
 
@@ -41,6 +58,12 @@ Options:
   --pip                   Force the pip install path even if uv is available
   --skip-pre-commit       Do not run pre-commit install
   --skip-system-checks    Skip cmake/pkg-config/GMP/uv checks (not recommended)
+
+Activation:
+  Running the script as a program cannot change your current shell. To create
+  the env and activate it in one step, source the script instead:
+    source ./scripts/setup_dev.sh
+  Otherwise activate afterwards with: . .venv/bin/activate
 
 Python selection (default):
   Parse requires-python and Programming Language :: Python :: 3.X classifiers
@@ -485,7 +508,10 @@ main() {
     fi
 
     echo -e "${GREEN}Setup complete! Run 'make pr' to check changes, or 'make docs' to build docs.${NC}"
-    echo -e "Activate with: ${YELLOW}. .venv/bin/activate${NC}"
+    if [[ "${SETUP_DEV_SOURCED:-0}" != "1" ]]; then
+        echo -e "Activate with: ${YELLOW}. .venv/bin/activate${NC}"
+        echo -e "Or next time auto-activate via: ${YELLOW}source ./scripts/setup_dev.sh${NC}"
+    fi
 }
 
 main "$@"
