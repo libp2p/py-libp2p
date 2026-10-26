@@ -138,7 +138,7 @@ function Get-SupportedPythonMinors {
                 }
             }
             elseif ($part.StartsWith("<")) {
-                # e.g. <4.0 means all 3.x are allowed — do NOT use bits[1] (0).
+                # e.g. <4.0 means all 3.x are allowed - do NOT use bits[1] (0).
                 $bits = $part.Substring(1).Split(".")
                 $maj = [int]$bits[0]
                 if ($maj -gt 3) {
