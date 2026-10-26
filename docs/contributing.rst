@@ -29,7 +29,9 @@ Python's built-in ``venv`` module. Instructions vary by platform:
     ``uv < 0.13.4`` trust the compromised eMudhra / emSign CA certificates, so
     upgrade them before installing dependencies, and rebuild container images
     with layer caching disabled. See the warning in :doc:`install` for the full
-    list of required versions and the upstream advisory.
+    list of required versions and the upstream advisory, and
+    `Discussion #1570 <https://github.com/libp2p/py-libp2p/discussions/1570>`_
+    for project-specific local-dev notes.
 
 Linux Setup
 ^^^^^^^^^^^

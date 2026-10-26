@@ -31,6 +31,8 @@ Follow the steps below to install `py-libp2p` on your platform.
     `Information for Python users regarding the eMudhra / emSign CA certificate
     security incident
     <https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576>`__
+    and the project notes in
+    `Discussion #1570 <https://github.com/libp2p/py-libp2p/discussions/1570>`_
     for the full advisory.
 
 Using uv (recommended)
@@ -49,7 +51,7 @@ It is used in py-libp2p's CI/CD pipeline and is the recommended way to install.
 
    .. code:: sh
 
-       pip install uv
+       pip install "uv>=0.13.4"
 
 2. Create a virtual environment and install `py-libp2p`:
 
