@@ -168,16 +168,44 @@ function Find-PythonBin([string]$majorMinor) {
     return $null
 }
 
+function Ensure-PythonVersion([string]$ver, [string]$viaLabel) {
+    $bin = Find-PythonBin $ver
+    if ($bin) {
+        $msg = "Selected Python $ver ($bin)"
+        if ($viaLabel) { $msg += " via $viaLabel" }
+        Write-Host $msg -ForegroundColor Green
+        return @{ Version = $ver; Bin = $bin }
+    }
+    if (-not $Pip -and (Get-Command uv -ErrorAction SilentlyContinue)) {
+        Write-Host "Python $ver not on PATH; installing via uv..." -ForegroundColor Yellow
+        & uv python install $ver
+        if ($LASTEXITCODE -ne 0) { throw "uv python install $ver failed" }
+        $bin = Find-PythonBin $ver
+        if ($bin) {
+            $msg = "Selected Python $ver ($bin) via uv python install"
+            if ($viaLabel) { $msg += " ($viaLabel)" }
+            Write-Host $msg -ForegroundColor Green
+            return @{ Version = $ver; Bin = $bin }
+        }
+        throw "Installed Python $ver with uv but could not locate it. Try: uv python find $ver"
+    }
+    $hint = "Python $ver not found on PATH / uv."
+    if (-not $Pip) {
+        $hint += " Install uv (winget install --id=astral-sh.uv) then re-run."
+    }
+    else {
+        $hint += " Install Python $ver from python.org or the Microsoft Store."
+    }
+    throw $hint
+}
+
 function Resolve-Python([string[]]$supported, [string]$override) {
     if ($override) {
         $mm = ($override -split "\.")[0..1] -join "."
         if ($supported -notcontains $mm) {
             throw "Python $override is outside supported set: $($supported -join ', ')"
         }
-        $bin = Find-PythonBin $mm
-        if (-not $bin) { throw "Python $override not found on PATH / py / uv" }
-        Write-Host "Selected Python $mm ($bin) via -Python" -ForegroundColor Green
-        return @{ Version = $mm; Bin = $bin }
+        return Ensure-PythonVersion $mm "-Python"
     }
 
     for ($i = $supported.Count - 1; $i -ge 0; $i--) {
@@ -189,30 +217,7 @@ function Resolve-Python([string[]]$supported, [string]$override) {
         }
     }
     $newest = $supported[$supported.Count - 1]
-    if (-not $Pip) {
-        $uvCmd = Get-Command uv -ErrorAction SilentlyContinue
-        if ($uvCmd) {
-            Write-Host "No supported Python on PATH; installing $newest via uv..." -ForegroundColor Yellow
-            & uv python install $newest
-            if ($LASTEXITCODE -ne 0) {
-                throw "uv python install $newest failed"
-            }
-            $bin = Find-PythonBin $newest
-            if ($bin) {
-                Write-Host "Selected Python $newest ($bin) via uv python install" -ForegroundColor Green
-                return @{ Version = $newest; Bin = $bin }
-            }
-            throw "Installed Python $newest with uv but could not locate it. Try: uv python find $newest"
-        }
-    }
-    $hint = "No supported Python installed. Need one of: $($supported -join ', ')."
-    if ($Pip) {
-        $hint += " Install Python $newest from python.org or the Microsoft Store."
-    }
-    else {
-        $hint += " Install uv (winget install --id=astral-sh.uv) then re-run."
-    }
-    throw $hint
+    return Ensure-PythonVersion $newest ""
 }
 
 function Test-SystemPrereqs {

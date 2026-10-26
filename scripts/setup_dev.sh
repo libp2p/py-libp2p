@@ -68,9 +68,9 @@ Activation:
 Python selection (default):
   Parse requires-python and Programming Language :: Python :: 3.X classifiers
   from pyproject.toml. Use the intersection as the supported set (today:
-  3.10–3.13). Pick the newest installed interpreter in that set. If none is
-  found and uv is available, install the newest supported version via
-  ``uv python install``.
+  3.10–3.13). Pick the newest installed interpreter in that set. If a needed
+  version is missing and uv is available (including with --python / UV_PYTHON),
+  install it via ``uv python install``.
 
 System prerequisites (checked before install):
   Linux:  sudo apt-get install cmake pkg-config libgmp-dev
@@ -339,6 +339,47 @@ find_python_bin() {
     return 1
 }
 
+# Find a Python major.minor on PATH/uv, or install it with uv when allowed.
+# Sets PY_BIN and PY_VER on success; exits on failure.
+ensure_python_version() {
+    local ver="$1"          # e.g. 3.12
+    local via_label="$2"    # human label for success message (e.g. --python)
+
+    if PY_BIN="$(find_python_bin "${ver}")"; then
+        PY_VER="$(echo "${ver}" | cut -d. -f1,2)"
+        echo -e "${GREEN}Selected Python ${PY_VER} (${PY_BIN})${via_label:+ via ${via_label}}${NC}"
+        return 0
+    fi
+
+    if [[ "${FORCE_PIP}" -eq 0 ]] && command -v uv >/dev/null 2>&1; then
+        echo -e "${YELLOW}Python ${ver} not on PATH; installing via uv...${NC}"
+        uv python install "${ver}" || {
+            echo -e "${RED}uv python install ${ver} failed${NC}" >&2
+            exit 1
+        }
+        if PY_BIN="$(find_python_bin "${ver}")"; then
+            PY_VER="$(echo "${ver}" | cut -d. -f1,2)"
+            echo -e "${GREEN}Selected Python ${PY_VER} (${PY_BIN}) via uv python install${via_label:+ (${via_label})}${NC}"
+            return 0
+        fi
+        echo -e "${RED}Installed Python ${ver} with uv but could not locate it${NC}" >&2
+        echo "Try: uv python find ${ver}" >&2
+        exit 1
+    fi
+
+    echo -e "${RED}Python ${ver} not found on PATH / uv${NC}" >&2
+    if [[ "${FORCE_PIP}" -eq 0 ]]; then
+        print_uv_install_hint >&2
+    else
+        if [[ "$(uname -s)" == "Darwin" ]]; then
+            echo "  brew install python@${ver}" >&2
+        else
+            echo "  sudo apt-get install python${ver} python${ver}-venv" >&2
+        fi
+    fi
+    exit 1
+}
+
 resolve_python() {
     local supported candidates=()
     mapfile -t supported < <(supported_python_minors)
@@ -357,12 +398,7 @@ resolve_python() {
             echo -e "${RED}--python ${PYTHON_OVERRIDE} is outside supported set: ${supported[*]}${NC}" >&2
             exit 1
         fi
-        if ! PY_BIN="$(find_python_bin "${PYTHON_OVERRIDE}")"; then
-            echo -e "${RED}Python ${PYTHON_OVERRIDE} not found on PATH / uv${NC}" >&2
-            exit 1
-        fi
-        PY_VER="${ov_mm}"
-        echo -e "${GREEN}Selected Python ${PY_VER} (${PY_BIN}) via --python${NC}"
+        ensure_python_version "${ov_mm}" "--python"
         return 0
     fi
 
@@ -376,12 +412,7 @@ resolve_python() {
             echo -e "${RED}UV_PYTHON=${UV_PYTHON} is outside supported set: ${supported[*]}${NC}" >&2
             exit 1
         fi
-        if ! PY_BIN="$(find_python_bin "${UV_PYTHON}")"; then
-            echo -e "${RED}UV_PYTHON=${UV_PYTHON} not found${NC}" >&2
-            exit 1
-        fi
-        PY_VER="${ov_mm}"
-        echo -e "${GREEN}Selected Python ${PY_VER} (${PY_BIN}) via UV_PYTHON${NC}"
+        ensure_python_version "${ov_mm}" "UV_PYTHON"
         return 0
     fi
 
@@ -397,35 +428,7 @@ resolve_python() {
     done
 
     local newest="${supported[${#supported[@]} - 1]}"
-    if [[ "${FORCE_PIP}" -eq 0 ]] && command -v uv >/dev/null 2>&1; then
-        echo -e "${YELLOW}No supported Python on PATH; installing ${newest} via uv...${NC}"
-        uv python install "${newest}" || {
-            echo -e "${RED}uv python install ${newest} failed${NC}" >&2
-            exit 1
-        }
-        if PY_BIN="$(find_python_bin "${newest}")"; then
-            PY_VER="${newest}"
-            echo -e "${GREEN}Selected Python ${PY_VER} (${PY_BIN}) via uv python install${NC}"
-            return 0
-        fi
-        echo -e "${RED}Installed Python ${newest} with uv but could not locate it on PATH${NC}" >&2
-        echo "Try: uv python find ${newest}" >&2
-        exit 1
-    fi
-
-    echo -e "${RED}No supported Python installed. Need one of: ${supported[*]}${NC}" >&2
-    if [[ "${FORCE_PIP}" -eq 0 ]]; then
-        echo "Install uv first, then re-run (it can fetch Python for you):" >&2
-        print_uv_install_hint >&2
-    else
-        echo "Install a system interpreter, e.g.:" >&2
-        if [[ "$(uname -s)" == "Darwin" ]]; then
-            echo "  brew install python@${newest}" >&2
-        else
-            echo "  sudo apt-get install python${newest} python${newest}-venv" >&2
-        fi
-    fi
-    exit 1
+    ensure_python_version "${newest}" ""
 }
 
 ensure_uv() {
