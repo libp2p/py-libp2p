@@ -1,91 +1,520 @@
 #!/bin/bash
-# Setup script for py-libp2p development environment
-# This script handles the installation of development dependencies using PEP 735 dependency-groups
+# Setup script for py-libp2p development environment (Linux / macOS).
+# Installs dependency-groups via uv (preferred) or pip, after checking system
+# prerequisites and selecting a supported Python from pyproject.toml.
+#
+# A subprocess cannot activate a venv in the caller's shell. For auto-activate:
+#   source ./scripts/setup_dev.sh
+#   # or: . ./scripts/setup_dev.sh
 
-set -e
+# Avoid depending on external `dirname` so PATH-restricted prereq checks still work.
+_SETUP_SRC="${BASH_SOURCE[0]}"
+SCRIPT_DIR="${_SETUP_SRC%/*}"
+if [[ "${SCRIPT_DIR}" == "${_SETUP_SRC}" ]]; then
+    SCRIPT_DIR="."
+fi
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-# Colors for output
+# If sourced, re-run as a normal process (so `exit` cannot kill the login shell),
+# then activate .venv in *this* shell.
+if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    SETUP_DEV_SOURCED=1 bash "${_SETUP_SRC}" "$@" || return $?
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/.venv/bin/activate"
+    echo "Activated .venv in the current shell ($(command -v python))"
+    return 0
+fi
+
+set -euo pipefail
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-echo -e "${GREEN}Setting up py-libp2p development environment...${NC}"
+cd "${REPO_ROOT}"
 
-# Security: the eMudhra/emSign CA incident (October 2026) requires patched
-# package managers, because pip and uv load their own bundled CA store in
-# addition to the system one. See https://discuss.python.org/t/109576
+# Security: eMudhra/emSign CA incident (October 2026). See Discussion #1570.
 MIN_UV_VERSION="0.13.4"
 MIN_PIP_VERSION="26.2.2"
 
+FORCE_PIP=0
+SKIP_PRE_COMMIT=0
+SKIP_SYSTEM_CHECKS=0
+PYTHON_OVERRIDE=""
+
+usage() {
+    cat <<'EOF'
+Usage:
+  ./scripts/setup_dev.sh [options]
+  source ./scripts/setup_dev.sh [options]   # also activates .venv in this shell
+
+Set up a py-libp2p development environment (Linux / macOS).
+
+Options:
+  -h, --help              Show this help and exit
+  --python VERSION        Force a Python version (e.g. 3.12 or 3.12.12).
+                          Must be in the supported set from pyproject.toml.
+  --pip                   Force the pip install path even if uv is available
+  --skip-pre-commit       Do not run pre-commit install
+  --skip-system-checks    Skip cmake/pkg-config/GMP/uv checks (not recommended)
+
+Activation:
+  Running the script as a program cannot change your current shell. To create
+  the env and activate it in one step, source the script instead:
+    source ./scripts/setup_dev.sh
+  Otherwise activate afterwards with: . .venv/bin/activate
+
+Python selection (default):
+  Parse requires-python and Programming Language :: Python :: 3.X classifiers
+  from pyproject.toml. Use the intersection as the supported set (today:
+  3.10–3.13). Pick the newest installed interpreter in that set. If a needed
+  version is missing and uv is available (including with --python / UV_PYTHON),
+  install it via ``uv python install``.
+
+System prerequisites (checked before install):
+  Linux:  sudo apt-get install cmake pkg-config libgmp-dev
+  macOS:  brew install cmake pkgconfig gmp
+  uv >= 0.13.4 (required unless --pip):
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          then: export PATH="$HOME/.local/bin:$PATH"
+
+Also requires patched pip >= 26.2.2 on the --pip path (eMudhra/emSign CA;
+Discussion #1570).
+
+Windows: use scripts/setup_dev.ps1 instead.
+EOF
+}
+
 version_ge() {
-    # usage: version_ge <actual> <minimum>; succeeds when actual >= minimum
     python3 -c '
 import sys
 
-def parts(version):
-    return tuple(int(part) for part in version.split(".") if part.isdigit())
+def parts(version: str):
+    out = []
+    for part in version.split("."):
+        digits = "".join(ch for ch in part if ch.isdigit())
+        if digits:
+            out.append(int(digits))
+    return tuple(out)
 
 actual, minimum = parts(sys.argv[1]), parts(sys.argv[2])
 sys.exit(0 if actual >= minimum else 1)
 ' "$1" "$2"
 }
 
-# Check if uv is available
-if command -v uv &> /dev/null; then
-    echo -e "${GREEN}Using uv for installation (recommended)...${NC}"
-    UV_VERSION=$(uv --version | awk '{print $2}')
-    if ! version_ge "$UV_VERSION" "$MIN_UV_VERSION"; then
-        echo -e "${YELLOW}uv ${UV_VERSION} trusts the compromised eMudhra/emSign CA certificates; upgrading to >= ${MIN_UV_VERSION}...${NC}"
-        UV_SYSTEM_CERTS=true uv self update || {
-            echo -e "${RED}Could not upgrade uv automatically. Reinstall it with:${NC}"
-            echo -e "  curl -LsSf https://astral.sh/uv/install.sh | sh"
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            --python)
+                [[ $# -ge 2 ]] || { echo -e "${RED}--python requires a VERSION${NC}" >&2; exit 1; }
+                PYTHON_OVERRIDE="$2"
+                shift 2
+                ;;
+            --pip)
+                FORCE_PIP=1
+                shift
+                ;;
+            --skip-pre-commit)
+                SKIP_PRE_COMMIT=1
+                shift
+                ;;
+            --skip-system-checks)
+                SKIP_SYSTEM_CHECKS=1
+                shift
+                ;;
+            *)
+                echo -e "${RED}Unknown option: $1${NC}" >&2
+                usage >&2
+                exit 1
+                ;;
+        esac
+    done
+}
+
+print_uv_install_hint() {
+    echo -e "${YELLOW}Install uv (>= ${MIN_UV_VERSION}):${NC}"
+    echo "  curl -LsSf https://astral.sh/uv/install.sh | sh"
+    echo "  export PATH=\"\$HOME/.local/bin:\$PATH\"   # if uv is not on PATH yet"
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        echo "  # or: brew install uv"
+    fi
+    echo "Or re-run with --pip if you already have a supported system Python."
+}
+
+check_system_prereqs() {
+    if [[ "${SKIP_SYSTEM_CHECKS}" -eq 1 ]]; then
+        echo -e "${YELLOW}Skipping system prerequisite checks${NC}"
+        return 0
+    fi
+
+    echo "Checking system prerequisites..."
+    local missing=0
+    local cmake_bin pkg_bin uv_bin
+    local uv_missing_or_old=0
+
+    if cmake_bin="$(command -v cmake 2>/dev/null)"; then
+        echo -e "  cmake:      ${GREEN}OK${NC} (${cmake_bin})"
+    else
+        echo -e "  cmake:      ${RED}MISSING${NC}"
+        missing=1
+    fi
+    if pkg_bin="$(command -v pkg-config 2>/dev/null)"; then
+        echo -e "  pkg-config: ${GREEN}OK${NC} (${pkg_bin})"
+    else
+        echo -e "  pkg-config: ${RED}MISSING${NC}"
+        missing=1
+    fi
+    if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists gmp 2>/dev/null; then
+        echo -e "  GMP:        ${GREEN}OK${NC} (pkg-config gmp)"
+    elif command -v pkg-config >/dev/null 2>&1; then
+        # Only blame GMP when pkg-config itself is present; otherwise the
+        # missing pkg-config line above already explains the failure.
+        echo -e "  GMP:        ${RED}MISSING${NC} (pkg-config gmp)"
+        missing=1
+    fi
+
+    # uv is required on the default path (used both to sync deps and to
+    # install a supported Python when none is on PATH). --pip skips this.
+    if uv_bin="$(command -v uv 2>/dev/null)"; then
+        local uv_version
+        uv_version="$(uv --version | awk '{print $2}')"
+        if version_ge "${uv_version}" "${MIN_UV_VERSION}"; then
+            echo -e "  uv:         ${GREEN}OK${NC} (${uv_bin}, ${uv_version})"
+        else
+            echo -e "  uv:         ${RED}TOO OLD${NC} (${uv_version} < ${MIN_UV_VERSION})"
+            uv_missing_or_old=1
+        fi
+    else
+        echo -e "  uv:         ${RED}MISSING${NC}"
+        uv_missing_or_old=1
+    fi
+    if [[ "${uv_missing_or_old}" -ne 0 ]]; then
+        if [[ "${FORCE_PIP}" -eq 0 ]]; then
+            missing=1
+        else
+            echo -e "             ${YELLOW}(--pip: continuing without uv)${NC}"
+        fi
+    fi
+
+    if [[ "${missing}" -ne 0 ]]; then
+        echo
+        if [[ "$(uname -s)" == "Darwin" ]]; then
+            echo -e "${YELLOW}Install with Homebrew:${NC}"
+            echo "  brew install cmake pkgconfig gmp"
+        else
+            echo -e "${YELLOW}Install on Debian/Ubuntu:${NC}"
+            echo "  sudo apt-get install cmake pkg-config libgmp-dev"
+        fi
+        if [[ "${uv_missing_or_old}" -ne 0 && "${FORCE_PIP}" -eq 0 ]]; then
+            echo
+            print_uv_install_hint
+        fi
+        echo "See docs/contributing.rst (Prerequisites)."
+        exit 1
+    fi
+}
+
+# Print supported majors as lines: 3.10\n3.11\n...  Prefer classifiers ∩ requires-python.
+supported_python_minors() {
+    python3 - <<'PY'
+import re
+import sys
+from pathlib import Path
+
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib  # type: ignore
+    except ImportError:
+        tomllib = None
+
+text = Path("pyproject.toml").read_text(encoding="utf-8")
+requires = ">=3.10,<4.0"
+classifiers: list[str] = []
+
+if tomllib is not None:
+    data = tomllib.loads(text)
+    project = data.get("project", {})
+    requires = project.get("requires-python", requires)
+    classifiers = list(project.get("classifiers", []))
+else:
+    m = re.search(r'requires-python\s*=\s*"([^"]+)"', text)
+    if m:
+        requires = m.group(1)
+    classifiers = re.findall(
+        r'Programming Language :: Python :: (3\.\d+)', text
+    )
+
+def parse_requires(spec: str):
+    """Return (min_tuple, max_exclusive_tuple_or_None) for simple >=X,<Y forms."""
+    min_v = (3, 10)
+    max_v = None
+    for part in spec.replace(" ", "").split(","):
+        if part.startswith(">="):
+            nums = tuple(int(x) for x in part[2:].split(".")[:2])
+            min_v = nums + (0,) * (2 - len(nums))
+        elif part.startswith(">"):
+            nums = [int(x) for x in part[1:].split(".")[:2]]
+            # exclusive lower bound -> bump patch conceptually by using next minor approx
+            if len(nums) == 1:
+                min_v = (nums[0], 0)
+            else:
+                min_v = (nums[0], nums[1] + 1)
+        elif part.startswith("<="):
+            nums = tuple(int(x) for x in part[2:].split(".")[:2])
+            max_v = (nums[0], nums[1] + 1)
+        elif part.startswith("<"):
+            nums = tuple(int(x) for x in part[1:].split(".")[:2])
+            max_v = nums + (0,) * (2 - len(nums))
+    return min_v, max_v
+
+min_v, max_v = parse_requires(requires)
+
+minors: list[tuple[int, int]] = []
+for c in classifiers:
+    m = re.search(r"Python :: (3)\.(\d+)$", c) if isinstance(c, str) else None
+    if m is None and isinstance(c, str) and re.fullmatch(r"3\.\d+", c):
+        major, minor = 3, int(c.split(".")[1])
+    elif m:
+        major, minor = int(m.group(1)), int(m.group(2))
+    else:
+        # classifier list from regex path already "3.X"
+        if isinstance(c, str) and re.fullmatch(r"3\.\d+", c):
+            major, minor = 3, int(c.split(".")[1])
+        else:
+            continue
+    ver = (major, minor)
+    if ver < min_v[:2]:
+        continue
+    if max_v is not None and ver >= max_v[:2]:
+        continue
+    minors.append(ver)
+
+# Fallback if no classifiers matched: 3.10 .. max_exclusive-1 or 3.13
+if not minors:
+    end = (max_v[1] - 1) if max_v and max_v[0] == 3 else 13
+    start = min_v[1] if min_v[0] == 3 else 10
+    minors = [(3, m) for m in range(start, end + 1)]
+
+for major, minor in sorted(set(minors)):
+    print(f"{major}.{minor}")
+PY
+}
+
+find_python_bin() {
+    local ver="$1"  # e.g. 3.12 or 3.12.1
+    local major_minor candidate
+    major_minor="$(echo "${ver}" | cut -d. -f1,2)"
+
+    # Prefer system / uv-managed interpreters over an existing repo .venv.
+    if candidate="$(command -v "python${major_minor}" 2>/dev/null)"; then
+        if [[ "${candidate}" != *"/py-libp2p/.venv/"* && "${candidate}" != *"/.venv/bin/"* ]]; then
+            echo "${candidate}"
+            return 0
+        fi
+    fi
+    for candidate in "/usr/bin/python${major_minor}" "/usr/local/bin/python${major_minor}"; do
+        if [[ -x "${candidate}" ]]; then
+            echo "${candidate}"
+            return 0
+        fi
+    done
+    if command -v uv >/dev/null 2>&1; then
+        local found
+        if found="$(uv python find "${major_minor}" 2>/dev/null)"; then
+            echo "${found}"
+            return 0
+        fi
+    fi
+    if candidate="$(command -v "python${major_minor}" 2>/dev/null)"; then
+        echo "${candidate}"
+        return 0
+    fi
+    return 1
+}
+
+# Find a Python major.minor on PATH/uv, or install it with uv when allowed.
+# Sets PY_BIN and PY_VER on success; exits on failure.
+ensure_python_version() {
+    local ver="$1"          # e.g. 3.12
+    local via_label="$2"    # human label for success message (e.g. --python)
+
+    if PY_BIN="$(find_python_bin "${ver}")"; then
+        PY_VER="$(echo "${ver}" | cut -d. -f1,2)"
+        echo -e "${GREEN}Selected Python ${PY_VER} (${PY_BIN})${via_label:+ via ${via_label}}${NC}"
+        return 0
+    fi
+
+    if [[ "${FORCE_PIP}" -eq 0 ]] && command -v uv >/dev/null 2>&1; then
+        echo -e "${YELLOW}Python ${ver} not on PATH; installing via uv...${NC}"
+        uv python install "${ver}" || {
+            echo -e "${RED}uv python install ${ver} failed${NC}" >&2
             exit 1
         }
-    fi
-    # if on macOS, add gmp flags to the sync command
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-        CFLAGS="$(pkg-config --cflags gmp)" LDFLAGS="$(pkg-config --libs gmp)" uv sync --group dev
-    else
-        uv sync --group dev
-    fi
-
-    # Install pre-commit hooks
-    echo -e "${GREEN}Installing pre-commit hooks...${NC}"
-    uv run pre-commit install
-
-    echo -e "${GREEN}Setup complete! You can now run 'make pr' to check your changes, or 'make docs' to build the docs.${NC}"
-else
-    # Check if virtual environment flag is set
-    if [[ -z "$VIRTUAL_ENV" ]]; then
-        echo -e "${YELLOW}Warning: Not in a virtual environment. Creating one...${NC}"
-        python3 -m venv .venv
-        echo -e "${GREEN}Virtual environment created. Activate it with:${NC}"
-        echo -e "  . .venv/bin/activate"
-        echo -e "${YELLOW}Then run this script again.${NC}"
+        if PY_BIN="$(find_python_bin "${ver}")"; then
+            PY_VER="$(echo "${ver}" | cut -d. -f1,2)"
+            echo -e "${GREEN}Selected Python ${PY_VER} (${PY_BIN}) via uv python install${via_label:+ (${via_label})}${NC}"
+            return 0
+        fi
+        echo -e "${RED}Installed Python ${ver} with uv but could not locate it${NC}" >&2
+        echo "Try: uv python find ${ver}" >&2
         exit 1
     fi
 
-    # Check pip version: >=26.2.2 is required by the eMudhra/emSign CA incident
-    # (and also supports PEP 735 dependency-groups).
-    PIP_VERSION=$(python -m pip --version | awk '{print $2}')
-    if ! version_ge "$PIP_VERSION" "$MIN_PIP_VERSION"; then
-        echo -e "${YELLOW}pip ${PIP_VERSION} trusts the compromised eMudhra/emSign CA certificates; upgrading to >= ${MIN_PIP_VERSION}...${NC}"
+    echo -e "${RED}Python ${ver} not found on PATH / uv${NC}" >&2
+    if [[ "${FORCE_PIP}" -eq 0 ]]; then
+        print_uv_install_hint >&2
+    else
+        if [[ "$(uname -s)" == "Darwin" ]]; then
+            echo "  brew install python@${ver}" >&2
+        else
+            echo "  sudo apt-get install python${ver} python${ver}-venv" >&2
+        fi
+    fi
+    exit 1
+}
+
+resolve_python() {
+    local supported candidates=()
+    mapfile -t supported < <(supported_python_minors)
+
+    if [[ -n "${PYTHON_OVERRIDE}" ]]; then
+        local ov_mm
+        ov_mm="$(echo "${PYTHON_OVERRIDE}" | cut -d. -f1,2)"
+        local ok=0
+        for s in "${supported[@]}"; do
+            if [[ "${s}" == "${ov_mm}" ]]; then
+                ok=1
+                break
+            fi
+        done
+        if [[ "${ok}" -eq 0 ]]; then
+            echo -e "${RED}--python ${PYTHON_OVERRIDE} is outside supported set: ${supported[*]}${NC}" >&2
+            exit 1
+        fi
+        ensure_python_version "${ov_mm}" "--python"
+        return 0
+    fi
+
+    if [[ -n "${UV_PYTHON:-}" ]]; then
+        local ov_mm ok=0
+        ov_mm="$(echo "${UV_PYTHON}" | cut -d. -f1,2)"
+        for s in "${supported[@]}"; do
+            [[ "${s}" == "${ov_mm}" ]] && ok=1 && break
+        done
+        if [[ "${ok}" -eq 0 ]]; then
+            echo -e "${RED}UV_PYTHON=${UV_PYTHON} is outside supported set: ${supported[*]}${NC}" >&2
+            exit 1
+        fi
+        ensure_python_version "${ov_mm}" "UV_PYTHON"
+        return 0
+    fi
+
+    # Newest first
+    local s
+    for ((i = ${#supported[@]} - 1; i >= 0; i--)); do
+        s="${supported[$i]}"
+        if PY_BIN="$(find_python_bin "${s}")"; then
+            PY_VER="${s}"
+            echo -e "${GREEN}Selected Python ${PY_VER} (${PY_BIN})${NC}"
+            return 0
+        fi
+    done
+
+    local newest="${supported[${#supported[@]} - 1]}"
+    ensure_python_version "${newest}" ""
+}
+
+ensure_uv() {
+    if ! command -v uv >/dev/null 2>&1; then
+        return 1
+    fi
+    local uv_version
+    uv_version="$(uv --version | awk '{print $2}')"
+    if ! version_ge "${uv_version}" "${MIN_UV_VERSION}"; then
+        echo -e "${YELLOW}uv ${uv_version} is below ${MIN_UV_VERSION}; upgrading...${NC}"
+        UV_SYSTEM_CERTS=true uv self update || {
+            echo -e "${RED}Could not upgrade uv. Reinstall: curl -LsSf https://astral.sh/uv/install.sh | sh${NC}"
+            exit 1
+        }
+    fi
+    return 0
+}
+
+run_uv_setup() {
+    echo -e "${GREEN}Using uv for installation (recommended)...${NC}"
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        CFLAGS="$(pkg-config --cflags gmp)" LDFLAGS="$(pkg-config --libs gmp)" \
+            uv sync --python "${PY_VER}" --group dev
+    else
+        uv sync --python "${PY_VER}" --group dev
+    fi
+    if [[ "${SKIP_PRE_COMMIT}" -eq 0 ]]; then
+        echo -e "${GREEN}Installing pre-commit hooks...${NC}"
+        uv run pre-commit install
+    fi
+}
+
+run_pip_setup() {
+    echo -e "${GREEN}Using pip for installation...${NC}"
+    if [[ -z "${VIRTUAL_ENV:-}" ]]; then
+        if [[ ! -d .venv ]]; then
+            echo -e "${YELLOW}Creating virtual environment with ${PY_BIN}...${NC}"
+            "${PY_BIN}" -m venv .venv
+        fi
+        # shellcheck disable=SC1091
+        source .venv/bin/activate
+    fi
+
+    local pip_version
+    pip_version="$(python -m pip --version | awk '{print $2}')"
+    if ! version_ge "${pip_version}" "${MIN_PIP_VERSION}"; then
+        echo -e "${YELLOW}pip ${pip_version} is below ${MIN_PIP_VERSION}; upgrading...${NC}"
         python -m pip install --upgrade "pip>=${MIN_PIP_VERSION}"
     fi
 
-    echo -e "${GREEN}Using pip for installation...${NC}"
-    # fastecdsa needs the GMP headers on macOS, same as the uv branch above;
-    # without these flags the source build fails with "gmp.h file not found".
     if [[ "$(uname -s)" == "Darwin" ]]; then
-        CFLAGS="$(pkg-config --cflags gmp)" LDFLAGS="$(pkg-config --libs gmp)" pip install --group dev -e .
+        CFLAGS="$(pkg-config --cflags gmp)" LDFLAGS="$(pkg-config --libs gmp)" \
+            pip install --group dev -e .
     else
         pip install --group dev -e .
     fi
 
-    # Install pre-commit hooks
-    echo -e "${GREEN}Installing pre-commit hooks...${NC}"
-    pre-commit install
+    if [[ "${SKIP_PRE_COMMIT}" -eq 0 ]]; then
+        echo -e "${GREEN}Installing pre-commit hooks...${NC}"
+        pre-commit install
+    fi
+}
 
-    echo -e "${GREEN}Setup complete! You can now run 'make pr' to check your changes, or 'make docs' to build the docs.${NC}"
-fi
+main() {
+    parse_args "$@"
+    echo -e "${GREEN}Setting up py-libp2p development environment...${NC}"
+    check_system_prereqs
+    resolve_python
+
+    if [[ "${FORCE_PIP}" -eq 0 ]]; then
+        # uv was already validated in check_system_prereqs (unless skipped).
+        if ! ensure_uv; then
+            echo -e "${RED}uv is required (or pass --pip).${NC}" >&2
+            print_uv_install_hint >&2
+            exit 1
+        fi
+        run_uv_setup
+    else
+        run_pip_setup
+    fi
+
+    echo -e "${GREEN}Setup complete! Run 'make pr' to check changes, or 'make docs' to build docs.${NC}"
+    if [[ "${SETUP_DEV_SOURCED:-0}" != "1" ]]; then
+        echo -e "Activate with: ${YELLOW}. .venv/bin/activate${NC}"
+        echo -e "Or next time auto-activate via: ${YELLOW}source ./scripts/setup_dev.sh${NC}"
+    fi
+}
+
+main "$@"

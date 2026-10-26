@@ -10,7 +10,7 @@ help:
 	@echo "fix - fix formatting & linting issues with ruff"
 	@echo "lint - fix linting issues with pre-commit"
 	@echo "test - run tests quickly with the default Python"
-	@echo "docs - generate docs and open in browser (linux-docs for version on linux)"
+	@echo "docs - generate docs and open in browser (auto: xdg-open on Linux, open on macOS)"
 	@echo "package-test - build package and install it in a venv for manual testing"
 	@echo "notes - consume towncrier newsfragments and update release notes in docs - requires bump to be set"
 	@echo "release - package and upload a release (does not run notes target) - requires bump to be set"
@@ -99,11 +99,15 @@ FORCE:
 
 # docs commands
 
-docs: check-docs
-	open docs/_build/html/index.html
+# Prefer xdg-open (Linux), then open (macOS). Fall back to no-op when neither
+# exists (headless CI / containers) so `make docs` still succeeds after the build.
+OPEN_CMD := $(shell command -v xdg-open 2>/dev/null || command -v open 2>/dev/null || echo :)
 
-linux-docs: check-docs
-	xdg-open docs/_build/html/index.html
+docs: check-docs
+	@$(OPEN_CMD) docs/_build/html/index.html >/dev/null 2>&1 || true
+
+# Backwards-compatible alias; same as `docs`.
+linux-docs: docs
 
 # docs helpers
 

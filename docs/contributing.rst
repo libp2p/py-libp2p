@@ -61,12 +61,23 @@ Install the development dependencies using a virtual environment:
 .. code:: sh
 
     cd py-libp2p
-    ./scripts/setup_dev.sh
+    # Recommended: source so .venv is activated in this shell afterwards
+    source ./scripts/setup_dev.sh
+    # optional: source ./scripts/setup_dev.sh --python 3.12
+    # or run without activating: ./scripts/setup_dev.sh
+
+The script checks for ``cmake``, ``pkg-config``, GMP, and ``uv`` (``>= 0.13.4``,
+required unless ``--pip``) before installing, keeps ``pip`` at the
+eMudhra/emSign CA floor on the ``--pip`` path, and selects the newest
+**installed** Python that appears in ``pyproject.toml`` classifiers and
+satisfies ``requires-python`` (currently ``3.10``–``3.13``). If none is on
+``PATH``, it runs ``uv python install`` for the newest supported version.
 
 .. note::
 
-    On Linux, if you are not already in a virtual environment, the script will create one
-    automatically and instruct you to activate it.
+    A subprocess cannot change your current shell. Prefer
+    ``source ./scripts/setup_dev.sh`` so ``.venv`` is activated automatically.
+    If you ran ``./scripts/setup_dev.sh``, activate with ``. .venv/bin/activate``.
 
 **Option 2: Using uv (recommended, same as CI):**
 
@@ -144,7 +155,11 @@ Install the development dependencies using a virtual environment:
 .. code:: sh
 
     cd py-libp2p
-    ./scripts/setup_dev.sh
+    source ./scripts/setup_dev.sh
+    # optional: source ./scripts/setup_dev.sh --python 3.12
+
+Same behaviour as on Linux: prerequisite checks, supported-Python selection,
+patched ``uv`` / ``pip`` floors, and auto-activation when the script is sourced.
 
 **Option 2: Using uv (recommended, same as CI):**
 
@@ -254,32 +269,47 @@ Setup Steps
         git clone git@github.com:your-github-username/py-libp2p.git
         cd py-libp2p
 
-2. **Create a Virtual Environment**
-   - In PowerShell:
+2. **Install dependencies with the setup script (recommended)**
+
+   From PowerShell in the repo root:
 
    .. code:: powershell
 
-        python -m venv venv
-        .\venv\Scripts\activate
+        # If scripts are blocked (Windows 11 Restricted policy), either:
+        #   Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+        # or one-shot without changing policy:
+        #   .\scripts\setup_dev.cmd
+        # Recommended: dot-source so .venv is activated in this session
+        . .\scripts\setup_dev.ps1
+        # optional: . .\scripts\setup_dev.ps1 -Python 3.12
+        # or: pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup_dev.ps1
 
-3. **Install Dependencies**
+   ``setup_dev.ps1`` checks for ``cmake`` and ``uv`` (``>= 0.13.4``, required
+   unless ``-Pip``), selects the newest supported Python from
+   ``pyproject.toml`` classifiers (``3.10``–``3.13``; installs via
+   ``uv python install`` when missing), or floors ``pip`` (``>= 26.2.2``) on the
+   ``-Pip`` path, and installs the ``dev`` dependency group.
+   GMP is not required on Windows (``fastecdsa`` is skipped on ``win32``).
 
-   **Option A: Using uv (recommended, same as CI):**
-
-   First, install ``uv`` if you haven't already:
+   If you ran the script without dot-sourcing, activate afterwards. Under the
+   default Windows 11 Restricted policy, either unlock scripts for this session
+   or use ``activate.bat``:
 
    .. code:: powershell
 
-        # Using pip
-        pip install "uv>=0.13.4"
+        Set-ExecutionPolicy -Scope Process Bypass
+        . .\.venv\Scripts\Activate.ps1
+        # or (cmd / Restricted-safe): .\.venv\Scripts\activate.bat
+        # permanent: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
-        # Or using winget
+3. **Manual alternative (uv or pip)**
+
+   **Option A: Using uv:**
+
+   .. code:: powershell
+
         winget install --id=astral-sh.uv
-
-   Then set up the development environment:
-
-   .. code:: powershell
-
+        # or: pip install "uv>=0.13.4"
         uv sync --group dev
         uv run pre-commit install
 
@@ -287,7 +317,9 @@ Setup Steps
 
    .. code:: powershell
 
-        pip install --upgrade "pip>=26.2.2"  # PEP 735 needs >= 25.1; eMudhra/emSign CA fix needs >= 26.2.2
+        python -m venv .venv
+        .\.venv\Scripts\Activate.ps1
+        python -m pip install --upgrade "pip>=26.2.2"  # PEP 735 needs >= 25.1; eMudhra/emSign CA fix needs >= 26.2.2
         pip install --group dev -e .
         pre-commit install
 
@@ -311,7 +343,8 @@ Setup Steps
 Notes
 """""
 
-- Use PowerShell, Command Prompt, or Git Bash as your shell.
+- Prefer native PowerShell with ``scripts/setup_dev.ps1``. WSL users can run
+  ``scripts/setup_dev.sh`` inside Linux instead.
 - Ensure all tools (Python, Git, CMake) are in your system PATH.
 
 Requirements
@@ -382,7 +415,10 @@ To add a new example (e.g., identify):
 5. Add example tests in ``tests/core/examples/test_examples.py``
 6. Add the example documentation in ``docs/examples.identify.rst``
 7. Add a news fragment for the new release in file ``newsfragments/536.feature.rst`` (fix-id.type.rst)
-8. Generate doc files with ``make docs`` or ``make linux-docs`` in linux (generates files ``libp2p.identity.identify.rst libp2p.identity.rst libp2p.identity.identify.pb.rst``)
+8. Generate doc files with ``make docs`` (opens the browser via ``xdg-open`` on
+   Linux or ``open`` on macOS; generates files such as
+   ``libp2p.identity.identify.rst``, ``libp2p.identity.rst``,
+   ``libp2p.identity.identify.pb.rst``)
 9. Add the example to ``setup.py``:
 
    .. code:: python
