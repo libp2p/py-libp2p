@@ -407,7 +407,10 @@ To add a new example (e.g., identify):
 5. Add example tests in ``tests/core/examples/test_examples.py``
 6. Add the example documentation in ``docs/examples.identify.rst``
 7. Add a news fragment for the new release in file ``newsfragments/536.feature.rst`` (fix-id.type.rst)
-8. Generate doc files with ``make docs`` or ``make linux-docs`` in linux (generates files ``libp2p.identity.identify.rst libp2p.identity.rst libp2p.identity.identify.pb.rst``)
+8. Generate doc files with ``make docs`` (opens the browser via ``xdg-open`` on
+   Linux or ``open`` on macOS; generates files such as
+   ``libp2p.identity.identify.rst``, ``libp2p.identity.rst``,
+   ``libp2p.identity.identify.pb.rst``)
 9. Add the example to ``setup.py``:
 
    .. code:: python
