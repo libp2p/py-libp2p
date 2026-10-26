@@ -4,20 +4,22 @@
   Set up a py-libp2p development environment on Windows (native PowerShell).
 
 .DESCRIPTION
-  Selects a supported Python from pyproject.toml (classifiers intersect
-  requires-python), checks cmake, prefers uv (>= 0.13.4) or pip (>= 26.2.2),
-  then installs the dev dependency group.
-
-  GMP is not required on Windows (fastecdsa is skipped on win32).
+  Checks cmake and uv (>= 0.13.4, required unless -Pip), selects a supported
+  Python from pyproject.toml (classifiers intersect requires-python), installs a
+  missing interpreter via ``uv python install`` when needed (including with
+  -Python), then installs the dev dependency group. With -Pip, floors pip at
+  >= 26.2.2 (eMudhra/emSign CA). GMP is not required on Windows (fastecdsa is
+  skipped on win32). Dot-source the script to also activate .venv.
 
 .PARAMETER Help
   Show help and exit.
 
 .PARAMETER Python
-  Force a Python version (e.g. 3.12). Must be in the supported set.
+  Force a Python version (e.g. 3.12). Must be in the supported set. If missing,
+  installs it with ``uv python install`` (unless -Pip).
 
 .PARAMETER Pip
-  Force the pip install path even if uv is available.
+  Force the pip install path even if uv is available (skips the uv requirement).
 
 .PARAMETER SkipPreCommit
   Do not run pre-commit install.
@@ -59,8 +61,10 @@ Set up a py-libp2p development environment on Windows.
 
 Options:
   -Help / -h / -?     Show this help and exit
-  -Python VERSION     Force Python version (e.g. 3.12); must be supported
-  -Pip                Force pip even if uv is available
+  -Python VERSION     Force Python version (e.g. 3.12); must be supported.
+                      If missing and uv is available, installs via
+                      ``uv python install``.
+  -Pip                Force pip even if uv is available (skips uv requirement)
   -SkipPreCommit      Do not run pre-commit install
 
 Activation:
@@ -72,14 +76,16 @@ Activation:
 Python selection (default):
   Parse requires-python and Programming Language :: Python :: 3.X classifiers
   from pyproject.toml. Use the intersection (today 3.10-3.13). Pick the newest
-  installed interpreter in that set.
+  installed interpreter in that set. If a needed version is missing and uv is
+  available (including with -Python), install it via ``uv python install``.
 
-Prerequisites:
+Prerequisites (checked before install):
   - CMake on PATH (winget install --id Kitware.CMake -e)
   - uv >= 0.13.4 on PATH unless -Pip (winget install --id=astral-sh.uv)
   - Git recommended (winget install --id Git.Git -e)
   - With -Pip: a supported system Python and pip >= 26.2.2
     (eMudhra/emSign CA incident; Discussion #1570)
+  - GMP is not required on Windows (fastecdsa is skipped on win32)
 
 If script execution is blocked:
   Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
