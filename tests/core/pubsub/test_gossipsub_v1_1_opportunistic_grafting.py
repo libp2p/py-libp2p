@@ -9,12 +9,12 @@ from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-import trio
 
 from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.score import ScoreParams, TopicScoreParams
 from libp2p.tools.utils import connect
 from tests.utils.factories import PubsubFactory
+from tests.utils.pubsub.wait import wait_for
 
 
 @pytest.mark.trio
@@ -39,13 +39,21 @@ async def test_mesh_improvement_with_high_scoring_peers():
         await connect(host0, host1)
         await connect(host0, host2)
         # Deliberately don't connect host1 and host2 directly
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(host1.get_id())
+        await pubsubs[1].wait_for_peer(host0.get_id())
+        await pubsubs[0].wait_for_peer(host2.get_id())
+        await pubsubs[2].wait_for_peer(host0.get_id())
 
         # All subscribe to the same topic
         topic = "test_mesh_improvement"
         for pubsub in pubsubs:
             await pubsub.subscribe(topic)
-        await trio.sleep(1.0)  # Allow time for mesh formation
+        await pubsubs[0].wait_for_subscription(host1.get_id(), topic)
+        await pubsubs[1].wait_for_subscription(host0.get_id(), topic)
+        await pubsubs[0].wait_for_subscription(host2.get_id(), topic)
+        await pubsubs[2].wait_for_subscription(host0.get_id(), topic)
+        await pubsubs[0].wait_for_mesh(host1.get_id(), topic)
+        await pubsubs[0].wait_for_mesh(host2.get_id(), topic)
 
         # Verify initial mesh state
         assert isinstance(gsub0, GossipSub)
@@ -59,7 +67,6 @@ async def test_mesh_improvement_with_high_scoring_peers():
         assert gsub0.scorer is not None
         for _ in range(10):  # Simulate multiple good message deliveries
             gsub0.scorer.on_mesh_delivery(peer2_id, topic)
-        await trio.sleep(0.1)
 
         # Verify peer2 has a higher score than peer1
         peer1_score = gsub0.scorer.score(peer1_id, [topic])
@@ -104,13 +111,21 @@ async def test_mesh_improvement_with_score_based_selection():
         # Connect host0 to all other hosts
         await connect(host0, host1)
         await connect(host0, host2)
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(host1.get_id())
+        await pubsubs[1].wait_for_peer(host0.get_id())
+        await pubsubs[0].wait_for_peer(host2.get_id())
+        await pubsubs[2].wait_for_peer(host0.get_id())
 
         # All subscribe to the same topic
         topic = "test_mesh_improvement"
         for pubsub in pubsubs:
             await pubsub.subscribe(topic)
-        await trio.sleep(1.0)  # Allow time for mesh formation
+        await pubsubs[0].wait_for_subscription(host1.get_id(), topic)
+        await pubsubs[1].wait_for_subscription(host0.get_id(), topic)
+        await pubsubs[0].wait_for_subscription(host2.get_id(), topic)
+        await pubsubs[2].wait_for_subscription(host0.get_id(), topic)
+        await pubsubs[0].wait_for_mesh(host1.get_id(), topic)
+        await pubsubs[0].wait_for_mesh(host2.get_id(), topic)
 
         # Verify initial mesh state
         assert isinstance(gsub0, GossipSub)
@@ -128,7 +143,6 @@ async def test_mesh_improvement_with_score_based_selection():
 
         for _ in range(10):
             gsub0.scorer.on_mesh_delivery(peer2_id, topic)
-        await trio.sleep(0.1)
 
         # Verify scores
         peer1_score = gsub0.scorer.score(peer1_id, [topic])
@@ -152,8 +166,11 @@ async def test_mesh_improvement_with_score_based_selection():
             for topic_id in topics:
                 await gsub0.emit_prune(topic_id, peer_id, False, False)
 
-        # Allow time for mesh changes to take effect
-        await trio.sleep(1.0)
+        # mesh_heartbeat updates local membership synchronously; wait for it
+        await wait_for(
+            lambda: len(gsub0.mesh.get(topic, set())) > 0,
+            fail_msg="mesh should remain non-empty after heartbeat",
+        )
 
         # Check the updated mesh
         final_mesh = set(gsub0.mesh[topic])
@@ -185,13 +202,21 @@ async def test_mesh_maintenance_with_scoring():
         # Connect all hosts
         await connect(host0, host1)
         await connect(host0, host2)
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(host1.get_id())
+        await pubsubs[1].wait_for_peer(host0.get_id())
+        await pubsubs[0].wait_for_peer(host2.get_id())
+        await pubsubs[2].wait_for_peer(host0.get_id())
 
         # All subscribe to the same topic
         topic = "test_mesh_maintenance"
         for pubsub in pubsubs:
             await pubsub.subscribe(topic)
-        await trio.sleep(1.0)  # Allow time for mesh formation
+        await pubsubs[0].wait_for_subscription(host1.get_id(), topic)
+        await pubsubs[1].wait_for_subscription(host0.get_id(), topic)
+        await pubsubs[0].wait_for_subscription(host2.get_id(), topic)
+        await pubsubs[2].wait_for_subscription(host0.get_id(), topic)
+        await pubsubs[0].wait_for_mesh(host1.get_id(), topic)
+        await pubsubs[0].wait_for_mesh(host2.get_id(), topic)
 
         # Verify initial mesh state
         assert isinstance(gsub0, GossipSub)
@@ -204,7 +229,6 @@ async def test_mesh_maintenance_with_scoring():
         assert gsub0.scorer is not None
         for _ in range(3):  # Not enough to exceed threshold
             gsub0.scorer.on_mesh_delivery(peer2_id, topic)
-        await trio.sleep(0.1)
 
         # Verify peer2's score is positive but below threshold
         peer2_score = gsub0.scorer.score(peer2_id, [topic])
@@ -239,13 +263,26 @@ async def test_mesh_with_degraded_peers():
         await connect(host0, host1)
         await connect(host0, host2)
         await connect(host0, host3)
-        await trio.sleep(0.5)
+        for other in (host1, host2, host3):
+            await pubsubs[0].wait_for_peer(other.get_id())
+        await pubsubs[1].wait_for_peer(host0.get_id())
+        await pubsubs[2].wait_for_peer(host0.get_id())
+        await pubsubs[3].wait_for_peer(host0.get_id())
 
         # All subscribe to the same topic
         topic = "test_degraded_mesh"
         for pubsub in pubsubs:
             await pubsub.subscribe(topic)
-        await trio.sleep(1.0)  # Allow time for mesh formation
+        for other in (host1, host2, host3):
+            await pubsubs[0].wait_for_subscription(other.get_id(), topic)
+        await pubsubs[1].wait_for_subscription(host0.get_id(), topic)
+        await pubsubs[2].wait_for_subscription(host0.get_id(), topic)
+        await pubsubs[3].wait_for_subscription(host0.get_id(), topic)
+        # degree may not include every peer; wait until mesh is non-empty
+        await wait_for(
+            lambda: len(gsub0.mesh.get(topic, set())) > 0,
+            fail_msg="host0 mesh should form after subscribe",
+        )
 
         # Verify initial mesh state
         assert isinstance(gsub0, GossipSub)
@@ -266,7 +303,6 @@ async def test_mesh_with_degraded_peers():
         # Make peer3 high-scoring (assuming it might not be in the initial mesh)
         for _ in range(10):
             gsub0.scorer.on_mesh_delivery(peer3_id, topic)
-        await trio.sleep(0.1)
 
         # Verify peer3 has a high score
         assert gsub0.scorer.score(peer3_id, [topic]) > 0
@@ -287,8 +323,10 @@ async def test_mesh_with_degraded_peers():
             for topic_id in topics:
                 await gsub0.emit_prune(topic_id, peer_id, False, False)
 
-        # Allow time for mesh changes to take effect
-        await trio.sleep(1.0)
+        await wait_for(
+            lambda: topic in gsub0.mesh,
+            fail_msg="mesh topic should remain after heartbeat",
+        )
 
         # Create a mock scorer if needed
         if not hasattr(gsub0, "scorer") or gsub0.scorer is None:
@@ -329,13 +367,21 @@ async def test_mesh_heartbeat_backoff():
         # Connect all hosts
         await connect(host0, host1)
         await connect(host0, host2)
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(host1.get_id())
+        await pubsubs[1].wait_for_peer(host0.get_id())
+        await pubsubs[0].wait_for_peer(host2.get_id())
+        await pubsubs[2].wait_for_peer(host0.get_id())
 
         # All subscribe to the same topic
         topic = "test_mesh_backoff"
         for pubsub in pubsubs:
             await pubsub.subscribe(topic)
-        await trio.sleep(1.0)  # Allow time for mesh formation
+        await pubsubs[0].wait_for_subscription(host1.get_id(), topic)
+        await pubsubs[1].wait_for_subscription(host0.get_id(), topic)
+        await pubsubs[0].wait_for_subscription(host2.get_id(), topic)
+        await pubsubs[2].wait_for_subscription(host0.get_id(), topic)
+        await pubsubs[0].wait_for_mesh(host1.get_id(), topic)
+        await pubsubs[0].wait_for_mesh(host2.get_id(), topic)
 
         # Verify initial mesh state
         assert isinstance(gsub0, GossipSub)
@@ -348,7 +394,6 @@ async def test_mesh_heartbeat_backoff():
         assert gsub0.scorer is not None
         for _ in range(10):
             gsub0.scorer.on_mesh_delivery(peer2_id, topic)
-        await trio.sleep(0.1)
 
         # Verify peer2 has a high score
         assert gsub0.scorer.score(peer2_id, [topic]) > 0

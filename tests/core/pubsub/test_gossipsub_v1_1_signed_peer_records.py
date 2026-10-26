@@ -9,7 +9,6 @@ from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-import trio
 
 from libp2p.peer.peerinfo import PeerInfo
 from libp2p.pubsub.gossipsub import GossipSub
@@ -107,12 +106,24 @@ class TestGossipSubSignedPeerRecords:
             await connect(host0, host1)
             await connect(host1, host2)
             await connect(host0, host2)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_peer(host1.get_id(), timeout=10)
+            await pubsubs[1].wait_for_peer(host0.get_id(), timeout=10)
+            await pubsubs[1].wait_for_peer(host2.get_id(), timeout=10)
+            await pubsubs[2].wait_for_peer(host1.get_id(), timeout=10)
+            await pubsubs[0].wait_for_peer(host2.get_id(), timeout=10)
+            await pubsubs[2].wait_for_peer(host0.get_id(), timeout=10)
 
             topic = "test_emit_prune_signed_records"
             for pubsub in pubsubs:
                 await pubsub.subscribe(topic)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_subscription(host1.get_id(), topic, timeout=10)
+            await pubsubs[0].wait_for_subscription(host2.get_id(), topic, timeout=10)
+            await pubsubs[1].wait_for_subscription(host0.get_id(), topic, timeout=10)
+            await pubsubs[1].wait_for_subscription(host2.get_id(), topic, timeout=10)
+            await pubsubs[2].wait_for_subscription(host0.get_id(), topic, timeout=10)
+            await pubsubs[2].wait_for_subscription(host1.get_id(), topic, timeout=10)
+            await pubsubs[0].wait_for_mesh(host1.get_id(), topic, timeout=10)
+            await pubsubs[1].wait_for_mesh(host0.get_id(), topic, timeout=10)
 
             # Mock the peerstore to return a signed record for host2
             assert gsub0.pubsub is not None
@@ -123,20 +134,19 @@ class TestGossipSubSignedPeerRecords:
             # Mock the get_peerstore method
             gsub0.pubsub.host.get_peerstore = MagicMock(return_value=mock_peerstore)
 
-            # Mock write_msg to capture the sent message
-            assert gsub0.pubsub is not None
-            mock_write_msg = AsyncMock()
-            gsub0.pubsub.write_msg = mock_write_msg
+            # Mock send_rpc to capture the sent message
+            mock_send_rpc = MagicMock()
+            gsub0.send_rpc = mock_send_rpc
 
             # Emit prune with PX enabled
             await gsub0.emit_prune(
                 topic, host1.get_id(), do_px=True, is_unsubscribe=False
             )
 
-            # Verify that write_msg was called
-            mock_write_msg.assert_called_once()
-            call_args = mock_write_msg.call_args[0]
-            rpc_msg = call_args[1]
+            # Verify that send_rpc was called
+            mock_send_rpc.assert_called_once()
+            call_args = mock_send_rpc.call_args
+            rpc_msg = call_args[0][1]  # second positional arg
 
             # Verify the RPC message contains prune with peers
             assert len(rpc_msg.control.prune) == 1
@@ -162,7 +172,8 @@ class TestGossipSubSignedPeerRecords:
 
             # Connect hosts
             await connect(host0, host1)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_peer(host1.get_id(), timeout=10)
+            await pubsubs[1].wait_for_peer(host0.get_id(), timeout=10)
 
             # Create mock signed peer record
             mock_envelope = MagicMock()
@@ -379,7 +390,8 @@ class TestGossipSubSignedPeerRecords:
 
             # Connect hosts
             await connect(host0, host1)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_peer(host1.get_id(), timeout=10)
+            await pubsubs[1].wait_for_peer(host0.get_id(), timeout=10)
 
             # Create PX peer info for already connected peer
             px_peer = rpc_pb2.PeerInfo()
@@ -407,7 +419,8 @@ class TestGossipSubSignedPeerRecords:
 
             # Connect hosts
             await connect(host0, host1)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_peer(host1.get_id(), timeout=10)
+            await pubsubs[1].wait_for_peer(host0.get_id(), timeout=10)
 
             # Mock maybe_consume_signed_record to return False (invalid record)
             with patch(
@@ -440,16 +453,16 @@ class TestGossipSubSignedPeerRecords:
 
             # Connect hosts
             await connect(host0, host1)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_peer(host1.get_id(), timeout=10)
+            await pubsubs[1].wait_for_peer(host0.get_id(), timeout=10)
 
             # Mock env_to_send_in_RPC
             with patch("libp2p.pubsub.gossipsub.env_to_send_in_RPC") as mock_env:
                 mock_env.return_value = (b"fake_sender_record", None)
 
-                # Mock write_msg to capture the sent message
-                assert gsub0.pubsub is not None
-                mock_write_msg = AsyncMock()
-                gsub0.pubsub.write_msg = mock_write_msg
+                # Mock send_rpc to capture the sent message
+                mock_send_rpc = MagicMock()
+                gsub0.send_rpc = mock_send_rpc
 
                 # Create control message
                 control_msg = rpc_pb2.ControlMessage()
@@ -459,10 +472,10 @@ class TestGossipSubSignedPeerRecords:
                 # Test emit_control_message
                 await gsub0.emit_control_message(control_msg, host1.get_id())
 
-                # Verify that write_msg was called
-                mock_write_msg.assert_called_once()
-                call_args = mock_write_msg.call_args[0]
-                rpc_msg = call_args[1]
+                # Verify that send_rpc was called
+                mock_send_rpc.assert_called_once()
+                call_args = mock_send_rpc.call_args
+                rpc_msg = call_args[0][1]  # second positional arg
 
                 # Verify that sender record is included
                 assert rpc_msg.HasField("senderRecord")
@@ -479,25 +492,25 @@ class TestGossipSubSignedPeerRecords:
 
             # Connect hosts
             await connect(host0, host1)
-            await trio.sleep(0.2)
+            await pubsubs[0].wait_for_peer(host1.get_id(), timeout=10)
+            await pubsubs[1].wait_for_peer(host0.get_id(), timeout=10)
 
             # Mock env_to_send_in_RPC
             with patch("libp2p.pubsub.gossipsub.env_to_send_in_RPC") as mock_env:
                 mock_env.return_value = (b"fake_sender_record", None)
 
-                # Mock write_msg to capture the sent message
-                assert gsub0.pubsub is not None
-                mock_write_msg = AsyncMock()
-                gsub0.pubsub.write_msg = mock_write_msg
+                # Mock send_rpc to capture the sent message
+                mock_send_rpc = MagicMock()
+                gsub0.send_rpc = mock_send_rpc
 
                 # Test emit_iwant
-                msg_ids = ["msg1", "msg2"]
+                msg_ids = [b"msg1", b"msg2"]
                 await gsub0.emit_iwant(msg_ids, host1.get_id())
 
-                # Verify that write_msg was called
-                mock_write_msg.assert_called_once()
-                call_args = mock_write_msg.call_args[0]
-                rpc_msg = call_args[1]
+                # Verify that send_rpc was called
+                mock_send_rpc.assert_called_once()
+                call_args = mock_send_rpc.call_args
+                rpc_msg = call_args[0][1]  # second positional arg
 
                 # Verify that sender record is included
                 assert rpc_msg.HasField("senderRecord")

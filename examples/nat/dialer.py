@@ -36,7 +36,7 @@ from libp2p.relay.circuit_v2.protocol import (
 )
 from libp2p.relay.circuit_v2.resources import RelayLimits
 from libp2p.relay.circuit_v2.transport import CircuitV2Transport
-from libp2p.tools.async_service import background_trio_service
+from libp2p.tools.anyio_service import background_trio_service
 from libp2p.utils.logging import setup_logging as libp2p_setup_logging
 
 # Configure logging
@@ -222,7 +222,7 @@ async def setup_dialer_node(
                             relay_info = info_from_p2p_addr(relay_maddr)
                         else:
                             # Assume it's just a peer ID
-                            relay_peer_id = ID.from_base58(relay_addr)
+                            relay_peer_id = ID.from_string(relay_addr)
                             relay_info = PeerInfo(
                                 relay_peer_id,
                                 [
@@ -251,7 +251,7 @@ async def setup_dialer_node(
                             pass
 
                         # Convert listener ID string to peer ID
-                        listener_peer_id = ID.from_base58(listener_id)
+                        listener_peer_id = ID.from_string(listener_id)
 
                         # Step 1: Connect to listener through relay
                         logger.info(

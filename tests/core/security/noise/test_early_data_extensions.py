@@ -333,13 +333,13 @@ class TestBackwardCompatibility:
     def test_pattern_with_spec_compliant_extensions(self, key_pair):
         """Test that patterns work with spec-compliant extensions."""
         libp2p_keypair = create_new_key_pair()
-        noise_keypair = create_new_key_pair()
+        noise_keypair = noise_static_key_factory()
         local_peer = ID.from_pubkey(libp2p_keypair.public_key)
 
         pattern = PatternXX(
             local_peer,
             libp2p_keypair.private_key,
-            noise_keypair.private_key,
+            noise_keypair,
             early_data=None,  # No early data for spec compliance
         )
 

@@ -11,7 +11,6 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/libp2p.svg)](https://pypi.python.org/pypi/libp2p)
 [![Build Status](https://img.shields.io/github/actions/workflow/status/libp2p/py-libp2p/tox.yml?branch=main&label=build%20status)](https://github.com/libp2p/py-libp2p/actions/workflows/tox.yml)
 [![Docs build](https://readthedocs.org/projects/py-libp2p/badge/?version=latest)](http://py-libp2p.readthedocs.io/en/latest/?badge=latest)
-<a href="https://filecoin.drips.network/app/projects/github/libp2p/py-libp2p" target="_blank"><img src="https://filecoin.drips.network/api/embed/project/https%3A%2F%2Fgithub.com%2Flibp2p%2Fpy-libp2p/support.png?background=light&style=drips&text=project&stat=support" alt="Support py-libp2p on drips.network" height="32"></a>
 
 > py-libp2p has moved beyond its experimental roots and is steadily progressing toward production readiness. The core features are stable, and we’re focused on refining performance, expanding protocol support, and ensuring smooth interop with other libp2p implementations. We welcome contributions and real-world usage feedback to help us reach full production maturity.
 
@@ -31,13 +30,33 @@ ______________________________________________________________________
 
 ### Transports
 
-| **Transport**                          | **Status** |                                     **Source**                                      |
-| -------------------------------------- | :--------: | :---------------------------------------------------------------------------------: |
-| **`libp2p-tcp`**                       |     ✅     | [source](https://github.com/libp2p/py-libp2p/blob/main/libp2p/transport/tcp/tcp.py) |
-| **`libp2p-quic`**                      |     ✅     |    [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/transport/quic)    |
-| **`libp2p-websocket`**                 |     ✅     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/transport/websocket)  |
-| **`libp2p-webrtc-browser-to-server`**  |     🌱     |                                                                                     |
-| **`libp2p-webrtc-private-to-private`** |     🌱     |                                                                                     |
+| **Transport**                          | **Status** |                                      **Source**                                       |
+| -------------------------------------- | :--------: | :-----------------------------------------------------------------------------------: |
+| **`libp2p-tcp`**                       |     ✅     |  [source](https://github.com/libp2p/py-libp2p/blob/main/libp2p/transport/tcp/tcp.py)  |
+| **`libp2p-quic`**                      |     ✅     |     [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/transport/quic)     |
+| **`libp2p-websocket`**                 |     ✅     |  [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/transport/websocket)   |
+| **`libp2p-webtransport`**              |     🌱     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/transport/webtransport) |
+| **`libp2p-webrtc-browser-to-server`**  |     🌱     |                                                                                       |
+| **`libp2p-webrtc-private-to-private`** |     🌱     |                                                                                       |
+
+WebRTC-Direct (browser/server) uses the spec **STUN path** by default: inbound
+dials hit a shared UDP port and the listener infers the offer from the first
+STUN packet; outbound dials synthesise an ICE-Lite answer from the multiaddr
+with no default public STUN servers. This is the only signalling path that
+interoperates with go-libp2p / js-libp2p / browsers. An experimental HTTP
+`POST /sdp` harness (`WebRTCTransportConfig(enable_sdp_http_harness=True)`) is
+**for py↔py debugging only** and is *not* interoperable — leave it off in
+production.
+
+**Choosing a dial version.** The listener always accepts both v1 and v2; the
+dialer picks with `WebRTCTransportConfig(webrtc_direct_dial_version=1|2)`:
+
+- **v1** (default today) — the migration path (SDP ufrag/pwd munging). Kept the
+  default while [libp2p/specs#715](https://github.com/libp2p/specs/pull/715) is
+  unmerged so existing v1 peers keep working.
+- **v2** (recommended) — the specs#715 flow, no SDP munging. Prefer it for new
+  deployments; **browser dialling needs v2** once `NoSdpMangleUfrag` support is
+  widespread. The default flips to v2 once specs#715 lands.
 
 ______________________________________________________________________
 
@@ -115,6 +134,35 @@ ______________________________________________________________________
 
 ______________________________________________________________________
 
+### Identity Persistence
+
+For a stable Peer ID across restarts, use opt-in identity helpers (default
+`new_host()` behavior is unchanged and still generates a random Ed25519 key):
+
+- **File helpers:** `libp2p.identity_utils` — `save_identity` / `load_identity` /
+  `create_identity_from_seed` (libp2p protobuf private-key format; Unix mode `0600`).
+- **Key-pair provider:** `new_host(key_pair_provider=...)` accepts
+  `Callable[[], KeyPair]` as described in issue #312.
+- **Filesystem keystore:** `FileSystemKeyStore` stores named keys under a directory;
+  pass `new_host(keystore=..., identity_name="default")` to load or auto-persist.
+
+Prefer these APIs over the legacy PEM helpers `save_keypair` / `load_keypair`
+(Ed25519-only, fixed path).
+
+Example (keystore)::
+
+```
+from pathlib import Path
+from libp2p import new_host
+from libp2p.crypto.keystore import FileSystemKeyStore
+
+store = FileSystemKeyStore(Path.home() / ".config" / "py-libp2p" / "keystore")
+host = new_host(keystore=store, identity_name="default")
+# Subsequent runs with the same store/name reuse the same Peer ID.
+```
+
+______________________________________________________________________
+
 ## Explanation of Basic Two Node Communication
 
 ### Core Concepts
@@ -140,3 +188,7 @@ _(non-normative, useful for team notes, not a reference)_
 **Communication over one connection with multiple protocols**: X and Y can communicate over the same connection using different protocols and the multiplexer will appropriately route messages for a given protocol to a particular handler function for that protocol, which allows for each host to handle different protocols with separate functions. Furthermore, we can use multiple streams for a given protocol that allow for the same protocol and same underlying connection to be used for communication about separate topics between nodes X and Y.
 
 **Why use multiple streams?**: The purpose of using the same connection for multiple streams to communicate over is to avoid the overhead of having multiple connections between X and Y. In order for X and Y to differentiate between messages on different streams and different protocols, a multiplexer is used to encode the messages when a message will be sent and decode a message when a message is received. The multiplexer encodes the message by adding a header to the beginning of any message to be sent that contains the stream id (along with some other info). Then, the message is sent across the raw connection and the receiving host will use its multiplexer to decode the message, i.e. determine which stream id the message should be routed to.
+
+### Support
+
+<a href="https://filecoin.drips.network/app/projects/github/libp2p/py-libp2p" target="_blank"><img src="https://filecoin.drips.network/api/embed/project/https%3A%2F%2Fgithub.com%2Flibp2p%2Fpy-libp2p/support.png?background=light&style=drips&text=project&stat=support" alt="Support py-libp2p on drips.network" height="32"></a>

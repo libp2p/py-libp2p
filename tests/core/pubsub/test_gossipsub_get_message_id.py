@@ -36,8 +36,8 @@ async def test_gossipsub_get_message_id():
         msg_id = pubsub.get_message_id(msg)
 
         # Verify it's the expected format (depends on the message ID constructor)
-        # For the default constructor, it should be seqno + from_id
-        expected_id = test_seqno + test_from
+        # For the default constructor, it should be from_id + seqno (matching Go)
+        expected_id = test_from + test_seqno
         assert msg_id == expected_id
 
 

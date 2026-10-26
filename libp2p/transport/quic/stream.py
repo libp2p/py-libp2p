@@ -11,6 +11,9 @@ from typing import TYPE_CHECKING, Any, cast
 
 import trio
 
+from libp2p.io.exceptions import IOException
+from libp2p.stream_muxer.exceptions import MuxedStreamEOF
+
 from .exceptions import (
     QUICStreamBackpressureError,
     QUICStreamClosedError,
@@ -18,6 +21,15 @@ from .exceptions import (
     QUICStreamResetError,
     QUICStreamTimeoutError,
 )
+
+try:
+    from aioquic.quic.connection import (
+        QuicConnectionError,
+        StreamFinishedError,
+    )
+except ImportError:
+    QuicConnectionError = None  # type: ignore[assignment,misc]
+    StreamFinishedError = None  # type: ignore[assignment,misc]
 
 if TYPE_CHECKING:
     from libp2p.abc import IMuxedStream
@@ -29,6 +41,18 @@ else:
     TProtocol = cast(type, object)
 
 logger = logging.getLogger(__name__)
+
+
+class _QUICStreamEOF(MuxedStreamEOF, IOException, EOFError):
+    """
+    Raised by QUICStream.read() when the stream has reached EOF (FIN received)
+    and the receive buffer is empty.
+
+    Inherits IOException so that callers like MultiselectCommunicator.read()
+    (which catches IOException) and read_exactly() (raises IncompleteReadError on
+    incomplete reads) both handle it correctly.  Also inherits EOFError to be
+    semantically compatible with libp2p.network.stream.exceptions.StreamEOF.
+    """
 
 
 class StreamState(Enum):
@@ -148,6 +172,13 @@ class QUICStream(IMuxedStream):
         self.MAX_RECEIVE_BUFFER_SIZE = (
             connection._transport._config.MAX_STREAM_RECEIVE_BUFFER
         )
+        self.SEND_BUFFER_HIGH_WATERMARK = (
+            connection._transport._config.STREAM_SEND_BUFFER_HIGH_WATERMARK
+        )
+        self.SEND_BUFFER_LOW_WATERMARK = (
+            connection._transport._config.STREAM_SEND_BUFFER_LOW_WATERMARK
+        )
+        self.WRITE_CHUNK_SIZE = connection._transport._config.STREAM_WRITE_CHUNK_SIZE
 
         if self._resource_scope:
             self._reserve_memory(self.FLOW_CONTROL_WINDOW_SIZE)
@@ -217,18 +248,22 @@ class QUICStream(IMuxedStream):
         if n is None:
             n = -1
 
+        # Check if there is data in the buffer FIRST before raising closed/reset errors
+        async with self._receive_buffer_lock:
+            if self._receive_buffer:
+                data = self._extract_data_from_buffer(n)
+                self._timeline.record_first_data()
+                return data
+
         async with self._state_lock:
             if self._state in (StreamState.CLOSED, StreamState.RESET):
                 raise QUICStreamClosedError(f"Stream {self.stream_id} is closed")
 
             if self._read_closed:
-                # Return any remaining buffered data, then EOF
-                async with self._receive_buffer_lock:
-                    if self._receive_buffer:
-                        data = self._extract_data_from_buffer(n)
-                        self._timeline.record_first_data()
-                        return data
-                return b""
+                # Buffer is empty and stream is half-closed for reading — signal EOF
+                # Raise StreamEOF (extends IOException) so callers like read_exactly()
+                # fail immediately instead of looping on empty reads.
+                raise _QUICStreamEOF()
 
         # Wait for data with timeout
         timeout = self.READ_TIMEOUT
@@ -242,14 +277,14 @@ class QUICStream(IMuxedStream):
                             return data
 
                         # Check if stream was reset (unblocking read loop)
-                        if self._state == StreamState.RESET:
+                        if self.is_reset():
                             raise QUICStreamResetError(
                                 f"Stream {self.stream_id} was reset"
                             )
 
-                        # Check if stream was closed while waiting
+                        # Buffer is empty and stream closed while waiting — EOF
                         if self._read_closed:
-                            return b""
+                            raise _QUICStreamEOF()
 
                     # Wait for more data
                     await self._receive_event.wait()
@@ -262,6 +297,12 @@ class QUICStream(IMuxedStream):
         except QUICStreamResetError:
             # Stream was reset while reading
             raise
+        except _QUICStreamEOF:
+            # Peer half-closed (FIN) while we were waiting for data. This is a
+            # normal end-of-stream, not a stream error: resetting here would
+            # tear down our own write side, which the peer may still be
+            # reading (e.g. perf: client sends request + FIN, then reads reply).
+            raise
         except Exception as e:
             logger.error(f"Error reading from stream {self.stream_id}: {e}")
             await self._handle_stream_error(e)
@@ -269,15 +310,25 @@ class QUICStream(IMuxedStream):
 
     async def write(self, data: bytes) -> None:
         """
-        Write data to the stream with QUIC flow control.
+        Write data to the stream with send-side backpressure.
+
+        aioquic buffers written data without limit and only paces the actual
+        transmission by congestion control and the peer's flow-control window.
+        To keep a fast writer honest (and bounded in memory), the data is handed
+        to aioquic in ``WRITE_CHUNK_SIZE`` pieces and, whenever the stream's
+        un-ACKed send buffer reaches ``SEND_BUFFER_HIGH_WATERMARK``, this call
+        blocks until acknowledgements bring it back down to
+        ``SEND_BUFFER_LOW_WATERMARK``. Returning therefore means the peer has
+        acknowledged all but at most ``SEND_BUFFER_HIGH_WATERMARK`` bytes.
 
         Args:
             data: Data to write
 
         Raises:
             QUICStreamClosedError: Stream is closed for writing
+            QUICStreamResetError: Stream was reset while waiting to write
+            QUICStreamTimeoutError: No send capacity within ``WRITE_TIMEOUT``
             QUICStreamBackpressureError: Flow control window exhausted
-            QUICStreamResetError: Stream was reset
 
         """
         if not data:
@@ -293,21 +344,80 @@ class QUICStream(IMuxedStream):
                 )
 
         try:
-            # Handle flow control backpressure
-            await self._backpressure_event.wait()
+            view = memoryview(data)
+            total = len(view)
+            offset = 0
+            while offset < total:
+                # Block while the peer has not acknowledged enough of what we
+                # already handed to aioquic.
+                await self._wait_for_send_capacity()
 
-            # Send data through QUIC connection
-            self._connection._quic.send_stream_data(self._stream_id, data)
-            await self._connection._transmit()
+                # Queue as many chunks as the send watermark allows, then
+                # transmit once before waiting again.
+                while offset < total:
+                    end = min(offset + self.WRITE_CHUNK_SIZE, total)
+                    if offset == 0 and end == total:
+                        chunk = data  # fits in one chunk: avoid a copy
+                    else:
+                        chunk = bytes(view[offset:end])
+                    offset = end
+
+                    self._connection._quic.send_stream_data(self._stream_id, chunk)
+                    self._update_send_backpressure()
+                    if not self._backpressure_event.is_set():
+                        break
+
+                self._connection._signal_activity()
+                await self._connection._transmit()
+                self._update_send_backpressure()
 
             self._timeline.record_first_data()
-            logger.debug(f"Wrote {len(data)} bytes to stream {self.stream_id}")
+            logger.debug(f"Wrote {total} bytes to stream {self.stream_id}")
 
+        except (
+            QUICStreamClosedError,
+            QUICStreamResetError,
+            QUICStreamTimeoutError,
+        ):
+            # Raised by _wait_for_send_capacity(): the stream state already
+            # reflects what happened, do not additionally reset the stream.
+            raise
+        except ValueError as e:
+            if "unknown peer-initiated stream" in str(e):
+                raise QUICStreamClosedError(
+                    f"Stream {self.stream_id} was already closed in QUIC layer"
+                ) from e
+            logger.error(f"Error writing to stream {self.stream_id}: {e}")
+            await self._handle_stream_error(e)
+            raise
+        except AssertionError as e:
+            # aioquic asserts on "cannot call write() after FIN" / "after reset()".
+            # Our write side is already closed; surface that as a closed-stream
+            # error instead of resetting the stream (which would also kill the
+            # peer's still-open read side).
+            msg = str(e)
+            if "after FIN" in msg or "after reset" in msg:
+                self._write_closed = True
+                logger.debug(
+                    f"Write on stream {self.stream_id} after local FIN/reset: {e}"
+                )
+                raise QUICStreamClosedError(
+                    f"Stream {self.stream_id} write side is closed"
+                ) from e
+            logger.error(f"Error writing to stream {self.stream_id}: {e}")
+            await self._handle_stream_error(e)
+            raise
         except Exception as e:
             logger.error(f"Error writing to stream {self.stream_id}: {e}")
-            # Convert QUIC-specific errors
-            if "flow control" in str(e).lower():
-                raise QUICStreamBackpressureError(f"Flow control limit reached: {e}")
+            # Convert QUIC-specific errors using isinstance checks
+            if QuicConnectionError is not None and isinstance(e, QuicConnectionError):
+                error_code = getattr(e, "error_code", None)
+                # QUIC flow control error code is 0x03
+                if error_code == 0x03:
+                    raise QUICStreamBackpressureError(
+                        f"Flow control limit reached: {e}",
+                        error_code=error_code,
+                    )
             await self._handle_stream_error(e)
             raise
 
@@ -350,6 +460,7 @@ class QUICStream(IMuxedStream):
             self._connection._quic.send_stream_data(
                 self._stream_id, b"", end_stream=True
             )
+            self._connection._signal_activity()
             await self._connection._transmit()
 
             self._write_closed = True
@@ -363,9 +474,19 @@ class QUICStream(IMuxedStream):
             logger.debug(f"Stream {self.stream_id} write side closed")
 
         except Exception as e:
-            msg = str(e).lower()
-            # These usually happen during shutdown races / late FIN handling.
-            if "after fin" in msg or "unknown peer-initiated stream" in msg:
+            # Classify the exception using isinstance instead of string matching.
+            # AssertionError: aioquic raises this for "after FIN" / "after reset".
+            # ValueError: aioquic raises this for unknown peer-initiated streams.
+            # StreamFinishedError: explicit stream-finished signal.
+            is_expected_shutdown = (
+                isinstance(e, AssertionError)
+                or (
+                    StreamFinishedError is not None
+                    and isinstance(e, StreamFinishedError)
+                )
+                or (isinstance(e, ValueError) and "peer-initiated" in str(e))
+            )
+            if is_expected_shutdown:
                 self._write_closed = True
                 async with self._state_lock:
                     if self._read_closed:
@@ -425,8 +546,9 @@ class QUICStream(IMuxedStream):
             await self._connection._transmit()
 
         except Exception as e:
-            msg = str(e).lower()
-            if "unknown peer-initiated stream" in msg:
+            # ValueError for unknown peer-initiated streams is expected
+            # during shutdown races; downgrade to debug.
+            if isinstance(e, ValueError) and "peer-initiated" in str(e):
                 logger.debug(f"Ignoring reset error on stream {self.stream_id}: {e}")
             else:
                 logger.error(f"Error sending reset for stream {self.stream_id}: {e}")
@@ -504,11 +626,6 @@ class QUICStream(IMuxedStream):
     async def handle_data_received(self, data: bytes, end_stream: bool) -> None:
         """
         Handle data received from the QUIC connection.
-
-        Args:
-            data: Received data
-            end_stream: Whether this is the last data (FIN received)
-
         """
         if self._state == StreamState.RESET:
             return
@@ -615,15 +732,92 @@ class QUICStream(IMuxedStream):
 
         """
         if available_window > 0:
-            self._backpressure_event.set()
+            # Re-evaluate against the actual send buffer: writers resume only
+            # if we are also below the send watermark.
+            self._update_send_backpressure()
             logger.debug(
-                f"Stream {self.stream_id} flow control".__add__(
-                    f"window updated: {available_window}"
-                )
+                f"Stream {self.stream_id} flow control "
+                f"window updated: {available_window}"
             )
         else:
-            self._backpressure_event = trio.Event()  # Reset to blocking state
+            self._block_writers()
             logger.debug(f"Stream {self.stream_id} flow control window exhausted")
+
+    # Send-side backpressure
+
+    def send_buffer_size(self) -> int:
+        """Bytes handed to aioquic for this stream that the peer has not ACKed."""
+        return self._connection.stream_send_buffer_size(self._stream_id)
+
+    def _block_writers(self) -> None:
+        """Make subsequent write() calls wait until capacity is available."""
+        if self._backpressure_event.is_set():
+            # Only ever replace a *set* event: nobody can be waiting on it, so
+            # waiters on the previous (unset) event are never orphaned.
+            self._backpressure_event = trio.Event()
+
+    def _update_send_backpressure(self) -> None:
+        """
+        Re-evaluate send backpressure from the un-ACKed send buffer.
+
+        Called after each write step and by the connection after datagrams are
+        processed (ACKs are handled inside aioquic's ``receive_datagram`` and
+        do not surface as events). Cheap enough to run frequently: it reads
+        two integers.
+        """
+        if self._write_closed or self._state in (
+            StreamState.CLOSED,
+            StreamState.RESET,
+        ):
+            # Nothing more will be written; never leave a writer stuck.
+            self._backpressure_event.set()
+            return
+
+        buffered = self.send_buffer_size()
+        if buffered >= self.SEND_BUFFER_HIGH_WATERMARK:
+            if self._backpressure_event.is_set():
+                logger.debug(
+                    f"Stream {self.stream_id} send buffer {buffered} bytes >= "
+                    f"{self.SEND_BUFFER_HIGH_WATERMARK}: applying backpressure"
+                )
+            self._block_writers()
+        elif buffered <= self.SEND_BUFFER_LOW_WATERMARK:
+            if not self._backpressure_event.is_set():
+                logger.debug(
+                    f"Stream {self.stream_id} send buffer {buffered} bytes <= "
+                    f"{self.SEND_BUFFER_LOW_WATERMARK}: releasing backpressure"
+                )
+                self._backpressure_event.set()
+
+    async def _wait_for_send_capacity(self) -> None:
+        """
+        Wait until the send buffer is below the low watermark.
+
+        Raises:
+            QUICStreamResetError: The stream was reset while waiting
+            QUICStreamClosedError: The write side was closed while waiting
+            QUICStreamTimeoutError: No capacity within ``WRITE_TIMEOUT``
+
+        """
+        if not self._backpressure_event.is_set():
+            with trio.move_on_after(self.WRITE_TIMEOUT) as scope:
+                await self._backpressure_event.wait()
+            if scope.cancelled_caught:
+                raise QUICStreamTimeoutError(
+                    f"Stream {self.stream_id} write timed out after "
+                    f"{self.WRITE_TIMEOUT}s waiting for the peer to acknowledge "
+                    f"{self.send_buffer_size()} buffered bytes"
+                )
+
+        # The wait may have ended because the stream went away, not because
+        # capacity was freed.
+        if self._state == StreamState.RESET:
+            raise QUICStreamResetError(
+                f"Stream {self.stream_id} was reset",
+                error_code=self._reset_error_code,
+            )
+        if self._write_closed or self._state == StreamState.CLOSED:
+            raise QUICStreamClosedError(f"Stream {self.stream_id} write side is closed")
 
     def _extract_data_from_buffer(self, n: int) -> bytes:
         """Extract data from receive buffer with specified limit."""
@@ -671,16 +865,20 @@ class QUICStream(IMuxedStream):
         if self._memory_reserved > 0:
             self._release_memory(self._memory_reserved)
 
-        # Clear receive buffer
-        async with self._receive_buffer_lock:
-            self._receive_buffer.clear()
+        # Do not clear receive buffer here. Allow application to drain it
+        # before surfacing EOF/reset.
 
         # Release resource scope if present
-        if self._resource_scope and hasattr(self._resource_scope, "done"):
+        if self._resource_scope:
             try:
-                self._resource_scope.done()
+                if hasattr(self._resource_scope, "close"):
+                    self._resource_scope.close()
+                elif hasattr(self._resource_scope, "release"):
+                    self._resource_scope.release()
+                elif hasattr(self._resource_scope, "done"):
+                    self._resource_scope.done()
             except Exception as e:
-                logger.warning(f"Error releasing resource scope: {e}")
+                logger.warning(f"Error releasing stream resource scope: {e}")
             self._resource_scope = None
 
         # Remove from connection's stream registry
@@ -707,13 +905,12 @@ class QUICStream(IMuxedStream):
         logger.debug("Exiting the context and closing the stream")
         await self.close()
 
-    def set_deadline(self, ttl: int) -> bool:
+    def set_deadline(self, ttl: int) -> None:
         """
-        Set a deadline for the stream. QUIC does not support deadlines natively,
-        so this method always returns False to indicate the operation is unsupported.
+        Set a deadline for the stream. QUIC does not support deadlines natively.
 
         :param ttl: Time-to-live in seconds (ignored).
-        :return: False, as deadlines are not supported.
+        :raises NotImplementedError: QUIC does not support setting deadlines.
         """
         raise NotImplementedError("QUIC does not support setting read deadlines")
 

@@ -7,10 +7,10 @@ from typing import Any
 
 from multiaddr import Multiaddr
 import trio
-from trio_websocket import WebSocketConnection
+from trio_websocket import ConnectionClosed, WebSocketConnection
 
 from libp2p.io.abc import ReadWriteCloser
-from libp2p.io.exceptions import IOException
+from libp2p.io.exceptions import ConnectionClosedError, IOException
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +168,10 @@ class P2PWebSocketConnection(ReadWriteCloser):
         """
         Check if an exception indicates WebSocket connection closure.
 
+        Uses ``isinstance`` against ``trio_websocket.ConnectionClosed``
+        instead of fragile string matching on the exception message or
+        type name.
+
         Args:
             e: The exception to check
 
@@ -175,13 +179,7 @@ class P2PWebSocketConnection(ReadWriteCloser):
             True if the exception indicates connection closure
 
         """
-        error_str = str(e)
-        error_type = type(e).__name__
-        return (
-            "CloseReason" in error_str
-            or "ConnectionClosed" in error_type
-            or "closed" in error_str.lower()
-        )
+        return isinstance(e, ConnectionClosed)
 
     def _extract_close_info(self, e: Exception) -> tuple[int | None, str]:
         """
@@ -194,31 +192,40 @@ class P2PWebSocketConnection(ReadWriteCloser):
             Tuple of (close_code, close_reason)
 
         """
-        # ConnectionClosed has a 'reason' attribute which is a CloseReason object
+        # ConnectionClosed has a 'reason' attribute which is a CloseReason object.
+        # Some exceptions (like mocks in tests) may have code/reason directly.
         close_reason_obj = getattr(e, "reason", None)
-        if close_reason_obj is not None:
+
+        # Check if reason is a CloseReason object (has 'code' attribute)
+        if close_reason_obj is not None and hasattr(close_reason_obj, "code"):
             close_code = getattr(close_reason_obj, "code", None)
             close_reason = (
                 getattr(close_reason_obj, "reason", None) or "Connection closed by peer"
             )
         else:
-            # Fallback if reason is not available
-            close_code = None
-            close_reason = "Connection closed by peer"
+            # Fallback: check if code and reason are directly on the exception
+            # (for mock exceptions in tests or other exception types)
+            close_code = getattr(e, "code", None)
+            close_reason = getattr(e, "reason", None) or "Connection closed by peer"
         return close_code, close_reason
 
     def _handle_connection_closed_exception(
         self, e: Exception, operation: str = "read"
-    ) -> IOException:
+    ) -> ConnectionClosedError:
         """
-        Handle a connection closure exception by creating an appropriate IOException.
+        Handle a connection closure exception by creating a ConnectionClosedError.
+
+        Returns a ``ConnectionClosedError`` (subclass of ``IOException``) that
+        carries the close code and reason as structured attributes.  This lets
+        upstream code (e.g. yamux) catch connection closures by *type* instead
+        of doing fragile string matching on the error message.
 
         Args:
             e: The exception that indicates connection closure
             operation: The operation that was being performed (read/write)
 
         Returns:
-            IOException with detailed information about the closure
+            ConnectionClosedError with close_code and close_reason attributes
 
         """
         self._closed = True
@@ -227,13 +234,17 @@ class P2PWebSocketConnection(ReadWriteCloser):
             f"WebSocket connection closed during {operation}: "
             f"code={close_code}, reason={close_reason}"
         )
-        # Return IOException to be raised by caller
-        # This allows read_exactly() to immediately detect connection closure
-        # instead of returning empty bytes which would cause retries
-        return IOException(
+        # Return ConnectionClosedError (subclass of IOException) to be raised
+        # by caller.  This allows read_exactly() to immediately detect
+        # connection closure instead of returning empty bytes which would cause
+        # retries, and lets yamux catch the typed exception directly.
+        return ConnectionClosedError(
             f"WebSocket connection closed by peer during "
             f"{operation} operation: code={close_code}, "
-            f"reason={close_reason}."
+            f"reason={close_reason}.",
+            close_code=close_code,
+            close_reason=close_reason,
+            transport="websocket",
         )
 
     async def _start_keepalive(self) -> None:
@@ -284,8 +295,10 @@ class P2PWebSocketConnection(ReadWriteCloser):
 
         """
         if self._closed:
-            # Return empty bytes to signal EOF (like TCP does)
-            return b""
+            # Raise IOException immediately when connection is closed.
+            # This allows read_exactly() to detect closure immediately
+            # instead of retrying up to 100 times on empty bytes.
+            raise IOException("Connection is closed")
 
         async with self._read_lock:
             try:
@@ -427,6 +440,9 @@ class P2PWebSocketConnection(ReadWriteCloser):
                 # Re-raise IOException as-is (already has proper context)
                 raise
             except Exception as e:
+                # Handle connection closure missed by inner handlers
+                if self._is_connection_closed_exception(e):
+                    raise self._handle_connection_closed_exception(e, "read")
                 logger.error(f"WebSocket read failed: {e}")
                 raise IOException(f"Read failed: {str(e)}")
 
@@ -464,7 +480,7 @@ class P2PWebSocketConnection(ReadWriteCloser):
                     raise self._handle_connection_closed_exception(e, "write")
                 logger.error(f"WebSocket write failed: {e}")
                 self._closed = True
-                raise IOException(f"Write failed: {str(e)}")
+                raise IOException(f"Write failed: {str(e)}") from e
 
     async def close(self) -> None:
         """

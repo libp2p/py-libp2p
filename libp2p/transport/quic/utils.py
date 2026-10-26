@@ -78,6 +78,9 @@ def is_quic_multiaddr(maddr: multiaddr.Multiaddr) -> bool:
             or f"/{QUIC_DRAFT29_PROTOCOL}" in addr_str
             or "/quic" in addr_str
         )
+        # WebTransport rides on quic-v1 but is a separate transport.
+        if "/webtransport" in addr_str:
+            return False
 
         return has_ip and has_udp and has_quic
 
@@ -293,6 +296,21 @@ def normalize_quic_multiaddr(maddr: multiaddr.Multiaddr) -> multiaddr.Multiaddr:
     return create_quic_multiaddr(host, port, version)
 
 
+def apply_flow_control_windows(
+    quic_config: QuicConfiguration,
+    transport_config: QUICTransportConfig,
+) -> None:
+    """
+    Map py-libp2p QUICTransportConfig flow-control windows onto aioquic limits.
+
+    aioquic defaults ``max_data`` / ``max_stream_data`` to ~1 MiB unless set.
+    Transport knobs must be applied in this single helper so server/client and
+    utils/transport construction paths cannot diverge (see discussion #1302).
+    """
+    quic_config.max_data = transport_config.CONNECTION_FLOW_CONTROL_WINDOW
+    quic_config.max_stream_data = transport_config.STREAM_FLOW_CONTROL_WINDOW
+
+
 def create_server_config_from_base(
     base_config: QuicConfiguration,
     security_manager: QUICTLSConfigManager | None = None,
@@ -311,6 +329,7 @@ def create_server_config_from_base(
         copyable_attrs = [
             "alpn_protocols",
             "verify_mode",
+            "max_datagram_size",
             "max_datagram_frame_size",
             "idle_timeout",
             "max_concurrent_streams",
@@ -319,6 +338,8 @@ def create_server_config_from_base(
             "max_stream_data",
             "stateless_retry",
             "quantum_readiness_test",
+            "congestion_control_algorithm",
+            "initial_rtt",
         ]
 
         for attr in copyable_attrs:
@@ -368,10 +389,13 @@ def create_server_config_from_base(
                 server_config.idle_timeout = getattr(
                     transport_config, "idle_timeout", 30.0
                 )
-            if server_config.max_datagram_frame_size is None:
-                server_config.max_datagram_frame_size = getattr(
-                    transport_config, "max_datagram_size", 1200
-                )
+            # UDP MTU (not the DATAGRAM extension frame size).
+            server_config.max_datagram_size = transport_config.max_datagram_size
+            server_config.congestion_control_algorithm = (
+                transport_config.congestion_control_algorithm
+            )
+            server_config.initial_rtt = transport_config.initial_rtt
+            apply_flow_control_windows(server_config, transport_config)
         # Ensure we have ALPN protocols
         if not server_config.alpn_protocols:
             server_config.alpn_protocols = ["libp2p"]
@@ -401,6 +425,7 @@ def create_client_config_from_base(
         copyable_attrs = [
             "alpn_protocols",
             "verify_mode",
+            "max_datagram_size",
             "max_datagram_frame_size",
             "idle_timeout",
             "max_concurrent_streams",
@@ -408,6 +433,8 @@ def create_client_config_from_base(
             "max_data",
             "max_stream_data",
             "quantum_readiness_test",
+            "congestion_control_algorithm",
+            "initial_rtt",
         ]
 
         for attr in copyable_attrs:
@@ -449,6 +476,19 @@ def create_client_config_from_base(
 
             except Exception as e:
                 logger.warning(f"Failed to apply security manager config: {e}")
+
+        if transport_config:
+            if client_config.idle_timeout == 0:
+                client_config.idle_timeout = getattr(
+                    transport_config, "idle_timeout", 30.0
+                )
+            # UDP MTU (not the DATAGRAM extension frame size).
+            client_config.max_datagram_size = transport_config.max_datagram_size
+            client_config.congestion_control_algorithm = (
+                transport_config.congestion_control_algorithm
+            )
+            client_config.initial_rtt = transport_config.initial_rtt
+            apply_flow_control_windows(client_config, transport_config)
 
         # Ensure we have ALPN protocols
         if not client_config.alpn_protocols:

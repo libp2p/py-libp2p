@@ -153,7 +153,7 @@ Client Output
     ======================================================================
     Size: 2.5 MB
     Filename: document.pdf (from metadata)
-    ✓ Saved to: /tmp/document.pdf
+    ✓ Saved to: <temp-dir>/document.pdf
     ======================================================================
 
 Features

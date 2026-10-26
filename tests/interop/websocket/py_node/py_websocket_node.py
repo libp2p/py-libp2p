@@ -7,6 +7,7 @@ import threading
 from typing import Any
 
 import trio
+from trio_websocket import connect_websocket_url
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -159,8 +160,6 @@ class PyWebSocketNode:
 
         # Try direct WebSocket echo against JS server
         try:
-            from trio_websocket import connect_websocket_url
-
             ws_url = f"ws://127.0.0.1:{port}/"
             async with trio.open_nursery() as nursery:
                 ws = await connect_websocket_url(nursery, ws_url)

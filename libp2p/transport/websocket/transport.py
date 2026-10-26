@@ -4,6 +4,7 @@ import ssl
 from urllib.parse import urlparse
 
 from multiaddr import Multiaddr
+from multiaddr.resolvers import DNSResolver
 import trio
 
 from libp2p.abc import IListener, ITransport
@@ -16,6 +17,11 @@ from libp2p.transport.websocket.multiaddr_utils import (
     ParsedWebSocketMultiaddr,
     parse_websocket_multiaddr,
 )
+from libp2p.utils.dns_utils import resolve_multiaddr_with_retry
+from libp2p.utils.multiaddr_utils import (
+    extract_host_from_multiaddr,
+    format_host_for_url,
+)
 
 from .autotls import AutoTLSConfig, AutoTLSManager, initialize_autotls
 from .connection import P2PWebSocketConnection
@@ -25,6 +31,18 @@ from .tls_config import WebSocketTLSConfig
 logger = logging.getLogger(__name__)
 
 
+def _find_ssl_error(exc: BaseException) -> ssl.SSLError | None:
+    """Return the ``ssl`` error behind ``exc``, if there is one in its chain."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, ssl.SSLError):
+            return current
+        current = current.__cause__ or current.__context__
+    return None
+
+
 @dataclass
 class WebsocketConfig:
     """Configuration options for WebSocket transport."""
@@ -32,6 +50,14 @@ class WebsocketConfig:
     # TLS configuration
     tls_client_config: ssl.SSLContext | None = None
     tls_server_config: ssl.SSLContext | None = None
+
+    # Dial ``wss`` without verifying the server certificate. Off by default: a
+    # ``wss`` dial with no explicit client configuration verifies against the
+    # system trust store and checks the hostname, as go-libp2p and js-libp2p do.
+    # Turn this on only for a self-signed endpoint you already trust; libp2p's
+    # own handshake still authenticates the peer inside the WebSocket, but an
+    # unverified outer TLS lets anyone on the path terminate it unnoticed.
+    insecure_skip_verify: bool = False
 
     # Advanced TLS configuration
     tls_config: WebSocketTLSConfig | None = None
@@ -43,6 +69,12 @@ class WebsocketConfig:
     handshake_timeout: float = 15.0
     max_buffered_amount: int = 4 * 1024 * 1024
     max_connections: int = 1000
+
+    # DNS resolution (for dial when the multiaddr is a /dnsaddr; a /dns, /dns4
+    # or /dns6 name is resolved by the socket connect and kept as the TLS
+    # server name and the Host header)
+    dns_resolution_timeout: float = 5.0
+    dns_max_retries: int = 3
 
     # Proxy configuration
     proxy_url: str | None = None
@@ -367,6 +399,8 @@ def combine_configs(*configs: WebsocketConfig) -> WebsocketConfig:
             result.tls_client_config = config.tls_client_config
         if config.tls_server_config is not None:
             result.tls_server_config = config.tls_server_config
+        if config.insecure_skip_verify:
+            result.insecure_skip_verify = True
 
         # Connection settings
         if config.handshake_timeout != 15.0:  # Not default
@@ -480,13 +514,41 @@ class WebsocketTransport(ITransport):
         ):
             nursery.start_soon(self._initialize_autotls, self._peer_id)
 
-    async def can_dial(self, maddr: Multiaddr) -> bool:
-        """Check if we can dial the given multiaddr."""
+    def can_dial(self, maddr: Multiaddr) -> bool:
+        """
+        Return True if this WebSocket transport can dial the given multiaddr.
+
+        Checks whether the multiaddr matches the WebSocket multiaddr pattern
+        (e.g. ``/ip4/.../tcp/.../ws`` or ``/ip4/.../tcp/.../wss``).
+
+        The check is purely protocol-level (no I/O); it changed from async
+        to sync to satisfy the :class:`~libp2p.abc.ITransport` interface.
+
+        :param maddr: The multiaddress to check.
+        :return: True if this transport handles the multiaddr.
+        """
         try:
             parse_websocket_multiaddr(maddr)
-            return True  # If parsing succeeds, it's a valid WebSocket multiaddr
+            return True
         except (ValueError, KeyError):
             return False
+
+    def can_listen(self, maddr: Multiaddr) -> bool:
+        """
+        Return True if this WebSocket transport can listen on the given multiaddr.
+
+        :param maddr: The multiaddress to check.
+        :return: True if this transport can listen on the multiaddr.
+        """
+        return self.can_dial(maddr)
+
+    def protocols(self) -> list[str]:
+        """
+        Return the list of multiaddr protocol names handled by WebSocket transport.
+
+        :return: ["ws", "wss"]
+        """
+        return ["ws", "wss"]
 
     async def _initialize_autotls(self, peer_id: ID | None = None) -> None:
         """Initialize AutoTLS if configured."""
@@ -511,6 +573,32 @@ class WebsocketTransport(ITransport):
         else:
             # Mark as initialized even if disabled so we don't check again
             self._autotls_initialized = True
+
+    def _default_client_ssl_context(self) -> ssl.SSLContext:
+        """
+        Build the TLS client context for a ``wss`` dial.
+
+        An explicit ``tls_client_config`` wins. Otherwise the context verifies
+        the server certificate against the system trust store and checks the
+        hostname, which is what go-libp2p (a zero ``tls.Config``) and js-libp2p
+        (the platform TLS stack) do. ``insecure_skip_verify`` restores the old
+        unverified behaviour for a self-signed endpoint the caller trusts.
+        """
+        if self._config.tls_client_config:
+            logger.debug("Using custom TLS client config")
+            return self._config.tls_client_config
+
+        ssl_context = ssl.create_default_context()
+        if self._config.insecure_skip_verify:
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            logger.warning(
+                "Dialing wss with certificate verification disabled "
+                "(insecure_skip_verify): the outer TLS is unauthenticated"
+            )
+        else:
+            logger.debug("Using default TLS client config (system trust store)")
+        return ssl_context
 
     async def _get_ssl_context(
         self,
@@ -585,17 +673,10 @@ class WebsocketTransport(ITransport):
 
         """
         # Extract host and port from the rest_multiaddr
-        host = (
-            proto_info.rest_multiaddr.value_for_protocol("ip4")
-            or proto_info.rest_multiaddr.value_for_protocol("ip6")
-            or proto_info.rest_multiaddr.value_for_protocol("dns")
-            or proto_info.rest_multiaddr.value_for_protocol("dns4")
-            or proto_info.rest_multiaddr.value_for_protocol("dns6")
-            or "localhost"
-        )
+        host = extract_host_from_multiaddr(proto_info.rest_multiaddr) or "localhost"
         port = int(proto_info.rest_multiaddr.value_for_protocol("tcp") or "80")
         protocol = "wss" if proto_info.is_wss else "ws"
-        ws_url = f"{protocol}://{host}:{port}/"
+        ws_url = f"{protocol}://{format_host_for_url(host)}:{port}/"
 
         # ✅ NEW: Determine proxy configuration with precedence:
         # 1. Explicit proxy_url parameter (highest priority)
@@ -629,16 +710,7 @@ class WebsocketTransport(ITransport):
                 )
 
                 if ssl_context is None:
-                    # Fall back to legacy TLS configuration
-                    if self._config.tls_client_config:
-                        ssl_context = self._config.tls_client_config
-                        logger.debug("Using custom TLS client config")
-                    else:
-                        # Create default SSL context for client
-                        ssl_context = ssl.create_default_context()
-                        ssl_context.check_hostname = False
-                        ssl_context.verify_mode = ssl.CERT_NONE
-                        logger.debug("Using default TLS client config (insecure)")
+                    ssl_context = self._default_client_ssl_context()
 
             # Handle proxy connections
             if final_proxy_url:
@@ -661,6 +733,11 @@ class WebsocketTransport(ITransport):
             logger.info(f"Connection established to {ws_url}")
             return conn
 
+        except OpenConnectionError:
+            # Already describes its own cause (a refused certificate, say);
+            # re-wrapping would bury it inside "Failed to connect to ...".
+            self._failed_connections += 1
+            raise
         except trio.TooSlowError as e:
             self._failed_connections += 1
             logger.error(f"Connection timeout after {self._config.handshake_timeout}s")
@@ -670,7 +747,10 @@ class WebsocketTransport(ITransport):
         except Exception as e:
             self._failed_connections += 1
             logger.error(f"Failed to connect to {ws_url}: {e}", exc_info=True)
-            raise OpenConnectionError(f"Failed to connect to {ws_url}: {str(e)}")
+            # Chain the cause: a refused certificate or a rejected upgrade is
+            # what the caller needs to see, and str(e) alone is empty for some
+            # ssl and trio errors.
+            raise OpenConnectionError(f"Failed to connect to {ws_url}: {e!r}") from e
 
     async def _create_direct_connection(
         self, proto_info: ParsedWebSocketMultiaddr, ssl_context: ssl.SSLContext | None
@@ -678,27 +758,21 @@ class WebsocketTransport(ITransport):
         """Create a direct WebSocket connection."""
         # Extract host and port from the rest_multiaddr
         # Support IP addresses and DNS-based multiaddrs
-        host = (
-            proto_info.rest_multiaddr.value_for_protocol("ip4")
-            or proto_info.rest_multiaddr.value_for_protocol("ip6")
-            or proto_info.rest_multiaddr.value_for_protocol("dns")
-            or proto_info.rest_multiaddr.value_for_protocol("dns4")
-            or proto_info.rest_multiaddr.value_for_protocol("dns6")
-            or "localhost"
-        )
+        host = extract_host_from_multiaddr(proto_info.rest_multiaddr) or "localhost"
         # Ensure host is a string, not a tuple or other type
         if isinstance(host, tuple):
             host = host[0]
 
         port = int(proto_info.rest_multiaddr.value_for_protocol("tcp") or "80")
         protocol = "wss" if proto_info.is_wss else "ws"
-        ws_url = f"{protocol}://{host}:{port}/"
+        ws_url = f"{protocol}://{format_host_for_url(host)}:{port}/"
 
         logger.debug(f"WebsocketTransport.dial connecting to {ws_url}")
 
         # Apply timeout to the connection process
         with trio.fail_after(self._config.handshake_timeout):
-            from trio_websocket import connect_websocket_url
+            from trio import aclose_forcefully
+            from trio_websocket import wrap_client_stream
 
             # Use background nursery if available (set by Swarm),
             # otherwise create temporary one
@@ -708,15 +782,57 @@ class WebsocketTransport(ITransport):
                     "WebSocket transport requires Swarm to set background nursery."
                 )
 
-            # Create the WebSocket connection using the Swarm's background nursery
-            # This nursery stays alive for the lifetime of the Swarm service
-            ws = await connect_websocket_url(
-                self._background_nursery,
-                ws_url,
-                ssl_context=ssl_context,
-                message_queue_size=1024,
-                max_message_size=self._config.max_message_size,
-            )
+            # Open the stream, and for wss complete the TLS handshake, in this
+            # task rather than letting trio_websocket do it from the background
+            # nursery. connect_websocket_url() starts its reader task there and
+            # then waits on an Event that is only ever set on success, so a
+            # refused certificate or an unanswered upgrade never reaches the
+            # dialer: it waits out handshake_timeout and reports a timeout,
+            # while the failed connection keeps the socket open. Owning the
+            # stream here means TLS errors surface with their cause and the
+            # socket is closed on every failure path.
+            stream: trio.SocketStream | trio.SSLStream
+            stream = await trio.open_tcp_stream(host, port)
+            try:
+                if ssl_context is not None:
+                    stream = trio.SSLStream(
+                        stream,
+                        ssl_context,
+                        server_hostname=host,
+                        https_compatible=True,
+                    )
+                    try:
+                        await stream.do_handshake()
+                    except Exception as exc:
+                        # trio reports a failed handshake as BrokenResourceError
+                        # and keeps the ssl error as the cause, so report the
+                        # cause: "certificate verify failed" is the actionable
+                        # part, "BrokenResourceError()" is not.
+                        ssl_error = _find_ssl_error(exc)
+                        if ssl_error is None:
+                            raise
+                        raise OpenConnectionError(
+                            f"TLS handshake failed for {ws_url}: {ssl_error}"
+                        ) from ssl_error
+
+                # trio_websocket omits the port from the Host header on the
+                # default ports, so keep that behaviour.
+                host_header = host if port in (80, 443) else f"{host}:{port}"
+                ws = await wrap_client_stream(
+                    self._background_nursery,
+                    stream,
+                    host_header,
+                    "/",
+                    message_queue_size=1024,
+                    max_message_size=self._config.max_message_size,
+                )
+            except BaseException:
+                # Includes the trio.Cancelled from fail_after: without the
+                # shield the close itself would be cancelled and the socket
+                # would leak exactly when the handshake timed out.
+                with trio.CancelScope(shield=True):  # type: ignore[call-arg]
+                    await aclose_forcefully(stream)
+                raise
 
             # Create our connection wrapper
             conn = P2PWebSocketConnection(
@@ -760,14 +876,7 @@ class WebsocketTransport(ITransport):
             )
 
             # Extract host and port from multiaddr
-            host = (
-                proto_info.rest_multiaddr.value_for_protocol("ip4")
-                or proto_info.rest_multiaddr.value_for_protocol("ip6")
-                or proto_info.rest_multiaddr.value_for_protocol("dns")
-                or proto_info.rest_multiaddr.value_for_protocol("dns4")
-                or proto_info.rest_multiaddr.value_for_protocol("dns6")
-                or "localhost"
-            )
+            host = extract_host_from_multiaddr(proto_info.rest_multiaddr) or "localhost"
             port = int(proto_info.rest_multiaddr.value_for_protocol("tcp") or "80")
 
             logger.debug(f"Connecting through SOCKS proxy to {host}:{port}")
@@ -807,6 +916,13 @@ class WebsocketTransport(ITransport):
         """
         Dial a WebSocket connection to the given multiaddr.
 
+        A ``/dnsaddr`` address is resolved through its TXT records first; the
+        records name the concrete addresses. A ``/dns``, ``/dns4`` or ``/dns6``
+        address is dialed by name: the name becomes the TLS server name and
+        the ``Host`` header of the WebSocket handshake, which a TLS-terminating
+        proxy in front of the peer selects the origin by, and the socket
+        connect resolves it. This matches go-libp2p and js-libp2p.
+
         Args:
             maddr: The multiaddr to dial (e.g., /ip4/127.0.0.1/tcp/8000/ws)
 
@@ -818,24 +934,56 @@ class WebsocketTransport(ITransport):
         :raises ValueError: If multiaddr is invalid or cannot be parsed
 
         """
-        logger.debug(f"WebsocketTransport.dial called with {maddr}")
+        logger.debug("WebsocketTransport.dial called with %s", maddr)
 
-        if not await self.can_dial(maddr):
+        protocols = list(maddr.protocols())
+        if protocols and protocols[0].name == "dnsaddr":
+            resolved = await resolve_multiaddr_with_retry(
+                maddr,
+                resolver=DNSResolver(),
+                max_retries=self._config.dns_max_retries,
+                timeout_seconds=self._config.dns_resolution_timeout,
+            )
+            if not resolved:
+                raise OpenConnectionError(
+                    f"Failed to resolve DNS for {maddr} (retries exhausted)"
+                )
+            last_error: Exception | None = None
+            for resolved_addr in resolved:
+                try:
+                    return await self._dial_resolved(resolved_addr)
+                except Exception as e:
+                    last_error = e
+                    logger.debug(
+                        "Dial to resolved address %s failed: %s",
+                        resolved_addr,
+                        e,
+                    )
+                    continue
+            if last_error is not None:
+                raise OpenConnectionError(
+                    f"Failed to connect to any resolved address for {maddr}"
+                ) from last_error
+            raise OpenConnectionError(
+                f"Failed to connect to any resolved address for {maddr}"
+            )
+        return await self._dial_resolved(maddr)
+
+    async def _dial_resolved(self, maddr: Multiaddr) -> RawConnection:
+        """Dial a multiaddr the socket can connect to: an IP or a DNS name."""
+        if not self.can_dial(maddr):
             raise OpenConnectionError(f"Cannot dial {maddr}")
 
         try:
-            # Parse multiaddr and create connection
             proto_info = parse_websocket_multiaddr(maddr)
             conn = await self._create_connection(proto_info)
-
-            # Return RawConnection - connection upgrading (security + muxing)
-            # is handled by the Swarm layer via TransportUpgrader
             try:
-                return RawConnection(conn, True)  # True for initiator
+                return RawConnection(conn, True)
             except Exception as e:
                 await conn.close()
-                raise OpenConnectionError(f"Failed to upgrade connection: {str(e)}")
-
+                raise OpenConnectionError(
+                    f"Failed to upgrade connection: {str(e)}"
+                ) from e
         except Exception as e:
             if isinstance(e, OpenConnectionError):
                 raise
@@ -868,7 +1016,7 @@ class WebsocketTransport(ITransport):
         ):
             self._background_nursery.start_soon(self._initialize_autotls)
 
-        return WebsocketListener(
+        listener = WebsocketListener(
             handler,
             self._upgrader,
             WebsocketListenerConfig(
@@ -885,6 +1033,8 @@ class WebsocketTransport(ITransport):
             ),
             peer_id=self._peer_id,
         )
+        self._active_listeners.add(listener)
+        return listener
 
     async def get_connections(self) -> dict[str, P2PWebSocketConnection]:
         """Get all active connections."""
@@ -905,6 +1055,29 @@ class WebsocketTransport(ITransport):
             "proxy_connections": self._proxy_connections,
             "has_proxy_config": bool(self._config.proxy_url),
         }
+
+    async def close(self) -> None:
+        """
+        Close all tracked WebSocket connections and listeners.
+
+        Invoked from ``Swarm.close()`` / ``Swarm.run()`` shutdown via
+        ``TransportManager.close_all()`` so dialed/accepted sockets are released
+        (#1498).
+        """
+        async with self._connection_lock:
+            connections = list(self._connections.values())
+            self._connections.clear()
+            self._current_connections = 0
+        listeners = list(self._active_listeners)
+        self._active_listeners.clear()
+
+        async with trio.open_nursery() as nursery:
+            for connection in connections:
+                nursery.start_soon(connection.close)
+            for listener in listeners:
+                nursery.start_soon(listener.close)
+
+        logger.debug("WebSocket transport closed")
 
     def resolve(self, maddr: Multiaddr) -> list[Multiaddr]:
         """

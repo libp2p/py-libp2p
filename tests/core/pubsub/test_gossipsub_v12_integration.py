@@ -2,7 +2,6 @@ from typing import cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
-import trio
 
 from libp2p.pubsub.gossipsub import (
     PROTOCOL_ID_V12,
@@ -15,6 +14,7 @@ from libp2p.tools.utils import (
 from tests.utils.factories import (
     PubsubFactory,
 )
+from tests.utils.pubsub.wait import wait_for
 
 
 @pytest.mark.trio
@@ -40,23 +40,33 @@ async def test_idontwant_message_exchange():
         for router in routers:
             assert isinstance(router, GossipSub)
 
-        # Connect all nodes
-        await connect(pubsubs[0].host, pubsubs[1].host)
-        await connect(pubsubs[1].host, pubsubs[2].host)
-        await connect(pubsubs[0].host, pubsubs[2].host)
-        await trio.sleep(0.1)  # Allow connections to establish
-
-        # Subscribe all nodes to the test topic
-        for pubsub in pubsubs:
-            await pubsub.subscribe(topic)
-        await trio.sleep(0.5)  # Allow mesh to form
-
-        # Set up the mesh manually to ensure a specific topology
-        # Node 0 and 1 are in Node 2's mesh
         peer0_id = pubsubs[0].host.get_id()
         peer1_id = pubsubs[1].host.get_id()
         peer2_id = pubsubs[2].host.get_id()
 
+        # Connect all nodes
+        await connect(pubsubs[0].host, pubsubs[1].host)
+        await connect(pubsubs[1].host, pubsubs[2].host)
+        await connect(pubsubs[0].host, pubsubs[2].host)
+        await pubsubs[0].wait_for_peer(peer1_id, timeout=10)
+        await pubsubs[1].wait_for_peer(peer0_id, timeout=10)
+        await pubsubs[1].wait_for_peer(peer2_id, timeout=10)
+        await pubsubs[2].wait_for_peer(peer1_id, timeout=10)
+        await pubsubs[0].wait_for_peer(peer2_id, timeout=10)
+        await pubsubs[2].wait_for_peer(peer0_id, timeout=10)
+
+        # Subscribe all nodes to the test topic
+        for pubsub in pubsubs:
+            await pubsub.subscribe(topic)
+        await pubsubs[0].wait_for_subscription(peer1_id, topic, timeout=10)
+        await pubsubs[0].wait_for_subscription(peer2_id, topic, timeout=10)
+        await pubsubs[1].wait_for_subscription(peer0_id, topic, timeout=10)
+        await pubsubs[1].wait_for_subscription(peer2_id, topic, timeout=10)
+        await pubsubs[2].wait_for_subscription(peer0_id, topic, timeout=10)
+        await pubsubs[2].wait_for_subscription(peer1_id, topic, timeout=10)
+
+        # Set up the mesh manually to ensure a specific topology
+        # Node 0 and 1 are in Node 2's mesh
         for router in routers:
             router.mesh[topic] = set()
 
@@ -96,7 +106,11 @@ async def test_idontwant_message_exchange():
             await routers[1].publish(peer0_id, msg)
 
             # Verify Node 1 emitted IDONTWANT to its mesh peers
-            await trio.sleep(0.1)  # Allow async operations to complete
+            await wait_for(
+                lambda: mock_emit.called,
+                timeout=10.0,
+                fail_msg="emit_idontwant was not called after publish",
+            )
 
             # Check that emit_idontwant was called for Node 2
             mock_emit.assert_called()
@@ -137,11 +151,20 @@ async def test_idontwant_integration_with_end_to_end_message():
     ) as pubsubs:
         topic = "test_topic"
 
+        peer0_id = pubsubs[0].host.get_id()
+        peer1_id = pubsubs[1].host.get_id()
+        peer2_id = pubsubs[2].host.get_id()
+
         # Connect all nodes
         await connect(pubsubs[0].host, pubsubs[1].host)
         await connect(pubsubs[1].host, pubsubs[2].host)
         await connect(pubsubs[0].host, pubsubs[2].host)
-        await trio.sleep(0.1)  # Allow connections to establish
+        await pubsubs[0].wait_for_peer(peer1_id, timeout=10)
+        await pubsubs[1].wait_for_peer(peer0_id, timeout=10)
+        await pubsubs[1].wait_for_peer(peer2_id, timeout=10)
+        await pubsubs[2].wait_for_peer(peer1_id, timeout=10)
+        await pubsubs[0].wait_for_peer(peer2_id, timeout=10)
+        await pubsubs[2].wait_for_peer(peer0_id, timeout=10)
 
         # Set protocol versions for all peers
         for i, pubsub in enumerate(pubsubs):
@@ -167,9 +190,6 @@ async def test_idontwant_integration_with_end_to_end_message():
         msg_id = pubsubs[0].get_message_id(msg)
 
         # Manually add the message ID to Node 0's don't_send list for Node 2
-        peer1_id = pubsubs[1].host.get_id()
-        peer2_id = pubsubs[2].host.get_id()
-
         # Cast to GossipSub to access implementation-specific attributes
         gossipsub_router = cast(GossipSub, pubsubs[0].router)
         if peer2_id not in gossipsub_router.dont_send_message_ids:

@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 from multiaddr import Multiaddr
 
+from libp2p.abc import ConnectionType
 from libp2p.peer.id import ID
 from libp2p.relay.circuit_v2.nat import (
     ReachabilityChecker,
@@ -13,6 +14,7 @@ from libp2p.relay.circuit_v2.nat import (
     is_ip_in_range,
     is_private_ip,
 )
+from libp2p.utils.multiaddr_utils import get_protocol_layers
 
 
 def test_ip_to_int_ipv4():
@@ -93,6 +95,19 @@ def test_extract_ip_from_multiaddr():
     assert extract_ip_from_multiaddr(addr6) == "192.168.1.1"
 
 
+def test_get_protocol_layers():
+    """Test get_protocol_layers uses Multiaddr.split() for stack (Section 3.2)."""
+    maddr = Multiaddr("/ip4/127.0.0.1/tcp/4001")
+    layers = get_protocol_layers(maddr)
+    assert len(layers) == 2
+    assert str(layers[0]) == "/ip4/127.0.0.1"
+    assert str(layers[1]) == "/tcp/4001"
+    # maxsplit=1: first component only
+    one = get_protocol_layers(maddr, maxsplit=1)
+    assert len(one) == 2  # split(maxsplit=1) yields 2 parts
+    assert str(one[0]) == "/ip4/127.0.0.1"
+
+
 def test_reachability_checker_init():
     """Test ReachabilityChecker initialization."""
     mock_host = MagicMock()
@@ -161,6 +176,7 @@ async def test_check_peer_reachability_connected_direct():
     mock_conn.get_transport_addresses.return_value = [
         Multiaddr("/ip4/192.168.1.1/tcp/1234")  # Direct connection
     ]
+    mock_conn.get_connection_type.return_value = ConnectionType.DIRECT
 
     mock_network.connections = {peer_id: mock_conn}
 
@@ -282,11 +298,13 @@ async def test_check_peer_reachability_multiple_connections():
     mock_conn1.get_transport_addresses.return_value = [
         Multiaddr("/p2p-circuit/ip4/192.168.1.1/tcp/1234")  # Relay
     ]
+    mock_conn1.get_connection_type.return_value = ConnectionType.RELAYED
 
     mock_conn2 = MagicMock()
     mock_conn2.get_transport_addresses.return_value = [
         Multiaddr("/ip4/192.168.1.1/tcp/1234")  # Direct
     ]
+    mock_conn2.get_connection_type.return_value = ConnectionType.DIRECT
 
     mock_network.connections = {peer_id: [mock_conn1, mock_conn2]}
 

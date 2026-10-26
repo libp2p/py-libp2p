@@ -1,20 +1,27 @@
+import os
+
 import pytest
 import trio
 from trio.testing import (
     wait_all_tasks_blocked,
 )
 
+from libp2p.stream_muxer.mplex.constants import (
+    CHUNK_SIZE,
+    MAX_MESSAGE_SIZE,
+    RECEIVE_TIMEOUT_SECS,
+)
 from libp2p.stream_muxer.mplex.exceptions import (
     MplexStreamClosed,
     MplexStreamEOF,
     MplexStreamReset,
     MuxedConnUnavailable,
 )
-from libp2p.stream_muxer.mplex.mplex import (
-    MPLEX_MESSAGE_CHANNEL_SIZE,
-)
 from libp2p.tools.constants import (
     MAX_READ_LEN,
+)
+from libp2p.utils import (
+    encode_uvarint,
 )
 
 DATA = b"data_123"
@@ -30,23 +37,105 @@ async def test_mplex_stream_read_write(mplex_stream_pair):
 @pytest.mark.trio
 async def test_mplex_stream_full_buffer(mplex_stream_pair):
     stream_0, stream_1 = mplex_stream_pair
-    # Test: The message channel is of size `MPLEX_MESSAGE_CHANNEL_SIZE`.
-    #   It should be fine to read even there are already `MPLEX_MESSAGE_CHANNEL_SIZE`
-    #   messages arriving.
-    for _ in range(MPLEX_MESSAGE_CHANNEL_SIZE):
-        await stream_0.write(DATA)
+    # With go-mplex-style flow control (channel depth 1 + blocking delivery),
+    # a slow reader does not immediately reset. Writes that fit in the
+    # channel complete; the reader can still drain them.
+    await stream_0.write(DATA)
     await wait_all_tasks_blocked()
-    # Sanity check
-    assert MAX_READ_LEN >= MPLEX_MESSAGE_CHANNEL_SIZE * len(DATA)
-    assert (await stream_1.read(MAX_READ_LEN)) == MPLEX_MESSAGE_CHANNEL_SIZE * DATA
+    assert (await stream_1.read(MAX_READ_LEN)) == DATA
 
-    # Test: Read after `MPLEX_MESSAGE_CHANNEL_SIZE + 1` messages has arrived, which
-    #   exceeds the channel size. The stream should have been reset.
-    for _ in range(MPLEX_MESSAGE_CHANNEL_SIZE + 1):
-        await stream_0.write(DATA)
+    # A large write is chunked and must round-trip without resetting.
+    # Reader must run concurrently — channel depth 1 applies backpressure.
+    large = DATA * 500  # well above CHUNK_SIZE / channel depth
+    received = bytearray()
+
+    async def reader() -> None:
+        while len(received) < len(large):
+            received.extend(await stream_1.read(65536))
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(reader)
+        await stream_0.write(large)
+    assert bytes(received) == large
+
+
+@pytest.mark.trio
+async def test_mplex_write_chunks_large_payload(mplex_stream_pair):
+    stream_0, stream_1 = mplex_stream_pair
+    payload = b"x" * (CHUNK_SIZE * 3 + 100)
+    frame_sizes: list[int] = []
+    original = stream_0.muxed_conn.send_message
+
+    async def counting_send(flag, data, stream_id):
+        if data:
+            frame_sizes.append(len(data))
+        return await original(flag, data, stream_id)
+
+    stream_0.muxed_conn.send_message = counting_send  # type: ignore[method-assign]
+    received = bytearray()
+
+    async def reader() -> None:
+        while len(received) < len(payload):
+            received.extend(await stream_1.read(65536))
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(reader)
+        await stream_0.write(payload)
+    assert frame_sizes
+    assert all(size <= CHUNK_SIZE for size in frame_sizes)
+    assert sum(frame_sizes) == len(payload)
+    assert bytes(received) == payload
+
+
+@pytest.mark.trio
+async def test_mplex_large_write_read_roundtrip(mplex_stream_pair):
+    stream_0, stream_1 = mplex_stream_pair
+    payload = os.urandom(900 * 1024)
+    received = bytearray()
+
+    async def reader() -> None:
+        while len(received) < len(payload):
+            received.extend(await stream_1.read(65536))
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(reader)
+        await stream_0.write(payload)
+    assert bytes(received) == payload
+
+
+@pytest.mark.trio
+async def test_mplex_receive_timeout_resets_stream(mplex_stream_pair, autojump_clock):
+    stream_0, stream_1 = mplex_stream_pair
+    # Occupy the depth-1 channel so the next frame blocks in _handle_message.
+    await stream_0.write(DATA)
     await wait_all_tasks_blocked()
+
+    async def blocked_write() -> None:
+        await stream_0.write(DATA)
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(blocked_write)
+        await wait_all_tasks_blocked()
+        # Advance past go-mplex ReceiveTimeout so the blocked delivery resets.
+        await trio.sleep(RECEIVE_TIMEOUT_SECS + 0.1)
+        nursery.cancel_scope.cancel()
+
     with pytest.raises(MplexStreamReset):
         await stream_1.read(MAX_READ_LEN)
+
+
+@pytest.mark.trio
+async def test_mplex_read_rejects_oversize_frame(mplex_conn_pair):
+    mplex_0, mplex_1 = mplex_conn_pair
+    # Craft a MessageInitiator frame whose length prefix exceeds MaxMessageSize.
+    # Header: (channel_id << 3) | flag; flag 2 = MessageInitiator.
+    header = encode_uvarint((0 << 3) | 2)
+    oversize_len = encode_uvarint(MAX_MESSAGE_SIZE + 1)
+    await mplex_0.secured_conn.write(header + oversize_len)
+    # Peer mux should tear down on MessageTooLarge → MplexUnavailable.
+    with trio.fail_after(5):
+        await mplex_1.event_closed.wait()
+    assert mplex_1.is_closed
 
 
 @pytest.mark.trio
@@ -88,7 +177,7 @@ async def test_mplex_stream_read_after_remote_closed(mplex_stream_pair):
     await wait_all_tasks_blocked()
     await stream_0.close()
     assert stream_0.event_local_closed.is_set()
-    await trio.sleep(0.01)
+    await trio.sleep(0.05)
     await wait_all_tasks_blocked()
     assert stream_1.event_remote_closed.is_set()
     assert (await stream_1.read(MAX_READ_LEN)) == DATA
@@ -109,11 +198,29 @@ async def test_mplex_stream_read_after_remote_reset(mplex_stream_pair):
     stream_0, stream_1 = mplex_stream_pair
     await stream_0.write(DATA)
     await stream_0.reset()
-    # Sleep to let `stream_1` receive the message.
+    # Sleep to let `stream_1` receive the message and reset.
     await trio.sleep(0.1)
     await wait_all_tasks_blocked()
+    # Buffered data that arrived before RESET must still be readable.
+    assert (await stream_1.read(MAX_READ_LEN)) == DATA
     with pytest.raises(MplexStreamReset):
         await stream_1.read(MAX_READ_LEN)
+
+
+@pytest.mark.trio
+async def test_mplex_stream_read_ping_payload_before_remote_reset(
+    mplex_stream_pair,
+):
+    """Ping-shaped: 32-byte payload then RESET must still return the payload."""
+    stream_0, stream_1 = mplex_stream_pair
+    ping_payload = b"\x01" * 32
+    await stream_0.write(ping_payload)
+    await stream_0.reset()
+    await trio.sleep(0.1)
+    await wait_all_tasks_blocked()
+    assert (await stream_1.read(32)) == ping_payload
+    with pytest.raises(MplexStreamReset):
+        await stream_1.read(32)
 
 
 @pytest.mark.trio
@@ -123,7 +230,8 @@ async def test_mplex_stream_read_after_remote_closed_and_reset(mplex_stream_pair
     await stream_0.close()
     await stream_0.reset()
     # Sleep to let `stream_1` receive the message.
-    await trio.sleep(0.01)
+    await trio.sleep(0.05)
+    await wait_all_tasks_blocked()
     assert (await stream_1.read(MAX_READ_LEN)) == DATA
 
 
@@ -167,7 +275,8 @@ async def test_mplex_stream_both_close(mplex_stream_pair):
 
     # Test: Close one side.
     await stream_0.close()
-    await trio.sleep(0.01)
+    await trio.sleep(0.05)
+    await wait_all_tasks_blocked()
 
     assert stream_0.event_local_closed.is_set()
     assert not stream_1.event_local_closed.is_set()
@@ -197,7 +306,8 @@ async def test_mplex_stream_both_close(mplex_stream_pair):
 async def test_mplex_stream_reset(mplex_stream_pair):
     stream_0, stream_1 = mplex_stream_pair
     await stream_0.reset()
-    await trio.sleep(0.01)
+    await trio.sleep(0.05)
+    await wait_all_tasks_blocked()
 
     # Both sides are closed.
     assert stream_0.event_local_closed.is_set()
@@ -353,12 +463,12 @@ async def test_mplex_stream_set_deadline_sets_both(mplex_stream_pair):
     stream_0, stream_1 = mplex_stream_pair
 
     # Set deadline for both operations
-    assert stream_0.set_deadline(30) is True
+    stream_0.set_deadline(30)
     assert stream_0.read_deadline == 30
     assert stream_0.write_deadline == 30
 
     # Should be able to update it
-    assert stream_0.set_deadline(60) is True
+    stream_0.set_deadline(60)
     assert stream_0.read_deadline == 60
     assert stream_0.write_deadline == 60
 
@@ -369,7 +479,7 @@ async def test_mplex_stream_set_read_deadline_only(mplex_stream_pair):
     stream_0, stream_1 = mplex_stream_pair
 
     # Set only read deadline
-    assert stream_0.set_read_deadline(30) is True
+    stream_0.set_read_deadline(30)
     assert stream_0.read_deadline == 30
     assert stream_0.write_deadline is None
 
@@ -380,7 +490,7 @@ async def test_mplex_stream_set_write_deadline_only(mplex_stream_pair):
     stream_0, stream_1 = mplex_stream_pair
 
     # Set only write deadline
-    assert stream_0.set_write_deadline(30) is True
+    stream_0.set_write_deadline(30)
     assert stream_0.write_deadline == 30
     assert stream_0.read_deadline is None
 
@@ -498,25 +608,31 @@ async def test_mplex_stream_concurrent_operations_with_deadlines(mplex_stream_pa
 
 @pytest.mark.trio
 async def test_mplex_stream_deadline_validation_negative_ttl(mplex_stream_pair):
-    """Test that deadline methods return False for negative TTL values."""
+    """Test that deadline methods raise ValueError for negative TTL values."""
     stream_0, stream_1 = mplex_stream_pair
 
     # Test set_deadline with negative TTL
-    assert stream_0.set_deadline(-1) is False
-    assert stream_0.set_deadline(-10) is False
+    with pytest.raises(ValueError, match="non-negative"):
+        stream_0.set_deadline(-1)
+    with pytest.raises(ValueError, match="non-negative"):
+        stream_0.set_deadline(-10)
     # Deadlines should remain unchanged
     assert stream_0.read_deadline is None
     assert stream_0.write_deadline is None
 
     # Test set_read_deadline with negative TTL
-    assert stream_0.set_read_deadline(-1) is False
-    assert stream_0.set_read_deadline(-5) is False
+    with pytest.raises(ValueError, match="non-negative"):
+        stream_0.set_read_deadline(-1)
+    with pytest.raises(ValueError, match="non-negative"):
+        stream_0.set_read_deadline(-5)
     # Read deadline should remain unchanged
     assert stream_0.read_deadline is None
 
     # Test set_write_deadline with negative TTL
-    assert stream_0.set_write_deadline(-1) is False
-    assert stream_0.set_write_deadline(-3) is False
+    with pytest.raises(ValueError, match="non-negative"):
+        stream_0.set_write_deadline(-1)
+    with pytest.raises(ValueError, match="non-negative"):
+        stream_0.set_write_deadline(-3)
     # Write deadline should remain unchanged
     assert stream_0.write_deadline is None
 
@@ -527,16 +643,16 @@ async def test_mplex_stream_deadline_validation_zero_ttl(mplex_stream_pair):
     stream_0, stream_1 = mplex_stream_pair
 
     # Test set_deadline with zero TTL (should be valid)
-    assert stream_0.set_deadline(0) is True
+    stream_0.set_deadline(0)
     assert stream_0.read_deadline == 0
     assert stream_0.write_deadline == 0
 
     # Test set_read_deadline with zero TTL
-    assert stream_0.set_read_deadline(0) is True
+    stream_0.set_read_deadline(0)
     assert stream_0.read_deadline == 0
 
     # Test set_write_deadline with zero TTL
-    assert stream_0.set_write_deadline(0) is True
+    stream_0.set_write_deadline(0)
     assert stream_0.write_deadline == 0
 
 
@@ -546,14 +662,14 @@ async def test_mplex_stream_deadline_validation_positive_ttl(mplex_stream_pair):
     stream_0, stream_1 = mplex_stream_pair
 
     # Test set_deadline with positive TTL
-    assert stream_0.set_deadline(1) is True
+    stream_0.set_deadline(1)
     assert stream_0.read_deadline == 1
     assert stream_0.write_deadline == 1
 
     # Test set_read_deadline with positive TTL
-    assert stream_0.set_read_deadline(5) is True
+    stream_0.set_read_deadline(5)
     assert stream_0.read_deadline == 5
 
     # Test set_write_deadline with positive TTL
-    assert stream_0.set_write_deadline(10) is True
+    stream_0.set_write_deadline(10)
     assert stream_0.write_deadline == 10

@@ -1,6 +1,8 @@
 from typing import Any, cast
 
 import multiaddr
+from multicodec import Code, get_prefix
+from multicodec.code_table import LIBP2P_PEER_RECORD
 
 from libp2p.crypto.ed25519 import Ed25519PublicKey
 from libp2p.crypto.keys import PrivateKey, PublicKey
@@ -10,6 +12,7 @@ import libp2p.peer.pb.crypto_pb2 as cryto_pb
 import libp2p.peer.pb.envelope_pb2 as pb
 import libp2p.peer.pb.peer_record_pb2 as record_pb
 from libp2p.peer.peer_record import (
+    PEER_RECORD_ENVELOPE_PAYLOAD_TYPE,
     PeerRecord,
     peer_record_from_protobuf,
     unmarshal_record,
@@ -17,7 +20,10 @@ from libp2p.peer.peer_record import (
 from libp2p.utils.varint import encode_uvarint
 
 ENVELOPE_DOMAIN = "libp2p-peer-record"
-PEER_RECORD_CODEC = b"\x03\x01"
+# Multicodec Code object (for internal use / comparison only)
+PEER_RECORD_CODE: Code = LIBP2P_PEER_RECORD
+# Wire-format payload type bytes — matches go-libp2p: []byte{0x03, 0x01}
+PEER_RECORD_CODEC: bytes = PEER_RECORD_ENVELOPE_PAYLOAD_TYPE
 
 
 class Envelope:
@@ -36,7 +42,9 @@ class Envelope:
     """
 
     public_key: PublicKey
-    payload_type: bytes
+    # payload_type is stored as raw bytes (wire format), matching go-libp2p.
+    # For PeerRecord envelopes this is bytes([0x03, 0x01]), NOT varint-encoded.
+    _payload_type: bytes
     raw_payload: bytes
     signature: bytes
 
@@ -46,14 +54,48 @@ class Envelope:
     def __init__(
         self,
         public_key: PublicKey,
-        payload_type: bytes,
+        payload_type: Code | str | bytes,
         raw_payload: bytes,
         signature: bytes,
     ):
         self.public_key = public_key
-        self.payload_type = payload_type
+
+        # Normalise payload_type to raw bytes
+        if isinstance(payload_type, bytes):
+            # Already raw bytes — use as-is (this is the go-libp2p wire format)
+            self._payload_type = payload_type
+        elif isinstance(payload_type, str):
+            # Treat as codec name, encode to raw prefix bytes
+            self._payload_type = get_prefix(payload_type)
+        elif isinstance(payload_type, Code):
+            if payload_type == PEER_RECORD_CODE:
+                # Use the go-libp2p compatible raw bytes, not varint
+                self._payload_type = PEER_RECORD_ENVELOPE_PAYLOAD_TYPE
+            else:
+                self._payload_type = get_prefix(str(payload_type))
+        else:
+            self._payload_type = bytes(payload_type)
+
         self.raw_payload = raw_payload
         self.signature = signature
+
+    @property
+    def payload_type(self) -> bytes:
+        """Return the raw payload type bytes (wire format)."""
+        return self._payload_type
+
+    @property
+    def payload_type_code(self) -> Code:
+        """Return the multicodec Code for this payload type (best-effort)."""
+        return PEER_RECORD_CODE
+
+    @payload_type_code.setter
+    def payload_type_code(self, value: Code) -> None:
+        """Update the raw payload_type bytes from a Code value."""
+        if value == PEER_RECORD_CODE:
+            self._payload_type = PEER_RECORD_ENVELOPE_PAYLOAD_TYPE
+        else:
+            self._payload_type = get_prefix(str(value))
 
     def marshal_envelope(self) -> bytes:
         """
@@ -101,8 +143,10 @@ class Envelope:
             return self._cached_record
 
         try:
-            if self.payload_type != PEER_RECORD_CODEC:
-                raise ValueError("Unsuported payload type in envelope")
+            if self._payload_type != PEER_RECORD_ENVELOPE_PAYLOAD_TYPE:
+                raise ValueError(
+                    f"Unsupported payload type in envelope: {self._payload_type.hex()}"
+                )
             msg = record_pb.PeerRecord()
             msg.ParseFromString(self.raw_payload)
 
@@ -127,7 +171,7 @@ class Envelope:
         if isinstance(other, Envelope):
             return (
                 self.public_key.__eq__(other.public_key)
-                and self.payload_type == other.payload_type
+                and self._payload_type == other._payload_type
                 and self.signature == other.signature
                 and self.raw_payload == other.raw_payload
             )
@@ -190,7 +234,7 @@ def seal_record(record: PeerRecord, private_key: PrivateKey) -> Envelope:
 
     return Envelope(
         public_key=private_key.get_public_key(),
-        payload_type=record.codec(),
+        payload_type=PEER_RECORD_ENVELOPE_PAYLOAD_TYPE,
         raw_payload=payload,
         signature=signature,
     )

@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "py-libp2p-perf-test"
+version = "0.1.0"
+description = "Python libp2p perf test implementation for test-plans perf"
+authors = [
+    {name = "libp2p", email = "team@libp2p.io"}
+]
+requires-python = ">=3.11"
+dependencies = [
+    "libp2p @ file:///app/py-libp2p",
+    "redis>=4.0.0",
+    "typing-extensions>=4.0.0",
+    "cryptography>=41.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["perf_test*"]

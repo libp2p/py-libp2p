@@ -146,11 +146,11 @@ def custom_identify_push_handler_for(host, use_varint_format: bool = True):
 
             # Update the peerstore with the new information as usual
             peerstore = host.get_peerstore()
-            from libp2p.identity.identify_push.identify_push import (
-                _update_peerstore_from_identify,
+            from libp2p.identity.update import (
+                update_peerstore_from_identify,
             )
 
-            await _update_peerstore_from_identify(peerstore, peer_id, identify_msg)
+            await update_peerstore_from_identify(peerstore, peer_id, identify_msg)
 
             logger.info("Successfully processed identify/push from peer %s", peer_id)
             print(f"✅ Successfully processed identify/push from peer {peer_id}")

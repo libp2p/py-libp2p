@@ -11,17 +11,26 @@ from collections.abc import Sequence
 import logging
 import threading
 import time
-from typing import Any
 
 from multiaddr import Multiaddr
 
 from libp2p.abc import IPeerStore
+from libp2p.crypto.exceptions import CryptographyError
 from libp2p.crypto.keys import KeyPair, PrivateKey, PublicKey
+from libp2p.crypto.serialization import (
+    deserialize_private_key,
+    deserialize_public_key,
+)
+from libp2p.custom_types import MetadataValue
 from libp2p.peer.envelope import Envelope
 from libp2p.peer.id import ID
 from libp2p.peer.peerdata import PeerData, PeerDataError
 from libp2p.peer.peerinfo import PeerInfo
-from libp2p.peer.peerstore import PeerRecordState, PeerStoreError
+from libp2p.peer.peerstore import (
+    PeerRecordState,
+    PeerStoreError,
+    _peer_record_signer_matches,
+)
 
 from ..datastore.base_sync import IDatastoreSync
 from ..serialization import (
@@ -149,16 +158,15 @@ class SyncPersistentPeerStore(IPeerStore):
                     key_key = self._get_key_key(peer_id)
                     key_data = self.datastore.get(key_key)
                     if key_data:
-                        # For now, store keys as metadata until keypair serialization
-                        # keys_metadata = deserialize_metadata(key_data)
-                        # TODO: Implement proper keypair deserialization
-                        # peer_data.pubkey = deserialize_public_key(
-                        #     keys_metadata.get(b"pubkey", b"")
-                        # )
-                        # peer_data.privkey = deserialize_private_key(
-                        #     keys_metadata.get(b"privkey", b"")
-                        # )
-                        pass
+                        keys_metadata = deserialize_metadata(key_data)
+                        if keys_metadata.get("pubkey"):
+                            peer_data.pubkey = deserialize_public_key(
+                                keys_metadata["pubkey"]
+                            )
+                        if keys_metadata.get("privkey"):
+                            peer_data.privkey = deserialize_private_key(
+                                keys_metadata["privkey"]
+                            )
 
                     # Load metadata
                     metadata_key = self._get_metadata_key(peer_id)
@@ -185,7 +193,13 @@ class SyncPersistentPeerStore(IPeerStore):
                         # Convert nanoseconds back to seconds for latmap
                         peer_data.latmap = latency_ns / 1_000_000_000
 
-                except (SerializationError, KeyError, ValueError, TypeError) as e:
+                except (
+                    SerializationError,
+                    CryptographyError,
+                    KeyError,
+                    ValueError,
+                    TypeError,
+                ) as e:
                     logger.error(f"Failed to load peer data for {peer_id}: {e}")
                     # Continue with empty peer data
                 except Exception:
@@ -214,7 +228,7 @@ class SyncPersistentPeerStore(IPeerStore):
                 addr_data = serialize_addresses(peer_data.addrs)
                 self.datastore.put(addr_key, addr_data)
 
-            # Save keys (temporarily as metadata until proper keypair serialization)
+            # Save keys as serialized metadata (pubkey/privkey protobuf bytes)
             if peer_data.pubkey or peer_data.privkey:
                 key_key = self._get_key_key(peer_id)
                 keys_metadata = {}
@@ -404,6 +418,21 @@ class SyncPersistentPeerStore(IPeerStore):
 
         return list(peer_ids)
 
+    def has_peer(self, peer_id: ID) -> bool:
+        """
+        Return True if the peer is known to this store (memory or datastore).
+
+        O(1) in-memory lookup, falling back to a single datastore key check —
+        never a full ``peer_ids()`` scan (which reconstructs and hashes every
+        peer and was saturating CPU on hot paths with large peerstores).
+        """
+        if peer_id in self.peer_data_map:
+            return True
+        try:
+            return bool(self.datastore.get(self._get_addr_key(peer_id)))
+        except Exception:
+            return False
+
     def clear_peerdata(self, peer_id: ID) -> None:
         """Clears all data associated with the given peer_id."""
         with self._lock:
@@ -521,7 +550,7 @@ class SyncPersistentPeerStore(IPeerStore):
 
     # ------METADATA---------
 
-    def get(self, peer_id: ID, key: str) -> Any:
+    def get(self, peer_id: ID, key: str) -> MetadataValue:
         """
         :param peer_id: peer ID to get peer data for
         :param key: the key to search value for
@@ -534,7 +563,7 @@ class SyncPersistentPeerStore(IPeerStore):
         except PeerDataError as error:
             raise PeerStoreError() from error
 
-    def put(self, peer_id: ID, key: str, val: Any) -> None:
+    def put(self, peer_id: ID, key: str, val: MetadataValue) -> None:
         """
         :param peer_id: peer ID to put peer data for
         :param key:
@@ -573,6 +602,9 @@ class SyncPersistentPeerStore(IPeerStore):
         Accept and store a signed PeerRecord, unless it's older than
         the one already stored.
         """
+        if not _peer_record_signer_matches(envelope):
+            return False
+
         record = envelope.record()
         peer_id = record.peer_id
 

@@ -1,1 +1,0 @@
-Implemented round-robin load balancing for CircuitV2 relay selection, prioritizing relays with active reservations for more reliable and evenly distributed relay usage.

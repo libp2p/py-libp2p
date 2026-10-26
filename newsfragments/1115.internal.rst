@@ -1,1 +1,0 @@
-Moved dev dependencies from ``[project.optional-dependencies]`` to ``[dependency-groups]`` and reorganized them to remove duplication.

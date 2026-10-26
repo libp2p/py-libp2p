@@ -1,11 +1,12 @@
 """Unit tests for Bitswap client."""
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import trio
 
 from libp2p.bitswap.block_store import MemoryBlockStore
-from libp2p.bitswap.cid import compute_cid_v1
+from libp2p.bitswap.cid import cid_to_text, compute_cid_v1, parse_cid
 from libp2p.bitswap.client import BitswapClient
 from libp2p.bitswap.config import (
     BITSWAP_PROTOCOL_V100,
@@ -49,7 +50,6 @@ class TestBitswapClientInit:
 
         assert len(client._wantlist) == 0
         assert len(client._peer_wantlists) == 0
-        assert len(client._pending_requests) == 0
         assert client._started is False
 
 
@@ -120,8 +120,8 @@ class TestBitswapClientWantlist:
 
         await client.want_block(cid, priority=5)
 
-        assert cid in client._wantlist
-        assert client._wantlist[cid]["priority"] == 5
+        assert parse_cid(cid) in client._wantlist
+        assert client._wantlist[parse_cid(cid)]["priority"] == 5
 
     @pytest.mark.trio
     async def test_remove_from_wantlist(self):
@@ -132,10 +132,10 @@ class TestBitswapClientWantlist:
         cid = compute_cid_v1(b"test data")
 
         await client.want_block(cid, priority=5)
-        assert cid in client._wantlist
+        assert parse_cid(cid) in client._wantlist
 
         await client.cancel_want(cid)
-        assert cid not in client._wantlist
+        assert parse_cid(cid) not in client._wantlist
 
     @pytest.mark.trio
     async def test_has_in_wantlist(self):
@@ -145,10 +145,10 @@ class TestBitswapClientWantlist:
 
         cid = compute_cid_v1(b"test data")
 
-        assert cid not in client._wantlist
+        assert parse_cid(cid) not in client._wantlist
 
         await client.want_block(cid)
-        assert cid in client._wantlist
+        assert parse_cid(cid) in client._wantlist
 
 
 class TestBitswapClientBlockOperations:
@@ -187,7 +187,7 @@ class TestBitswapClientBlockOperations:
         await client.block_store.put_block(cid, data)
 
         # Get block
-        retrieved = await client.get_block(cid)
+        retrieved = await client.new_session().get_block(cid)
         assert retrieved == data
 
     @pytest.mark.trio
@@ -220,7 +220,7 @@ class TestBitswapClientBlockOperations:
 
         # Should timeout when block doesn't exist
         with pytest.raises(BitswapTimeoutError):
-            await client.get_block(cid, timeout=0.1)
+            await client.new_session().get_block(cid, timeout=0.1)
 
 
 class TestBitswapClientPeerManagement:
@@ -247,10 +247,57 @@ class TestBitswapClientPeerManagement:
         peer_id = PeerID(b"peer123")
         cid_bytes = compute_cid_v1(b"data")
 
-        client._peer_wantlists[peer_id] = {cid_bytes: {"priority": 1}}
+        client._peer_wantlists[peer_id] = {parse_cid(cid_bytes): {"priority": 1}}
 
         assert peer_id in client._peer_wantlists
-        assert cid_bytes in client._peer_wantlists[peer_id]
+        assert parse_cid(cid_bytes) in client._peer_wantlists[peer_id]
+
+
+class TestBitswapClientMixedCIDInputs:
+    """Test public client APIs with mixed CID input types."""
+
+    @pytest.mark.trio
+    async def test_add_and_get_block_with_mixed_inputs(self):
+        """Test add/get block APIs accept text, hex, and CID object forms."""
+        mock_host = MagicMock()
+        client = BitswapClient(mock_host)
+        data = b"mixed-client-add-get"
+        cid = compute_cid_v1(data)
+
+        await client.add_block(cid_to_text(cid), data)
+        assert await client.new_session().get_block(cid.hex()) == data
+        assert await client.new_session().get_block(parse_cid(cid)) == data
+
+    @pytest.mark.trio
+    async def test_want_and_cancel_with_mixed_inputs(self):
+        """Test want/cancel APIs normalize mixed input forms to one key."""
+        mock_host = MagicMock()
+        client = BitswapClient(mock_host)
+        cid = compute_cid_v1(b"mixed-client-want-cancel")
+
+        await client.want_block(cid_to_text(cid), priority=9)
+        assert parse_cid(cid) in client._wantlist
+        assert client._wantlist[parse_cid(cid)]["priority"] == 9
+
+        await client.cancel_want(cid.hex())
+        assert parse_cid(cid) not in client._wantlist
+
+    @pytest.mark.trio
+    async def test_have_block_with_canonical_text_input(self):
+        """Test have_block accepts canonical text and returns True for local blocks."""
+        mock_host = MagicMock()
+        client = BitswapClient(mock_host)
+        cid = compute_cid_v1(b"mixed-client-have")
+
+        # Put block locally — have_block should return True immediately
+        client._broadcast_wantlist = AsyncMock()  # type: ignore[method-assign]
+        await client.block_store.put_block(cid, b"mixed-client-have")
+
+        has_block = await client.have_block(cid_to_text(cid))
+
+        assert has_block is True
+        # Block was local, so no network broadcast needed
+        client._broadcast_wantlist.assert_not_awaited()
 
 
 class TestBitswapClientMultipleBlocks:
@@ -276,7 +323,7 @@ class TestBitswapClientMultipleBlocks:
         for cid, data in blocks.items():
             has_block = await client.block_store.has_block(cid)
             assert has_block is True
-            retrieved = await client.get_block(cid)
+            retrieved = await client.new_session().get_block(cid)
             assert retrieved == data
 
     @pytest.mark.trio
@@ -301,3 +348,88 @@ class TestBitswapClientMultipleBlocks:
         assert len(all_cids) == len(blocks)
         for cid in blocks.keys():
             assert cid in all_cids
+
+
+class TestBitswapClientBugFixes:
+    """Test regression fixes for critical Bitswap client bugs."""
+
+    @pytest.mark.trio
+    async def test_concurrent_get_block_same_cid(self, autojump_clock):
+        """Test concurrent requests for the exact same CID don't race/orphan."""
+        mock_host = MagicMock()
+        client = BitswapClient(mock_host)
+        cid = compute_cid_v1(b"concurrent_data")
+        cid_obj = parse_cid(cid)
+        client._send_wantlist_to_peer = AsyncMock(return_value=True)
+        client._broadcast_wantlist = AsyncMock()
+
+        results = []
+
+        async def fetch_block():
+            data = await client.new_session().get_block(cid, timeout=2.0)
+            results.append(data)
+
+        async def mock_network_delivery():
+            await trio.sleep(0.5)
+            await client.add_block(cid_obj, b"concurrent_data")
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(mock_network_delivery)
+            for _ in range(5):
+                nursery.start_soon(fetch_block)
+
+        assert len(results) == 5
+        assert all(r == b"concurrent_data" for r in results)
+
+    @pytest.mark.trio
+    async def test_add_block_invalid_cid(self):
+        """Test CID validation prevents corrupt data (Bug 7)."""
+        mock_host = MagicMock()
+        client = BitswapClient(mock_host)
+        cid = compute_cid_v1(b"real_data")
+
+        with pytest.raises(ValueError, match="Block data does not match CID hash"):
+            await client.add_block(cid, b"fake_data")
+
+    @pytest.mark.trio
+    async def test_timeout_cleanup(self, autojump_clock):
+        """Test timeout properly cleans up dictionaries (Bugs 5 & 9)."""
+        mock_host = MagicMock()
+        client = BitswapClient(mock_host)
+        cid = compute_cid_v1(b"missing_data")
+        cid_obj = parse_cid(cid)
+        client._send_wantlist_to_peer = AsyncMock(return_value=True)
+        client._broadcast_wantlist = AsyncMock()
+
+        # Simulate expected block setup and dont_have
+        peer_id = PeerID(b"peer1")
+        client.presence_manager.add_have(peer_id, cid_obj)
+        client.presence_manager.add_dont_have(peer_id, cid_obj)
+
+        with pytest.raises(BitswapTimeoutError):
+            await client.new_session().get_block(cid, timeout=0.1)
+
+        assert cid_obj not in client._wantlist
+        assert peer_id not in client.presence_manager.get_dont_have_peers(cid_obj)
+        expected_cids = client.presence_manager.get_expected_cids_for_peer(peer_id)
+        assert cid_obj not in expected_cids
+
+    @pytest.mark.trio
+    async def test_broadcast_limit(self):
+        """Test wantlist broadcast is limited to max 20 peers (Bug 6)."""
+        mock_host = MagicMock()
+        client = BitswapClient(mock_host)
+
+        # Mock 50 connected peers
+        mock_connections = {PeerID(f"peer{i}".encode()): MagicMock() for i in range(50)}
+        mock_host.get_network().connections = mock_connections
+
+        client._send_wantlist_to_peer = AsyncMock(return_value=True)
+
+        cid = compute_cid_v1(b"broadcast_data")
+        from libp2p.bitswap.cid import parse_cid
+
+        cid_obj = parse_cid(cid)
+        await client._broadcast_wantlist([cid_obj])
+
+        assert client._send_wantlist_to_peer.call_count == 20

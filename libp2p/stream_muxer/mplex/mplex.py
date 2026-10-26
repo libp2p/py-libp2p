@@ -8,9 +8,11 @@ from typing import (
     Any,
 )
 
+import multiaddr
 import trio
 
 from libp2p.abc import (
+    ConnectionType,
     IMuxedConn,
     IMuxedStream,
     ISecureConn,
@@ -22,7 +24,9 @@ from libp2p.exceptions import (
     ParseError,
 )
 from libp2p.io.exceptions import (
+    ConnectionClosedError,
     IncompleteReadError,
+    MessageTooLarge,
 )
 from libp2p.network.connection.exceptions import (
     RawConnError,
@@ -34,10 +38,14 @@ from libp2p.utils import (
     decode_uvarint_from_stream,
     encode_uvarint,
     encode_varint_prefixed,
-    read_varint_prefixed_bytes,
+    read_varint_prefixed_bytes_limited,
 )
 
 from .constants import (
+    BUFFER_SIZE,
+    MAX_MESSAGE_SIZE,
+    MPLEX_MESSAGE_CHANNEL_SIZE,
+    RECEIVE_TIMEOUT_SECS,
     HeaderTags,
 )
 from .datastructures import (
@@ -51,8 +59,13 @@ from .mplex_stream import (
 )
 
 MPLEX_PROTOCOL_ID = TProtocol("/mplex/6.7.0")
-# Ref: https://github.com/libp2p/go-mplex/blob/414db61813d9ad3e6f4a7db5c1b1612de343ace9/multiplex.go#L115  # noqa: E501
-MPLEX_MESSAGE_CHANNEL_SIZE = 8
+
+# Re-export for existing test imports.
+__all__ = (
+    "MPLEX_MESSAGE_CHANNEL_SIZE",
+    "MPLEX_PROTOCOL_ID",
+    "Mplex",
+)
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +88,7 @@ class Mplex(IMuxedConn):
     event_closed: trio.Event
     event_started: trio.Event
     on_close: Callable[[], Awaitable[Any]] | None
+    _established: bool
 
     def __init__(
         self,
@@ -106,6 +120,23 @@ class Mplex(IMuxedConn):
         self.event_closed = trio.Event()
         self.event_started = trio.Event()
         self.on_close = on_close
+        self._established = False
+
+    @property
+    def is_established(self) -> bool:
+        """
+        Check if the Mplex connection is fully established and ready for streams.
+
+        Returns True when:
+        - The event_started has been set
+        - The handle_incoming task is actively running
+        - The connection is not shutting down
+        """
+        return (
+            self._established
+            and self.event_started.is_set()
+            and not self.event_shutting_down.is_set()
+        )
 
     async def start(self) -> None:
         await self.handle_incoming()
@@ -118,11 +149,20 @@ class Mplex(IMuxedConn):
         """
         Close the stream muxer and underlying secured connection.
         """
-        if self.event_shutting_down.is_set():
-            return
-        # Set the `event_shutting_down`, to allow graceful shutdown.
-        self.event_shutting_down.set()
+        # Always close the underlying connection, even when the mux is already
+        # shutting down. The read loop's _cleanup() sets event_shutting_down on
+        # a peer-initiated EOF *without* closing our socket, so returning early
+        # here would leak it (#1487). secured_conn.close() is idempotent; this
+        # mirrors Yamux.close(), which closes the secured conn unconditionally.
+        if not self.event_shutting_down.is_set():
+            # Set the `event_shutting_down`, to allow graceful shutdown.
+            self.event_shutting_down.set()
         await self.secured_conn.close()
+        # If the read loop never observed EOF (or exited without cleanup),
+        # finish teardown ourselves. Mirrors Yamux: do not hang forever on
+        # event_closed after we already closed the secured connection.
+        if not self.event_closed.is_set():
+            await self._cleanup()
         # Blocked until `close` is finally set.
         await self.event_closed.wait()
 
@@ -180,7 +220,7 @@ class Mplex(IMuxedConn):
 
     async def send_message(
         self, flag: HeaderTags, data: bytes | None, stream_id: StreamID
-    ) -> int:
+    ) -> None:
         """
         Send a message over the connection.
 
@@ -196,8 +236,7 @@ class Mplex(IMuxedConn):
 
         _bytes = header + encode_varint_prefixed(data)
 
-        # type ignored TODO figure out return for this and write_to_stream
-        return await self.write_to_stream(_bytes)  # type: ignore
+        await self.write_to_stream(_bytes)
 
     async def write_to_stream(self, _bytes: bytes) -> None:
         """
@@ -208,7 +247,7 @@ class Mplex(IMuxedConn):
         """
         try:
             await self.secured_conn.write(_bytes)
-        except RawConnError as e:
+        except (RawConnError, ConnectionClosedError) as e:
             raise MplexUnavailable(
                 "failed to write message to the underlying connection"
             ) from e
@@ -218,16 +257,19 @@ class Mplex(IMuxedConn):
         Read a message off of the secured connection and add it to the
         corresponding message buffer.
         """
+        self._established = True
         self.event_started.set()
-        while True:
-            try:
-                await self._handle_incoming_message()
-            except MplexUnavailable as e:
-                logger.debug("mplex unavailable while waiting for incoming: %s", e)
-                break
-        # If we enter here, it means this connection is shutting down.
-        # We should clean things up.
-        await self._cleanup()
+        try:
+            while True:
+                try:
+                    await self._handle_incoming_message()
+                except MplexUnavailable as e:
+                    logger.debug("mplex unavailable while waiting for incoming: %s", e)
+                    break
+        finally:
+            # Always clean up so close() waiters are not left hanging, even if
+            # an unexpected exception escapes the read loop.
+            await self._cleanup()
 
     async def read_message(self) -> tuple[int, int, bytes]:
         """
@@ -237,14 +279,27 @@ class Mplex(IMuxedConn):
         """
         try:
             header = await decode_uvarint_from_stream(self.secured_conn)
-        except (ParseError, RawConnError, IncompleteReadError) as error:
+        except (
+            ParseError,
+            RawConnError,
+            ConnectionClosedError,
+            IncompleteReadError,
+        ) as error:
             raise MplexUnavailable(
                 "failed to read the header correctly from the underlying connection: "
                 f"{error}"
             )
         try:
-            message = await read_varint_prefixed_bytes(self.secured_conn)
-        except (ParseError, RawConnError, IncompleteReadError) as error:
+            message = await read_varint_prefixed_bytes_limited(
+                self.secured_conn, MAX_MESSAGE_SIZE
+            )
+        except (
+            ParseError,
+            RawConnError,
+            ConnectionClosedError,
+            IncompleteReadError,
+            MessageTooLarge,
+        ) as error:
             raise MplexUnavailable(
                 "failed to read the message body correctly from the underlying "
                 f"connection: {error}"
@@ -277,7 +332,7 @@ class Mplex(IMuxedConn):
             await self._handle_reset(stream_id)
         else:
             # Receives messages with an unknown flag
-            # TODO: logging
+            logger.warning("Received message with unknown flag: %d", flag)
             async with self.streams_lock:
                 if stream_id in self.streams:
                     stream = self.streams[stream_id]
@@ -301,24 +356,43 @@ class Mplex(IMuxedConn):
             if stream_id not in self.streams:
                 # We receive a message of the stream `stream_id` which is not accepted
                 #   before. It is abnormal. Possibly disconnect?
-                # TODO: Warn and emit logs about this.
+                logger.warning(
+                    "Received message for non-existent stream: %s", stream_id
+                )
                 return
             stream = self.streams[stream_id]
             send_channel = self.streams_msg_channels[stream_id]
         async with stream.close_lock:
             if stream.event_remote_closed.is_set():
-                # TODO: Warn "Received data from remote after stream was closed by them. (len = %d)"  # noqa: E501
+                logger.warning(
+                    "Received data from remote after stream was closed by them. "
+                    "(len = %d)",
+                    len(message),
+                )
                 return
-        try:
-            send_channel.send_nowait(message)
-        except (trio.BrokenResourceError, trio.ClosedResourceError):
-            raise MplexUnavailable
-        except trio.WouldBlock:
-            # `send_channel` is full, reset this stream.
-            logger.warning(
-                "message channel of stream %s is full: stream is reset", stream_id
-            )
-            await stream.reset()
+        # Deliver body in BUFFER_SIZE slices with blocking backpressure and a
+        # receive timeout, matching go-mplex (channel depth 1 + ReceiveTimeout).
+        if message:
+            chunks = [
+                message[i : i + BUFFER_SIZE]
+                for i in range(0, len(message), BUFFER_SIZE)
+            ]
+        else:
+            chunks = [b""]
+        for chunk in chunks:
+            try:
+                with trio.fail_after(RECEIVE_TIMEOUT_SECS):
+                    await send_channel.send(chunk)
+            except trio.TooSlowError:
+                logger.warning(
+                    "message channel of stream %s timed out waiting for reader: "
+                    "stream is reset",
+                    stream_id,
+                )
+                await stream.reset()
+                return
+            except (trio.BrokenResourceError, trio.ClosedResourceError):
+                raise MplexUnavailable
 
     async def _handle_close(self, stream_id: StreamID) -> None:
         async with self.streams_lock:
@@ -350,6 +424,8 @@ class Mplex(IMuxedConn):
                 return
             stream = self.streams[stream_id]
             send_channel = self.streams_msg_channels[stream_id]
+        # Close send_channel so the receive side sees EndOfChannel after any
+        # already-queued messages are drained (see MplexStream.read).
         await send_channel.aclose()
         async with stream.close_lock:
             if not stream.event_remote_closed.is_set():
@@ -363,18 +439,24 @@ class Mplex(IMuxedConn):
             self.streams_msg_channels.pop(stream_id, None)
 
     async def _cleanup(self) -> None:
-        if not self.event_shutting_down.is_set():
-            self.event_shutting_down.set()
+        # Idempotent: close() and handle_incoming may both invoke cleanup.
+        # Guard under streams_lock so concurrent callers cannot double-close.
         async with self.streams_lock:
-            for stream_id, stream in self.streams.items():
+            if self.event_closed.is_set():
+                return
+            if not self.event_shutting_down.is_set():
+                self.event_shutting_down.set()
+            for stream_id, stream in list(self.streams.items()):
                 async with stream.close_lock:
                     if not stream.event_remote_closed.is_set():
                         stream.event_remote_closed.set()
                         stream.event_reset.set()
                         stream.event_local_closed.set()
-                send_channel = self.streams_msg_channels[stream_id]
-                await send_channel.aclose()
-        self.event_closed.set()
+                send_channel = self.streams_msg_channels.pop(stream_id, None)
+                if send_channel is not None:
+                    await send_channel.aclose()
+            self.streams.clear()
+            self.event_closed.set()
         await self.new_stream_send_channel.aclose()
         # Call on_close callback if provided
         if self.on_close:
@@ -393,3 +475,15 @@ class Mplex(IMuxedConn):
     def get_remote_address(self) -> tuple[str, int] | None:
         """Delegate to the underlying Mplex connection's secured_conn."""
         return self.secured_conn.get_remote_address()
+
+    def get_transport_addresses(self) -> list[multiaddr.Multiaddr]:
+        """
+        Get transport addresses by delegating to secured_conn.
+        """
+        return self.secured_conn.get_transport_addresses()
+
+    def get_connection_type(self) -> ConnectionType:
+        """
+        Get connection type by delegating to secured_conn.
+        """
+        return self.secured_conn.get_connection_type()

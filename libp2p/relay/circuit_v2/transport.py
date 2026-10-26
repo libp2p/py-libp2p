@@ -10,6 +10,7 @@ import time
 from typing import Any, cast
 
 import multiaddr
+from multiaddr.protocols import P_P2P, P_P2P_CIRCUIT
 import trio
 
 from libp2p.abc import (
@@ -19,6 +20,9 @@ from libp2p.abc import (
     INetStream,
     IRawConnection,
     ITransport,
+)
+from libp2p.connection_types import (
+    ConnectionType,
 )
 from libp2p.custom_types import (
     THandler,
@@ -33,9 +37,11 @@ from libp2p.peer.id import (
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
-from libp2p.peer.peerstore import env_to_send_in_RPC
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     Service,
+)
+from libp2p.utils.multiaddr_utils import (
+    join_multiaddrs,
 )
 
 from .config import (
@@ -45,8 +51,11 @@ from .config import (
 from .discovery import (
     RelayDiscovery,
 )
+from .exceptions import RelayConnectionError
 from .pb.circuit_pb2 import (
     HopMessage,
+    PeerId as CircuitPeerId,
+    Reservation,
     StopMessage,
 )
 from .performance_tracker import (
@@ -54,6 +63,7 @@ from .performance_tracker import (
 )
 from .protocol import (
     PROTOCOL_ID,
+    STOP_PROTOCOL_ID,
     STREAM_READ_TIMEOUT,
     CircuitV2Protocol,
     INetStreamWithExtras,
@@ -63,6 +73,8 @@ from .protocol_buffer import (
 )
 from .utils import (
     maybe_consume_signed_record,
+    read_delimited_msg,
+    write_delimited_msg,
 )
 
 logger = logging.getLogger(__name__)
@@ -123,6 +135,14 @@ class TrackedRawConnection(IRawConnection):
         """Get remote address from the wrapped connection."""
         return self._wrapped.get_remote_address()
 
+    def get_transport_addresses(self) -> list[multiaddr.Multiaddr]:
+        """Delegate to wrapped connection."""
+        return self._wrapped.get_transport_addresses()
+
+    def get_connection_type(self) -> ConnectionType:
+        """Always RELAYED since this wraps relay connections."""
+        return ConnectionType.RELAYED
+
     def __getattr__(self, name: str) -> Any:
         """Delegate attribute access to wrapped connection."""
         return getattr(self._wrapped, name)
@@ -176,15 +196,25 @@ class CircuitV2Transport(ITransport):
         # Performance tracker for intelligent relay selection
         self.performance_tracker = RelayPerformanceTracker()
 
-        # Stored addresses and DHT (from origin/main)
-        self._last_relay_index = -1
-        self._relay_list: list[ID] = []
-        self._relay_metrics: dict[ID, dict[str, float | int]] = {}
         self._reservations: dict[ID, float] = {}
+        self._reservation_proofs: dict[ID, Reservation] = {}
         self._refreshing = False
+        self._refresh_lock = trio.Lock()
         self.dht: KadDHT | None = None
         if config.enable_dht_discovery:
             self.dht = KadDHT(host, DHTMode.CLIENT)
+
+    def can_dial(self, maddr: multiaddr.Multiaddr) -> bool:
+        """Return True if this transport can dial the given multiaddr."""
+        return any(p.code == P_P2P_CIRCUIT for p in maddr.protocols())
+
+    def can_listen(self, maddr: multiaddr.Multiaddr) -> bool:
+        """Return True if this transport can listen on the given multiaddr."""
+        return any(p.code == P_P2P_CIRCUIT for p in maddr.protocols())
+
+    def protocols(self) -> list[str]:
+        """Return the list of protocol names handled by this transport."""
+        return ["p2p-circuit"]
 
     async def dial(  # type: ignore[override]
         self,
@@ -209,41 +239,23 @@ class CircuitV2Transport(ITransport):
             If the connection cannot be established
 
         """
-        # Extract peer ID from multiaddr - P_P2P code is 0x01A5 (421)
-        relay_id_str = None
-        relay_maddr = None
-        dest_id_str = None
-        found_circuit = False
-        relay_maddr_end_index = None
+        # Parse circuit multiaddr using decapsulate_code (Phase 2.3)
+        try:
+            relay_maddr, dest_peer_id = self.parse_circuit_ma(maddr)
+        except ValueError as e:
+            raise ConnectionError(str(e)) from e
 
-        for idx, (proto, value) in enumerate(maddr.items()):
-            if proto.name == "p2p-circuit":
-                found_circuit = True
-                relay_maddr_end_index = idx
-            elif proto.name == "p2p":
-                if not found_circuit and relay_id_str is None:
-                    relay_id_str = value
-                elif found_circuit and dest_id_str is None:
-                    dest_id_str = value
-
-        if relay_id_str is not None and relay_maddr_end_index is not None:
-            relay_maddr = multiaddr.Multiaddr(
-                "/".join(str(maddr).split("/")[: relay_maddr_end_index * 2 + 1])
-            )
+        relay_id_str = relay_maddr.get_peer_id()
         if not relay_id_str:
             raise ConnectionError("Multiaddr does not contain relay peer ID")
-        if not dest_id_str:
-            raise ConnectionError(
-                "Multiaddr does not contain destination peer ID after p2p-circuit"
-            )
 
-        logger.debug(f"Relay peer ID: {relay_id_str} , \n {relay_maddr}")
+        logger.debug("Relay peer ID: %s , \n %s", relay_id_str, relay_maddr)
 
-        dest_info = PeerInfo(ID.from_base58(dest_id_str), [maddr])
-        logger.debug(f"Dialing destination peer ID: {dest_id_str} , \n {maddr}")
+        dest_info = PeerInfo(dest_peer_id, [maddr])
+        logger.debug(f"Dialing destination peer ID: {dest_peer_id} , \n {maddr}")
         # Use the internal dial_peer_info method
         if isinstance(relay_id_str, str):
-            relay_peer_id = ID.from_base58(relay_id_str)
+            relay_peer_id = ID.from_string(relay_id_str)
         elif isinstance(relay_id_str, ID):
             relay_peer_id = relay_id_str
         else:
@@ -389,22 +401,29 @@ class CircuitV2Transport(ITransport):
                     logger.warning(
                         "Failed to make reservation with relay %s", relay_peer_id
                     )
-            # Create signed peer record to send with the HOP message
-            envelope_bytes, _ = env_to_send_in_RPC(self.host)
-
+                # rust-libp2p (and similar) relays finish each HOP substream after one
+                # exchange. After RESERVE, open a new stream for CONNECT so the relay
+                # does not drop the substream before we read the STATUS response.
+                await relay_stream.close()
+                relay_stream = await self.host.new_stream(relay_peer_id, [PROTOCOL_ID])
+                if not relay_stream:
+                    raise ConnectionError(
+                        f"Could not open stream to relay {relay_peer_id} for CONNECT"
+                    )
             # Send HOP CONNECT message
             connect_msg = HopMessage(
                 type=HopMessage.CONNECT,
-                peer=dest_info.peer_id.to_bytes(),
-                senderRecord=envelope_bytes,
+                peer=CircuitPeerId(id=dest_info.peer_id.to_bytes()),
             )
-            await relay_stream.write(connect_msg.SerializeToString())
+
+            reservation_proof = self._reservation_proofs.get(relay_peer_id)
+            if reservation_proof and reservation_proof.expire > int(time.time()):
+                connect_msg.reservation.CopyFrom(reservation_proof)
+            await write_delimited_msg(relay_stream, connect_msg)
 
             # Read response with timeout
             with trio.fail_after(STREAM_READ_TIMEOUT):
-                resp_bytes = await relay_stream.read(1024)
-                resp = HopMessage()
-                resp.ParseFromString(resp_bytes)
+                resp = await read_delimited_msg(relay_stream, HopMessage)
 
             # Get destination peer SPR from the relay's response and validate it
             if resp.HasField("senderRecord"):
@@ -417,11 +436,16 @@ class CircuitV2Transport(ITransport):
                     # and the relay might not have the destination's signed peer record
 
             # Access status attributes directly
-            status_code = getattr(resp.status, "code", StatusCode.OK)
-            status_msg = getattr(resp.status, "message", "Unknown error")
+            status_code = (
+                StatusCode(resp.status) if resp.HasField("status") else StatusCode.OK
+            )
 
             if status_code != StatusCode.OK:
-                raise ConnectionError(f"Relay connection failed: {status_msg}")
+                raise RelayConnectionError(
+                    f"Relay connection failed with status {status_code}",
+                    status_code=status_code,
+                    status_msg=f"status code {status_code}",
+                )
 
             # Record successful connection attempt
             latency_ms = (trio.current_time() - connection_start_time) * 1000
@@ -438,7 +462,16 @@ class CircuitV2Transport(ITransport):
             self._store_multiaddrs(dest_info, relay_peer_id)
 
             # Create raw connection from stream and wrap it to track closure
-            raw_conn = RawConnection(stream=relay_stream, initiator=True)
+            # Construct circuit multiaddr: /p2p/{relay}/p2p-circuit/p2p/{destination}
+            circuit_ma = multiaddr.Multiaddr(
+                f"/p2p/{relay_peer_id.to_base58()}/p2p-circuit/p2p/{dest_info.peer_id.to_base58()}"
+            )
+            raw_conn = RawConnection(
+                stream=relay_stream,
+                initiator=True,
+                connection_type=ConnectionType.RELAYED,
+                addresses=[circuit_ma],
+            )
             return TrackedRawConnection(
                 wrapped=raw_conn,
                 relay_id=relay_peer_id,
@@ -462,6 +495,8 @@ class CircuitV2Transport(ITransport):
         """
         Parse a /p2p-circuit/p2p/<targetPeerID> path from a relay Multiaddr.
 
+        Uses decapsulate_code for efficiency (Phase 2.3 multiaddr integration).
+
         Returns:
             relay_ma: Multiaddr to the relay
             target_peer_id: ID of the target peer
@@ -470,36 +505,34 @@ class CircuitV2Transport(ITransport):
             ValueError: if the Multiaddr is not a valid circuit address
 
         """
-        parts = ma.items()
-
-        if len(parts) < 2:
-            raise ValueError(f"Invalid circuit Multiaddr, too short: {ma}")
-
-        proto_name, _ = parts[-2]
-        if proto_name.name != "p2p-circuit":
+        # Must contain /p2p-circuit (decapsulate_code is no-op if missing)
+        protocols = list(ma.protocols())
+        if not any(p.code == P_P2P_CIRCUIT for p in protocols):
             raise ValueError(f"Missing /p2p-circuit in Multiaddr: {ma}")
 
-        proto_name, val = parts[-1]
-        if proto_name.name != "p2p":
-            raise ValueError(f"Missing /p2p/<peerID> at the end: {ma}")
+        # Get destination peer ID (rightmost /p2p) before decapsulating
+        dest_id_str = ma.get_peer_id()
+        if not dest_id_str:
+            raise ValueError(
+                f"Missing /p2p/<peerID> at the end of circuit Multiaddr: {ma}"
+            )
 
         try:
-            if isinstance(val, ID):
-                target_peer_id = val
-            else:
-                target_peer_id = ID.from_base58(val)
+            target_peer_id = ID.from_base58(dest_id_str)
         except Exception as e:
-            raise ValueError(f"Invalid peer ID in circuit Multiaddr: {val}") from e
+            raise ValueError(
+                f"Invalid peer ID in circuit Multiaddr: {dest_id_str}"
+            ) from e
 
-        relay_parts = parts[:-2]
-        relay_ma_str = "/".join(
-            f"{p[0].name}/{p[1]}" for p in relay_parts if p[1] is not None
-        )
-        relay_ma = (
-            multiaddr.Multiaddr(relay_ma_str)
-            if relay_ma_str
-            else multiaddr.Multiaddr("/")
-        )
+        # Remove /p2p/<dest> then /p2p-circuit to get relay multiaddr
+        try:
+            without_dest = ma.decapsulate_code(P_P2P)
+            relay_ma = without_dest.decapsulate_code(P_P2P_CIRCUIT)
+        except Exception as e:
+            raise ValueError(f"Invalid circuit Multiaddr: {ma}") from e
+
+        if not str(relay_ma) or str(relay_ma) == "/":
+            raise ValueError(f"Invalid circuit Multiaddr, too short: {ma}")
 
         return relay_ma, target_peer_id
 
@@ -518,10 +551,12 @@ class CircuitV2Transport(ITransport):
                 if not isinstance(relay_ma, multiaddr.Multiaddr):
                     continue
 
-                # Construct /p2p-circuit address
-                circuit_ma = relay_ma.encapsulate(
-                    multiaddr.Multiaddr("/p2p-circuit")
-                ).encapsulate(multiaddr.Multiaddr(f"/p2p/{peer_info.peer_id}"))
+                # Construct /p2p-circuit address (Section 7.1: join when available)
+                circuit_ma = join_multiaddrs(
+                    relay_ma,
+                    multiaddr.Multiaddr("/p2p-circuit"),
+                    multiaddr.Multiaddr(f"/p2p/{peer_info.peer_id}"),
+                )
 
                 peer_store.add_addrs(peer_info.peer_id, [circuit_ma], ttl=2**31 - 1)
                 logger.debug(
@@ -542,21 +577,22 @@ class CircuitV2Transport(ITransport):
         Dial using a stored /p2p-circuit multiaddr.
 
         circuit_ma looks like: <relay-ma>/p2p-circuit/p2p/<target-peer-id>
-        We extract the relay multiaddr (everything before /p2p-circuit), dial the relay,
-        and issue a HOP CONNECT to the target peer.
+        Uses parse_circuit_ma (decapsulate_code) to extract relay multiaddr.
         """
-        ma_str = str(circuit_ma)
-        idx = ma_str.find("/p2p-circuit")
-        if idx == -1:
-            raise ConnectionError("Not a p2p-ciruit multiaddr")
+        try:
+            relay_ma, target_peer_id = self.parse_circuit_ma(circuit_ma)
+        except ValueError as e:
+            raise ConnectionError(f"Not a p2p-circuit multiaddr: {e}") from e
+        if target_peer_id != peer_info.peer_id:
+            raise ConnectionError(
+                "Circuit multiaddr target peer does not match peer_info"
+            )
 
-        relay_ma_str = ma_str[:idx]  # everything before /p2p-circuit
-        relay_ma = multiaddr.Multiaddr(relay_ma_str)
-        relay_peer_id_str = relay_ma.value_for_protocol("p2p")
+        relay_peer_id_str = relay_ma.get_peer_id()
         if not relay_peer_id_str:
             raise ConnectionError("Relay multiaddr missing peer id")
 
-        relay_peer_id = ID.from_base58(relay_peer_id_str)
+        relay_peer_id = ID.from_string(relay_peer_id_str)
 
         # open stream to the relay and request hop connect
         relay_stream = await self.host.new_stream(relay_peer_id, [PROTOCOL_ID])
@@ -566,23 +602,30 @@ class CircuitV2Transport(ITransport):
         try:
             hop_msg = HopMessage(
                 type=HopMessage.CONNECT,
-                peer=peer_info.peer_id.to_bytes(),
+                peer=CircuitPeerId(id=peer_info.peer_id.to_bytes()),
             )
-            await relay_stream.write(hop_msg.SerializeToString())
+            await write_delimited_msg(relay_stream, hop_msg)
 
-            resp_bytes = await relay_stream.read()
-            resp = HopMessage()
-            resp.ParseFromString(resp_bytes)
+            resp = await read_delimited_msg(relay_stream, HopMessage)
 
-            status_code = getattr(resp.status, "code", StatusCode.OK)
-            status_msg = getattr(resp.status, "message", "Unknown error")
+            status_code = (
+                StatusCode(resp.status) if resp.HasField("status") else StatusCode.OK
+            )
 
             if status_code != StatusCode.OK:
                 await relay_stream.close()
-                raise ConnectionError(f"Relay connection failed: {status_msg}")
+                raise RelayConnectionError(
+                    f"Relay connection failed with status {status_code}",
+                    status_code=status_code,
+                    status_msg=f"status code {status_code}",
+                )
 
-            # Wrap in TrackedRawConnection for tracking
-            raw_conn = RawConnection(stream=relay_stream, initiator=True)
+            raw_conn = RawConnection(
+                stream=relay_stream,
+                initiator=True,
+                connection_type=ConnectionType.RELAYED,
+                addresses=[circuit_ma],
+            )
             return TrackedRawConnection(
                 wrapped=raw_conn,
                 relay_id=relay_peer_id,
@@ -698,10 +741,10 @@ class CircuitV2Transport(ITransport):
     def _extract_relay_id_from_ma(self, ma: multiaddr.Multiaddr) -> ID:
         """Extract relay peer ID from a circuit multiaddr."""
         relay_ma, _ = self.parse_circuit_ma(ma)
-        relay_peer_id_str = relay_ma.value_for_protocol("p2p")
+        relay_peer_id_str = relay_ma.get_peer_id()
         if not relay_peer_id_str:
             raise ValueError("Relay multiaddr missing peer id")
-        return ID.from_base58(relay_peer_id_str)
+        return ID.from_string(relay_peer_id_str)
 
     async def discover_peers(self, key: bytes, max_results: int = 5) -> list[PeerInfo]:
         if not self.dht:
@@ -733,36 +776,6 @@ class CircuitV2Transport(ITransport):
         except Exception:
             return False
 
-    async def _measure_relay(
-        self, relay_id: ID, scored_relays: list[tuple[ID, float]]
-    ) -> None:
-        metrics = self._relay_metrics.setdefault(
-            relay_id, {"latency": 0, "failures": 0, "last_seen": 0}
-        )
-        start = time.monotonic()
-        available = await self._is_relay_available(relay_id)
-        latency = time.monotonic() - start
-
-        if not available:
-            metrics["failures"] += 1
-            return
-
-        metrics.update(
-            {
-                "latency": latency,
-                "failures": max(0.0, metrics["failures"] - 1),
-                "last_seen": time.time(),
-            }
-        )
-
-        score = (
-            1000
-            - (metrics["failures"] * 10)
-            - (latency * 100)
-            - ((time.time() - metrics["last_seen"]) * 0.1)
-        )
-        scored_relays.append((relay_id, score))
-
     async def reserve(
         self, stream: INetStream, relay_peer_id: ID, nursery: trio.Nursery
     ) -> bool:
@@ -773,10 +786,12 @@ class CircuitV2Transport(ITransport):
         if not success:
             return False
 
-        # Start refresher if this is the first reservation
-        if not self._refreshing:
-            self._refreshing = True
-            nursery.start_soon(self._refresh_reservations_worker)
+        # Start refresher if this is the first reservation (guarded:
+        # concurrent reserve() calls must not spawn duplicate workers).
+        async with self._refresh_lock:
+            if not self._refreshing:
+                self._refreshing = True
+                nursery.start_soon(self._refresh_reservations_worker)
         return True
 
     async def _make_reservation(
@@ -801,17 +816,14 @@ class CircuitV2Transport(ITransport):
 
         """
         try:
-            # Create signed envelope for the reservation request to relay
-            envelope_bytes, _ = env_to_send_in_RPC(self.host)
-            # Send reservation request
+            # Send reservation request (spec RESERVE carries no fields)
             reserve_msg = HopMessage(
                 type=HopMessage.RESERVE,
-                peer=self.host.get_id().to_bytes(),
-                senderRecord=envelope_bytes,
+                peer=CircuitPeerId(id=self.host.get_id().to_bytes()),
             )
 
             try:
-                await stream.write(reserve_msg.SerializeToString())
+                await write_delimited_msg(stream, reserve_msg)
                 logger.debug("Successfully sent reservation request")
             except Exception as e:
                 logger.error("Failed to send reservation request: %s", str(e))
@@ -820,12 +832,8 @@ class CircuitV2Transport(ITransport):
             # Read response with timeout
             with trio.fail_after(STREAM_READ_TIMEOUT):
                 try:
-                    resp_bytes = await stream.read(1024)
-                    logger.debug(
-                        "Received reservation response: %d bytes", len(resp_bytes)
-                    )
-                    resp = HopMessage()
-                    resp.ParseFromString(resp_bytes)
+                    resp = await read_delimited_msg(stream, HopMessage)
+                    logger.debug("Received reservation response")
                 except Exception as e:
                     logger.error(
                         "Failed to read/parse reservation response: %s", str(e)
@@ -841,24 +849,30 @@ class CircuitV2Transport(ITransport):
                     # Don't fail the reservation - the senderRecord is optional
 
             # Access status attributes directly
-            status_code = getattr(resp.status, "code", StatusCode.OK)
-            status_msg = getattr(resp.status, "message", "Unknown error")
-            expires = getattr(resp.reservation, "expire", 0)
-
-            logger.debug(
-                "Reservation response: code=%s, message=%s", status_code, status_msg
+            status_code = (
+                StatusCode(resp.status) if resp.HasField("status") else StatusCode.OK
             )
+            expires = resp.reservation.expire if resp.HasField("reservation") else 0
+
+            logger.debug("Reservation response: code=%s", status_code)
 
             if status_code != StatusCode.OK:
                 logger.warning(
-                    "Reservation failed with relay %s: %s",
+                    "Reservation failed with relay %s: code %s",
                     relay_peer_id,
-                    status_msg,
+                    status_code,
                 )
                 return False
 
             self._reservations[relay_peer_id] = expires
-            logger.info("Reserved peer %s (ttl=%.1fs)", relay_peer_id, expires)
+            self._reservation_proofs[relay_peer_id] = Reservation(
+                expire=expires,
+                voucher=resp.reservation.voucher
+                if resp.HasField("reservation")
+                else b"",
+            )
+            ttl = max(0, expires - int(time.time()))
+            logger.info("Reserved peer %s (ttl=%ss)", relay_peer_id, ttl)
 
             return True
 
@@ -882,6 +896,7 @@ class CircuitV2Transport(ITransport):
                 for relay_peer_id in expired:
                     logger.info("Reservation expired for peer %s", relay_peer_id)
                     del self._reservations[relay_peer_id]
+                    self._reservation_proofs.pop(relay_peer_id, None)
 
                 to_refresh = [
                     relay_peer_id
@@ -996,8 +1011,6 @@ class CircuitV2Listener(Service, IListener):
         ----------
         stream : INetStream
             The incoming stream
-        remote_peer_id : ID
-            The remote peer's ID
 
         Returns
         -------
@@ -1015,15 +1028,24 @@ class CircuitV2Listener(Service, IListener):
 
         try:
             # Read STOP message
-            msg_bytes = await stream.read()
-            stop_msg = StopMessage()
-            stop_msg.ParseFromString(msg_bytes)
+            stop_msg = await read_delimited_msg(stream, StopMessage)
 
             if stop_msg.type != StopMessage.CONNECT:
                 raise ConnectionError("Invalid STOP message type")
 
-            # Create raw connection
-            return RawConnection(stream=stream, initiator=False)
+            # Create raw connection for relayed connection
+            # Construct circuit multiaddr: /p2p/{relay}/p2p-circuit/p2p/{source}
+            peer_id = ID(stop_msg.peer.id)
+            relay_peer_id = self.host.get_id()
+            circuit_ma = multiaddr.Multiaddr(
+                f"/p2p/{relay_peer_id.to_base58()}/p2p-circuit/p2p/{peer_id.to_base58()}"
+            )
+            return RawConnection(
+                stream=stream,
+                initiator=False,
+                connection_type=ConnectionType.RELAYED,
+                addresses=[circuit_ma],
+            )
 
         except Exception as e:
             await stream.close()
@@ -1061,13 +1083,13 @@ class CircuitV2Listener(Service, IListener):
                 )
                 await stream.close()
 
-        self.host.set_stream_handler(PROTOCOL_ID, stream_handler)
+        self.host.set_stream_handler(STOP_PROTOCOL_ID, stream_handler)
         try:
             await self.manager.wait_finished()
         finally:
             logger.debug("CircuitV2Listener stopped")
 
-    async def listen(self, maddr: multiaddr.Multiaddr, nursery: trio.Nursery) -> bool:
+    async def listen(self, maddr: multiaddr.Multiaddr) -> None:
         """
         Start listening on the given multiaddr.
 
@@ -1075,13 +1097,6 @@ class CircuitV2Listener(Service, IListener):
         ----------
         maddr : multiaddr.Multiaddr
             The multiaddr to listen on
-        nursery : trio.Nursery
-            The nursery to run tasks in
-
-        Returns
-        -------
-        bool
-            True if listening successfully started
 
         """
         # Convert string to Multiaddr if needed
@@ -1091,7 +1106,6 @@ class CircuitV2Listener(Service, IListener):
             else multiaddr.Multiaddr(maddr)
         )
         self.multiaddrs.append(addr)
-        return True
 
     def get_addrs(self) -> tuple[multiaddr.Multiaddr, ...]:
         """

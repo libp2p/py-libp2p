@@ -1,0 +1,331 @@
+"""
+Tests for WebRTCStream protobuf framing and lifecycle.
+"""
+# pyrefly: ignore
+
+from __future__ import annotations
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+import trio
+import trio.testing
+
+from libp2p.transport.webrtc.constants import MAX_PAYLOAD_SIZE
+from libp2p.transport.webrtc.pb.webrtc_pb2 import Message
+from libp2p.transport.webrtc.stream import StreamState, WebRTCStream
+from libp2p.utils.varint import decode_varint_with_size, encode_uvarint
+
+
+def _framed(msg: Message) -> bytes:
+    """Encode a Message in the on-wire uvarint-length-prefixed form."""
+    data = msg.SerializeToString()
+    return encode_uvarint(len(data)) + data
+
+
+def _parse_framed(raw: bytes) -> Message:
+    """Inverse of :func:`_framed` — decode the wire format back to a Message."""
+    length, consumed = decode_varint_with_size(raw)
+    msg = Message()
+    msg.ParseFromString(raw[consumed : consumed + length])
+    return msg
+
+
+def _wire_sends(stream: WebRTCStream) -> list:
+    """Calls made to the connection's asyncio-side send callback (flags)."""
+    return stream.muxed_conn._send_on_channel_cb.call_args_list
+
+
+def _make_stream(channel_id: int = 2) -> WebRTCStream:
+    """Create a stream with a mock connection and send callback."""
+    mock_conn = MagicMock()
+    mock_conn.peer_id = MagicMock()
+    stream = WebRTCStream(
+        connection=mock_conn,
+        channel_id=channel_id,
+        is_initiator=True,
+    )
+    stream._send_callback = AsyncMock()
+    return stream
+
+
+class TestWrite:
+    @pytest.mark.trio
+    async def test_write_sends_framed_protobuf(self):
+        stream = _make_stream()
+        await stream.write(b"hello")
+        stream._send_callback.assert_called_once()
+        raw = stream._send_callback.call_args[0][0]
+        # Wire form is uvarint(len) || protobuf bytes.
+        msg = _parse_framed(raw)
+        assert msg.message == b"hello"
+        assert not msg.HasField("flag")
+
+    @pytest.mark.trio
+    async def test_write_chunks_at_payload_size(self):
+        stream = _make_stream()
+        big = b"x" * (MAX_PAYLOAD_SIZE * 2)
+        await stream.write(big)
+        assert stream._send_callback.call_count == 2
+        msg1 = _parse_framed(stream._send_callback.call_args_list[0][0][0])
+        msg2 = _parse_framed(stream._send_callback.call_args_list[1][0][0])
+        assert len(msg1.message) == MAX_PAYLOAD_SIZE
+        assert len(msg2.message) == MAX_PAYLOAD_SIZE
+
+    @pytest.mark.trio
+    async def test_framed_message_never_exceeds_16_kib(self):
+        """Every send must keep the full framed wire payload <= 16 KiB."""
+        stream = _make_stream()
+        await stream.write(b"y" * (MAX_PAYLOAD_SIZE * 3 + 7))
+        for call in stream._send_callback.call_args_list:
+            framed = call[0][0]
+            assert len(framed) <= 16_384
+
+    @pytest.mark.trio
+    async def test_write_after_close_raises(self):
+        stream = _make_stream()
+        stream._write_closed = True
+        with pytest.raises(Exception, match="closed"):
+            await stream.write(b"data")
+
+    @pytest.mark.trio
+    async def test_write_after_reset_raises(self):
+        stream = _make_stream()
+        stream._state = StreamState.RESET
+        with pytest.raises(Exception, match="reset"):
+            await stream.write(b"data")
+
+
+class TestRead:
+    @pytest.mark.trio
+    async def test_read_returns_data_from_on_data(self):
+        stream = _make_stream()
+        stream.on_data(_framed(Message(message=b"world")))
+        data = await stream.read()
+        assert data == b"world"
+
+    @pytest.mark.trio
+    async def test_read_after_reset_raises(self):
+        stream = _make_stream()
+        stream._state = StreamState.RESET
+        with pytest.raises(Exception, match="reset"):
+            await stream.read()
+
+    @pytest.mark.trio
+    async def test_read_buffers_partial(self):
+        stream = _make_stream()
+        stream.on_data(_framed(Message(message=b"abcdefgh")))
+        # Read 3 bytes
+        data = await stream.read(3)
+        assert data == b"abc"
+        # Read remaining
+        data = await stream.read()
+        assert data == b"defgh"
+
+    @pytest.mark.trio
+    async def test_frame_split_across_sctp_messages(self):
+        # go-libp2p (go-msgio pbio fallback) writes the varint prefix and the
+        # protobuf body as two separate SCTP messages; a body may also be cut.
+        stream = _make_stream()
+        framed = _framed(Message(message=b"from-go"))
+        stream.on_data(framed[:1])  # varint prefix alone
+        assert not stream._read_buf
+        stream.on_data(framed[1:4])  # partial body
+        stream.on_data(framed[4:])
+        assert await stream.read(7) == b"from-go"
+
+    @pytest.mark.trio
+    async def test_multiple_frames_in_one_sctp_message(self):
+        stream = _make_stream()
+        stream.on_data(
+            _framed(Message(message=b"ab"))
+            + _framed(Message(message=b"cd", flag=Message.FIN))
+        )
+        assert await stream.read() == b"ab"
+        assert await stream.read() == b"cd"
+        assert stream._read_closed
+
+    @pytest.mark.trio
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            b"\xff\xff\xff\xff\xff",  # unterminated varint, past any legal size
+            b"\x81\x80\x01",  # length 16385 > MAX_MESSAGE_SIZE
+            b"\x02\xff\xff",  # length ok, body is not a protobuf
+        ],
+    )
+    async def test_malformed_frame_resets_stream(self, raw):
+        stream = _make_stream()
+        with patch("libp2p.transport.webrtc.stream.logger.warning") as warning:
+            stream.on_data(raw)
+        assert not stream._read_buf
+        assert "malformed frame" in warning.call_args.args[0]
+        assert stream._state == StreamState.RESET
+        with pytest.raises(Exception, match="reset"):
+            await stream.read()
+
+    @pytest.mark.trio
+    async def test_frames_before_malformed_one_are_delivered_then_reset(self):
+        stream = _make_stream()
+        got = []
+
+        async def reader() -> None:
+            got.append(await stream.read())
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(reader)
+            await trio.testing.wait_all_tasks_blocked()  # reader blocked in read()
+            with patch("libp2p.transport.webrtc.stream.logger.warning"):
+                stream.on_data(_framed(Message(message=b"ab", flag=Message.FIN)))
+                stream.on_data(b"\x02\xff\xff")
+        assert got == [b"ab"]
+        assert stream._read_closed
+        sent = [_parse_framed(c.args[1]) for c in _wire_sends(stream)]
+        assert [m.flag for m in sent] == [Message.FIN_ACK, Message.RESET]
+        assert stream._state == StreamState.RESET
+
+    @pytest.mark.trio
+    async def test_bytes_after_malformed_frame_are_ignored(self):
+        stream = _make_stream()
+        with patch("libp2p.transport.webrtc.stream.logger.warning"):
+            stream.on_data(b"\x02\xff\xff")
+            stream.on_data(_framed(Message(message=b"late")))
+            stream.on_data(b"\x02\xff\xff")
+        assert not stream._frame_buf
+        sent = [_parse_framed(c.args[1]) for c in _wire_sends(stream)]
+        assert [m.flag for m in sent] == [Message.RESET]
+
+    @pytest.mark.trio
+    async def test_one_sctp_message_is_one_trio_hop(self):
+        stream = _make_stream()
+        raw = b"".join(_framed(Message(message=c)) for c in (b"a", b"b", b"c"))
+        with patch.object(stream, "_run_on_trio_thread") as hop:
+            stream.on_data(raw)
+        hop.assert_called_once()
+        hop.call_args.args[0]()  # apply the batch inline (we are on trio)
+        assert [await stream.read() for _ in range(3)] == [b"a", b"b", b"c"]
+
+
+class TestFlags:
+    @pytest.mark.trio
+    async def test_on_data_fin_closes_read_and_sends_fin_ack(self):
+        stream = _make_stream()
+        stream.on_data(_framed(Message(flag=Message.FIN)))
+        assert stream._read_closed is True
+
+    @pytest.mark.trio
+    async def test_on_data_fin_ack_sets_event(self):
+        stream = _make_stream()
+        stream.on_data(_framed(Message(flag=Message.FIN_ACK)))
+        assert stream._fin_ack_received.is_set()
+
+    @pytest.mark.trio
+    async def test_on_data_stop_sending_closes_write(self):
+        stream = _make_stream()
+        stream.on_data(_framed(Message(flag=Message.STOP_SENDING)))
+        assert stream._write_closed is True
+
+    @pytest.mark.trio
+    async def test_on_data_reset_sets_state(self):
+        stream = _make_stream()
+        stream.on_data(_framed(Message(flag=Message.RESET)))
+        assert stream._state == StreamState.RESET
+
+    @pytest.mark.trio
+    async def test_on_data_with_flag_and_payload(self):
+        stream = _make_stream()
+        stream.on_data(_framed(Message(flag=Message.FIN, message=b"last-chunk")))
+        # FIN should close reads but payload should be delivered
+        data = await stream.read()
+        assert data == b"last-chunk"
+
+
+class TestClose:
+    @pytest.mark.trio
+    async def test_close_sends_fin(self):
+        stream = _make_stream()
+        # Pre-set FIN_ACK so close doesn't block
+        stream._fin_ack_received.set()
+        await stream.close()
+        assert stream._state == StreamState.CLOSED
+        # Should have sent FIN
+        calls = stream._send_callback.call_args_list
+        assert len(calls) >= 1
+        msg = _parse_framed(calls[0][0][0])
+        assert msg.flag == Message.FIN
+
+    @pytest.mark.trio
+    async def test_close_is_idempotent(self):
+        stream = _make_stream()
+        stream._fin_ack_received.set()
+        await stream.close()
+        await stream.close()  # Should not raise
+        assert stream._state == StreamState.CLOSED
+
+    @pytest.mark.trio
+    async def test_reset_sends_reset_flag(self):
+        stream = _make_stream()
+        await stream.reset()
+        assert stream._state == StreamState.RESET
+        calls = stream._send_callback.call_args_list
+        msg = _parse_framed(calls[0][0][0])
+        assert msg.flag == Message.RESET
+
+
+class TestDeadline:
+    @pytest.mark.trio
+    async def test_set_deadline(self):
+        stream = _make_stream()
+        stream.set_deadline(10)
+        assert stream._deadline > 0
+
+    @pytest.mark.trio
+    async def test_clear_deadline(self):
+        stream = _make_stream()
+        stream.set_deadline(10)
+        stream.set_deadline(0)
+        assert stream._deadline == 0.0
+
+
+class TestChannelClose:
+    @pytest.mark.trio
+    async def test_on_channel_close(self):
+        stream = _make_stream()
+        stream.on_channel_close()
+        assert stream._read_closed is True
+        assert stream._write_closed is True
+
+
+class TestReviewGuards:
+    """Guards added in review: decoder contract, RESET semantics."""
+
+    def test_decode_frames_rejects_zero_consumed(self):
+        """
+        A decoder returning (0, 0) on non-empty input must not wrap to
+        head[-1]; it is treated as a malformed prefix.
+        """
+        from unittest.mock import patch
+
+        import libp2p.transport.webrtc.stream as stream_mod
+
+        buf = bytearray(b"\x01a")
+        with patch.object(stream_mod, "decode_varint_with_size", return_value=(0, 0)):
+            with pytest.raises(ValueError, match="empty varint"):
+                list(stream_mod._decode_frames(buf))
+
+    @pytest.mark.trio
+    async def test_reset_locally_is_idempotent(self):
+        stream = _make_stream()
+        stream._reset_locally()
+        stream._reset_locally()  # second call is a no-op, no double sentinel
+        assert stream._state is StreamState.RESET
+
+    @pytest.mark.trio
+    async def test_data_after_reset_in_same_batch_is_dropped(self):
+        """A crafted batch [RESET, data] must not deliver the data."""
+        stream = _make_stream()
+        raw = _framed(Message(flag=Message.RESET)) + _framed(Message(message=b"late"))
+        stream.on_data(raw)
+        assert stream._state is StreamState.RESET
+        with pytest.raises(Exception):
+            await stream.read(4)

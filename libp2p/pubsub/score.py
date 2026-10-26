@@ -95,6 +95,17 @@ class PeerScorer:
         # Application-specific scores cache
         self.app_specific_scores: dict[ID, float] = defaultdict(float)
 
+        # Enhanced v1.4 behavioral tracking
+        self.graft_flood_penalties: dict[ID, float] = defaultdict(float)
+        self.iwant_spam_penalties: dict[ID, float] = defaultdict(float)
+        self.ihave_spam_penalties: dict[ID, float] = defaultdict(float)
+        self.equivocation_penalties: dict[ID, float] = defaultdict(float)
+
+        # IP subnet tracking for enhanced colocation detection
+        self.subnet_tracking: dict[str, set[ID]] = defaultdict(
+            set
+        )  # /24 subnet -> peers
+
     # ---- Update hooks ----
     def on_heartbeat(self, dt_seconds: float = 1.0) -> None:
         # Apply decay to all counters
@@ -125,6 +136,16 @@ class PeerScorer:
         # Apply decay to application-specific scores
         for peer in list(self.app_specific_scores.keys()):
             self.app_specific_scores[peer] *= self.params.p6_appl_slack_decay
+
+        # Apply decay to v1.4 behavioral penalties
+        for peer in list(self.graft_flood_penalties.keys()):
+            self.graft_flood_penalties[peer] *= self.params.p5_behavior_penalty_decay
+        for peer in list(self.iwant_spam_penalties.keys()):
+            self.iwant_spam_penalties[peer] *= self.params.p5_behavior_penalty_decay
+        for peer in list(self.ihave_spam_penalties.keys()):
+            self.ihave_spam_penalties[peer] *= self.params.p5_behavior_penalty_decay
+        for peer in list(self.equivocation_penalties.keys()):
+            self.equivocation_penalties[peer] *= self.params.p5_behavior_penalty_decay
 
     def on_join_mesh(self, peer: ID, topic: str) -> None:
         # Start counting time in mesh for the peer
@@ -159,6 +180,16 @@ class PeerScorer:
         # Remove IP association
         self.remove_peer_ip(peer)
 
+        # Remove v1.4 behavioral penalties
+        if peer in self.graft_flood_penalties:
+            del self.graft_flood_penalties[peer]
+        if peer in self.iwant_spam_penalties:
+            del self.iwant_spam_penalties[peer]
+        if peer in self.ihave_spam_penalties:
+            del self.ihave_spam_penalties[peer]
+        if peer in self.equivocation_penalties:
+            del self.equivocation_penalties[peer]
+
     def on_first_delivery(self, peer: ID, topic: str) -> None:
         self.first_message_deliveries[peer][topic] += 1.0
 
@@ -170,6 +201,22 @@ class PeerScorer:
 
     def penalize_behavior(self, peer: ID, amount: float = 1.0) -> None:
         self.behavior_penalty[peer] += amount
+
+    def penalize_graft_flood(self, peer: ID, amount: float = 10.0) -> None:
+        """Apply penalty for GRAFT flooding behavior."""
+        self.graft_flood_penalties[peer] += amount
+
+    def penalize_iwant_spam(self, peer: ID, amount: float = 5.0) -> None:
+        """Apply penalty for IWANT spamming behavior."""
+        self.iwant_spam_penalties[peer] += amount
+
+    def penalize_ihave_spam(self, peer: ID, amount: float = 5.0) -> None:
+        """Apply penalty for IHAVE spamming behavior."""
+        self.ihave_spam_penalties[peer] += amount
+
+    def penalize_equivocation(self, peer: ID, amount: float = 100.0) -> None:
+        """Apply severe penalty for message equivocation."""
+        self.equivocation_penalties[peer] += amount
 
     def add_peer_ip(self, peer: ID, ip_str: str) -> None:
         """
@@ -189,6 +236,11 @@ class PeerScorer:
         self.peer_ips[ip_str].add(peer)
         self.ip_by_peer[peer] = ip_str
 
+        # Track subnet for enhanced colocation detection
+        subnet = self._get_subnet(ip_str)
+        if subnet:
+            self.subnet_tracking[subnet].add(peer)
+
     def remove_peer_ip(self, peer: ID) -> None:
         """
         Remove a peer's IP association.
@@ -200,6 +252,14 @@ class PeerScorer:
             self.peer_ips[ip_str].discard(peer)
             if not self.peer_ips[ip_str]:
                 del self.peer_ips[ip_str]
+
+            # Remove from subnet tracking
+            subnet = self._get_subnet(ip_str)
+            if subnet and subnet in self.subnet_tracking:
+                self.subnet_tracking[subnet].discard(peer)
+                if not self.subnet_tracking[subnet]:
+                    del self.subnet_tracking[subnet]
+
             del self.ip_by_peer[peer]
 
     def update_app_specific_score(self, peer: ID) -> None:
@@ -214,6 +274,32 @@ class PeerScorer:
             except Exception:
                 # If app-specific scoring fails, default to 0
                 self.app_specific_scores[peer] = 0.0
+
+    def _get_subnet(self, ip_str: str) -> str | None:
+        """
+        Extract /24 subnet from IP address for subnet-based colocation tracking.
+
+        :param ip_str: IP address string
+        :return: Subnet string (e.g., "192.168.1") or None if invalid
+        """
+        try:
+            # Handle IPv4 /24 subnets
+            if "." in ip_str and ip_str.count(".") == 3:
+                parts = ip_str.split(".")
+                if len(parts) == 4 and all(
+                    part.isdigit() and 0 <= int(part) <= 255 for part in parts
+                ):
+                    return ".".join(parts[:3])
+
+            # Handle IPv6 /64 subnets (simplified)
+            elif ":" in ip_str:
+                parts = ip_str.split(":")
+                if len(parts) >= 4:
+                    return ":".join(parts[:4])
+
+            return None
+        except Exception:
+            return None
 
     # ---- Scoring ----
     def topic_score(self, peer: ID, topic: str) -> float:
@@ -238,6 +324,8 @@ class PeerScorer:
         """
         Calculate the IP colocation penalty for a peer.
 
+        Enhanced for v1.4 with subnet-level tracking.
+
         :param peer: The peer ID
         :return: The IP colocation penalty (positive value that will be subtracted)
         """
@@ -245,14 +333,33 @@ class PeerScorer:
             return 0.0
 
         ip_str = self.ip_by_peer[peer]
-        peer_count = len(self.peer_ips[ip_str])
 
-        if peer_count <= self.params.p7_ip_colocation_threshold:
-            return 0.0
+        # Exact IP colocation penalty
+        exact_ip_count = len(self.peer_ips[ip_str])
+        ip_penalty = 0.0
 
-        # Penalty increases quadratically with excess peers
-        excess_peers = peer_count - self.params.p7_ip_colocation_threshold
-        return self.params.p7_ip_colocation_weight * (excess_peers**2)
+        if exact_ip_count > self.params.p7_ip_colocation_threshold:
+            excess_peers = exact_ip_count - self.params.p7_ip_colocation_threshold
+            ip_penalty = self.params.p7_ip_colocation_weight * (excess_peers**2)
+
+        # Additional subnet-level penalty (lighter weight)
+        subnet = self._get_subnet(ip_str)
+        subnet_penalty = 0.0
+
+        if subnet and subnet in self.subnet_tracking:
+            subnet_count = len(self.subnet_tracking[subnet])
+            subnet_threshold = (
+                self.params.p7_ip_colocation_threshold * 3
+            )  # More lenient for subnets
+
+            if subnet_count > subnet_threshold:
+                excess_subnet_peers = subnet_count - subnet_threshold
+                # Apply lighter penalty for subnet colocation
+                subnet_penalty = (
+                    self.params.p7_ip_colocation_weight * 0.1
+                ) * excess_subnet_peers
+
+        return ip_penalty + subnet_penalty
 
     def score(self, peer: ID, topics: list[str]) -> float:
         score = 0.0
@@ -260,9 +367,17 @@ class PeerScorer:
             score += self.topic_score(peer, t)
 
         # Behavior penalty activates beyond threshold
-        if self.behavior_penalty[peer] > self.params.p5_behavior_penalty_threshold:
+        total_behavior_penalty = (
+            self.behavior_penalty[peer]
+            + self.graft_flood_penalties[peer]
+            + self.iwant_spam_penalties[peer]
+            + self.ihave_spam_penalties[peer]
+            + self.equivocation_penalties[peer]
+        )
+
+        if total_behavior_penalty > self.params.p5_behavior_penalty_threshold:
             score -= (
-                self.behavior_penalty[peer] - self.params.p5_behavior_penalty_threshold
+                total_behavior_penalty - self.params.p5_behavior_penalty_threshold
             ) * self.params.p5_behavior_penalty_weight
 
         # P6: Application-specific scoring
@@ -386,6 +501,10 @@ class PeerScorer:
             "mesh_deliveries": self.mesh_message_deliveries[peer][topic],
             "invalid_messages": self.invalid_messages[peer][topic],
             "behavior_penalty": self.behavior_penalty[peer],
+            "graft_flood_penalty": self.graft_flood_penalties[peer],
+            "iwant_spam_penalty": self.iwant_spam_penalties[peer],
+            "ihave_spam_penalty": self.ihave_spam_penalties[peer],
+            "equivocation_penalty": self.equivocation_penalties[peer],
             "app_specific_score": self.app_specific_scores[peer],
             "ip_colocation_penalty": self.ip_colocation_penalty(peer),
             "peer_ip": self.ip_by_peer.get(peer, "unknown"),

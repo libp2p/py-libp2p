@@ -1,3 +1,4 @@
+from collections.abc import Awaitable, Callable
 from enum import (
     Enum,
     auto,
@@ -5,6 +6,8 @@ from enum import (
 import logging
 from typing import (
     TYPE_CHECKING,
+    Any,
+    cast,
 )
 
 import trio
@@ -16,6 +19,7 @@ from libp2p.abc import (
 from libp2p.custom_types import (
     TProtocol,
 )
+from libp2p.rcmgr.metrics import Direction
 from libp2p.stream_muxer.exceptions import (
     MuxedStreamClosed,
     MuxedStreamEOF,
@@ -121,9 +125,13 @@ class NetStream(INetStream):
 
     muxed_stream: IMuxedStream
     protocol_id: TProtocol | None
+    metric_send_channel: trio.MemorySendChannel[Any] | None = None
 
     def __init__(
-        self, muxed_stream: IMuxedStream, swarm_conn: "SwarmConn | None"
+        self,
+        muxed_stream: IMuxedStream,
+        swarm_conn: "SwarmConn | None",
+        metric_send_channel: trio.MemorySendChannel[Any] | None,
     ) -> None:
         self.muxed_stream = muxed_stream
         self.muxed_conn = muxed_stream.muxed_conn
@@ -132,8 +140,16 @@ class NetStream(INetStream):
         self.swarm_conn = swarm_conn
         self.logger = logging.getLogger(__name__)
 
+        # Stream direction for resource release tracking
+        self._direction: Direction = Direction.UNKNOWN
+        # Idempotency guard against double-release of RM/semaphore resources
+        self._resource_released: bool = False
+
         # Thread safety for state operations (following AkMo3's approach)
         self._state_lock = trio.Lock()
+
+        # Metrics emit endpoint
+        self.metric_send_channel = metric_send_channel
 
     def get_protocol(self) -> TProtocol | None:
         """
@@ -319,7 +335,17 @@ class NetStream(INetStream):
                     "Cannot close write on stream; stream is in error state"
                 )
 
-        await self.muxed_stream.close()
+        # Yamux/Mplex ``close()`` is already a write half-close (sends FIN and
+        # keeps the read side open). QUICStream.close() closes BOTH directions,
+        # which would make a subsequent read return EOF immediately (e.g. the
+        # perf protocol: client half-closes after its request and then reads the
+        # server's reply). Prefer a dedicated ``close_write()`` when the muxed
+        # stream provides one.
+        close_write = getattr(self.muxed_stream, "close_write", None)
+        if callable(close_write):
+            await cast(Callable[[], Awaitable[None]], close_write)()
+        else:
+            await self.muxed_stream.close()
 
         async with self._state_lock:
             if self._state == StreamState.OPEN:
@@ -365,3 +391,38 @@ class NetStream(INetStream):
                 StreamState.RESET,
                 StreamState.CLOSE_BOTH,
             ]
+
+    @property
+    def is_closed(self) -> bool:
+        """
+        True when the stream is in a terminal state or its underlying muxed
+        stream is closed/reset.
+
+        Consumers that cannot rely on ``closed_stream`` notifee events (e.g.
+        resource-leak monitors reconciling streams whose connection died
+        without dispatching per-stream close events) use this to detect
+        streams that are no longer live.
+
+        :return: True if the stream is closed or reset, otherwise False.
+        """
+        if self._state in (
+            StreamState.CLOSE_BOTH,
+            StreamState.RESET,
+            StreamState.ERROR,
+        ):
+            return True
+
+        # Delegate to the underlying muxed stream when it exposes a closed
+        # check (e.g. QUICStream.is_closed()), or fall back to its state.
+        is_closed = getattr(self.muxed_stream, "is_closed", None)
+        if is_closed is not None:
+            try:
+                return bool(is_closed() if callable(is_closed) else is_closed)
+            except Exception:
+                return False
+        state = getattr(self.muxed_stream, "_state", None)
+        if state is not None:
+            name = getattr(state, "name", None) or getattr(state, "value", None)
+            if name in ("CLOSED", "RESET", "closed", "reset"):
+                return True
+        return False
