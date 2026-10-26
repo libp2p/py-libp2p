@@ -81,9 +81,10 @@ Python selection (default):
 
 Prerequisites (checked before install):
   - CMake on PATH (winget install --id Kitware.CMake -e)
-  - uv >= 0.13.4 on PATH unless -Pip (winget install --id=astral-sh.uv)
+  - uv >= 0.13.4 unless -Pip (auto-tries winget install astral-sh.uv;
+    no system Python required — uv downloads CPython)
   - Git recommended (winget install --id Git.Git -e)
-  - With -Pip: a supported system Python and pip >= 26.2.2
+  - With -Pip: a supported system Python on PATH and pip >= 26.2.2
     (eMudhra/emSign CA incident; Discussion #1570)
   - GMP is not required on Windows (fastecdsa is skipped on win32)
 
@@ -147,34 +148,78 @@ function Get-SupportedPythonMinors {
     return @($filtered)
 }
 
+function Update-SessionPath {
+    # Pick up tools installed earlier in this session (winget / uv installer).
+    $machine = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+    $user = [System.Environment]::GetEnvironmentVariable("Path", "User")
+    $extra = @(
+        (Join-Path $env:USERPROFILE ".local\bin"),
+        (Join-Path $env:USERPROFILE ".cargo\bin"),
+        (Join-Path $env:LOCALAPPDATA "Programs\uv")
+    ) | Where-Object { $_ -and (Test-Path $_) }
+    $env:Path = (@($machine, $user) + $extra) -join ";"
+}
+
+function Test-RealPythonPath([string]$path) {
+    if (-not $path) { return $false }
+    # Windows Store "python" / "python3" stubs open the Store and are not usable.
+    if ($path -match '\\WindowsApps\\') { return $false }
+    return (Test-Path $path)
+}
+
 function Find-PythonBin([string]$majorMinor) {
     $cmd = Get-Command "python$majorMinor" -ErrorAction SilentlyContinue
-    if ($cmd) { return $cmd.Source }
+    if ($cmd -and (Test-RealPythonPath $cmd.Source)) { return $cmd.Source }
 
     $pyLauncher = Get-Command py -ErrorAction SilentlyContinue
     if ($pyLauncher) {
         try {
-            $out = & py "-$majorMinor" -c "import sys; print(sys.executable)" 2>$null
-            if ($LASTEXITCODE -eq 0 -and $out) { return $out.Trim() }
+            $out = & py "-$majorMinor" -c "import sys; print(sys.executable)" 2>&1 |
+                Where-Object { $_ -is [string] -or $_.GetType().Name -eq "String" } |
+                Out-String
+            $path = ($out -split "`r?`n" | Where-Object { $_ -and ($_ -notmatch "^(py:|Python )") } | Select-Object -First 1)
+            if ($path -and (Test-RealPythonPath $path.Trim())) { return $path.Trim() }
         } catch { }
     }
 
-    $uv = Get-Command uv -ErrorAction SilentlyContinue
-    if ($uv) {
+    Update-SessionPath
+    if (Get-Command uv -ErrorAction SilentlyContinue) {
         try {
-            $found = & uv python find $majorMinor 2>$null
-            if ($LASTEXITCODE -eq 0 -and $found) { return $found.Trim() }
+            $prevEap = $ErrorActionPreference
+            $ErrorActionPreference = "Continue"
+            $found = & uv python find $majorMinor 2>&1 | Out-String
+            $ErrorActionPreference = $prevEap
+            $path = ($found -split "`r?`n" | Where-Object { $_ -match "python(\.exe)?$" -or $_ -match "cpython" -or $_ -match "\\python\.exe$" } | Select-Object -First 1)
+            if (-not $path) {
+                $path = ($found -split "`r?`n" | Where-Object { $_.Trim() -ne "" -and $_ -notmatch "error|warning|INFO" } | Select-Object -First 1)
+            }
+            if ($path -and (Test-RealPythonPath $path.Trim())) { return $path.Trim() }
+            # uv may print a valid path that Test-Path accepts
+            if ($path -and (Test-Path $path.Trim())) { return $path.Trim() }
         } catch { }
     }
 
     $python = Get-Command python -ErrorAction SilentlyContinue
-    if ($python) {
+    if ($python -and (Test-RealPythonPath $python.Source)) {
         try {
-            $ver = & python -c "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')" 2>$null
+            $ver = & python -c "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')" 2>&1 | Out-String
             if ($ver -and $ver.Trim() -eq $majorMinor) { return $python.Source }
         } catch { }
     }
     return $null
+}
+
+function Install-UvViaWinget {
+    $winget = Get-Command winget -ErrorAction SilentlyContinue
+    if (-not $winget) { return $false }
+    Write-Host "  uv: attempting winget install (astral-sh.uv)..." -ForegroundColor Yellow
+    & winget install --id=astral-sh.uv -e --accept-package-agreements --accept-source-agreements
+    if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1978335189) {
+        # -1978335189 = already installed (winget)
+        return $false
+    }
+    Update-SessionPath
+    return [bool](Get-Command uv -ErrorAction SilentlyContinue)
 }
 
 function Ensure-PythonVersion([string]$ver, [string]$viaLabel) {
@@ -187,8 +232,10 @@ function Ensure-PythonVersion([string]$ver, [string]$viaLabel) {
     }
     if (-not $Pip -and (Get-Command uv -ErrorAction SilentlyContinue)) {
         Write-Host "Python $ver not on PATH; installing via uv..." -ForegroundColor Yellow
+        Write-Host "(No system Python required — uv will download CPython $ver.)" -ForegroundColor Yellow
         & uv python install $ver
         if ($LASTEXITCODE -ne 0) { throw "uv python install $ver failed" }
+        Update-SessionPath
         $bin = Find-PythonBin $ver
         if ($bin) {
             $msg = "Selected Python $ver ($bin) via uv python install"
@@ -196,14 +243,16 @@ function Ensure-PythonVersion([string]$ver, [string]$viaLabel) {
             Write-Host $msg -ForegroundColor Green
             return @{ Version = $ver; Bin = $bin }
         }
-        throw "Installed Python $ver with uv but could not locate it. Try: uv python find $ver"
+        # uv sync --python <ver> can resolve the interpreter even if find is flaky
+        Write-Host "Selected Python $ver (managed by uv; will use: uv sync --python $ver)" -ForegroundColor Green
+        return @{ Version = $ver; Bin = $null }
     }
     $hint = "Python $ver not found on PATH / uv."
     if (-not $Pip) {
-        $hint += " Install uv (winget install --id=astral-sh.uv) then re-run."
+        $hint += " Install uv (winget install --id=astral-sh.uv) then re-run; uv will download Python."
     }
     else {
-        $hint += " Install Python $ver from python.org or the Microsoft Store."
+        $hint += " Install Python $ver from https://www.python.org/downloads/windows/ (enable 'Add to PATH')."
     }
     throw $hint
 }
@@ -231,6 +280,7 @@ function Resolve-Python([string[]]$supported, [string]$override) {
 
 function Test-SystemPrereqs {
     Write-Host "Checking system prerequisites..."
+    Update-SessionPath
     $missing = $false
     $cmake = Get-Command cmake -ErrorAction SilentlyContinue
     if (-not $cmake) {
@@ -242,6 +292,12 @@ function Test-SystemPrereqs {
     }
 
     $uv = Get-Command uv -ErrorAction SilentlyContinue
+    if (-not $uv -and -not $Pip) {
+        Write-Host "  uv: MISSING" -ForegroundColor Red
+        if (Install-UvViaWinget) {
+            $uv = Get-Command uv -ErrorAction SilentlyContinue
+        }
+    }
     if ($uv) {
         $raw = (& uv --version) | Out-String
         $ver = Get-VersionOrZero $raw
@@ -257,7 +313,7 @@ function Test-SystemPrereqs {
     else {
         Write-Host "  uv: MISSING" -ForegroundColor Red
         if (-not $Pip) { $missing = $true }
-        else { Write-Host "       (-Pip: continuing without uv)" -ForegroundColor Yellow }
+        else { Write-Host "       (-Pip: continuing without uv; need a system Python)" -ForegroundColor Yellow }
     }
 
     if ($missing) {
@@ -266,6 +322,7 @@ function Test-SystemPrereqs {
         }
         if (-not $Pip -and -not (Get-Command uv -ErrorAction SilentlyContinue)) {
             Write-Host "Install uv with: winget install --id=astral-sh.uv"
+            Write-Host "Then re-run; uv will download Python — no system Python install needed."
             Write-Host "Or re-run with -Pip if you already have a supported system Python."
         }
         Write-Host "See docs/contributing.rst (Windows Development Setup)."
@@ -323,6 +380,12 @@ if (-not $Pip) {
     }
 }
 else {
+    if (-not $pyBin) {
+        Write-Host "The -Pip path requires a system Python $pyVer on PATH." -ForegroundColor Red
+        Write-Host "Install from https://www.python.org/downloads/windows/ (enable Add to PATH),"
+        Write-Host "or re-run without -Pip so uv can download Python for you."
+        exit 1
+    }
     $venvPython = Join-Path $repoRoot ".venv\Scripts\python.exe"
     if (-not (Test-Path $venvPython)) {
         Write-Host "Creating virtual environment with $pyBin..." -ForegroundColor Yellow
