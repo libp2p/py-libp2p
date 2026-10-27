@@ -88,8 +88,7 @@ class SOCKSConnectionManager:
             host: Target WebSocket host
             port: Target WebSocket port
             ssl_context: Optional SSL context for WSS connections
-            server_hostname: TLS server name and Host header for the upgrade,
-                e.g. the name of a /tls/sni/<name>/ws address; defaults to host
+            server_hostname: TLS server name and Host header; defaults to host
 
         Returns:
             WebSocket connection object (trio-websocket)
@@ -105,6 +104,7 @@ class SOCKSConnectionManager:
                 logger.debug(f"Creating SOCKS5 client for {host}:{port}")
                 # Note: trio_socks uses a different API - we'll need to implement
                 # the connection logic using Socks5Stream
+                # It must use server_hostname, not host, as SNI and Host header.
                 raise NotImplementedError(
                     "SOCKS5 proxy support needs to be implemented with "
                     "trio_socks.socks5.Socks5Stream"
