@@ -8,44 +8,49 @@ import trio
 from libp2p.abc import (
     IHost,
     INetStream,
-    IPeerStore,
-)
-from libp2p.crypto.serialization import (
-    deserialize_public_key,
 )
 from libp2p.custom_types import (
     StreamHandlerFn,
     TProtocol,
 )
+from libp2p.identity.identify.identify import (
+    _mk_identify_protobuf,
+)
+from libp2p.identity.identify.pb.identify_pb2 import (
+    Identify,
+)
+from libp2p.identity.update import (
+    update_peerstore_from_identify,
+)
 from libp2p.network.stream.exceptions import (
     StreamClosed,
+    StreamReset,
 )
-from libp2p.peer.envelope import consume_envelope
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.stream_muxer.exceptions import MuxedStreamError
 from libp2p.utils import (
-    get_agent_version,
     varint,
 )
 from libp2p.utils.varint import (
     read_length_prefixed_protobuf,
 )
 
-from ..identify.identify import (
-    _mk_identify_protobuf,
-)
-from ..identify.pb.identify_pb2 import (
-    Identify,
-)
-
 logger = logging.getLogger(__name__)
 
 # Protocol ID for identify/push
 ID_PUSH = TProtocol("/ipfs/id/push/1.0.0")
-PROTOCOL_VERSION = "ipfs/0.1.0"
-AGENT_VERSION = get_agent_version()
 CONCURRENCY_LIMIT = 10
+_default_push_capacity: trio.CapacityLimiter | None = None
+
+
+def _get_push_capacity() -> trio.CapacityLimiter:
+    """Return a shared CapacityLimiter for identify-push concurrency control."""
+    global _default_push_capacity
+    if _default_push_capacity is None:
+        _default_push_capacity = trio.CapacityLimiter(CONCURRENCY_LIMIT)
+    return _default_push_capacity
 
 
 def identify_push_handler_for(
@@ -68,26 +73,31 @@ def identify_push_handler_for(
 
         try:
             # Use the utility function to read the protobuf message
-            data = await read_length_prefixed_protobuf(stream, use_varint_format)
+            with trio.fail_after(10.0):
+                data = await read_length_prefixed_protobuf(stream, use_varint_format)
 
             identify_msg = Identify()
             identify_msg.ParseFromString(data)
 
             # Update the peerstore with the new information
-            await _update_peerstore_from_identify(
+            await update_peerstore_from_identify(
                 host.get_peerstore(), peer_id, identify_msg
             )
 
             logger.debug("Successfully processed identify/push from peer %s", peer_id)
 
-            # Send acknowledgment to indicate successful processing
-            # This ensures the sender knows the message was received before closing
-            await stream.write(b"OK")
-
-        except StreamClosed:
+        except (StreamClosed, StreamReset):
             logger.debug(
-                "Stream closed while processing identify/push from %s", peer_id
+                "Stream closed/reset while processing identify/push from %s", peer_id
             )
+        except MuxedStreamError:
+            logger.debug(
+                "Muxed stream error while processing identify/push from %s", peer_id
+            )
+            try:
+                await stream.reset()
+            except Exception:
+                pass
         except Exception as e:
             logger.error("Error processing identify/push from %s: %s", peer_id, e)
         finally:
@@ -100,84 +110,11 @@ def identify_push_handler_for(
     return handle_identify_push
 
 
-async def _update_peerstore_from_identify(
-    peerstore: IPeerStore, peer_id: ID, identify_msg: Identify
-) -> None:
-    """
-    Update the peerstore with information from an identify message.
-
-    This function handles partial updates, where only some fields may be present
-    in the identify message.
-
-    Security: Signed peer records are validated to ensure the peer ID in the
-    record matches the sender's peer ID to prevent peer ID spoofing attacks.
-    """
-    # Update public key if present
-    if identify_msg.HasField("public_key"):
-        try:
-            peerstore.add_protocols(peer_id, [])
-            pubkey = deserialize_public_key(identify_msg.public_key)
-            peerstore.add_pubkey(peer_id, pubkey)
-        except Exception as e:
-            logger.error("Error updating public key for peer %s: %s", peer_id, e)
-
-    # Update listen addresses if present
-    if identify_msg.listen_addrs:
-        try:
-            addrs = [Multiaddr(addr) for addr in identify_msg.listen_addrs]
-            for addr in addrs:
-                peerstore.add_addr(peer_id, addr, 7200)  # 2 hours TTL
-        except Exception as e:
-            logger.error("Error updating listen addresses for peer %s: %s", peer_id, e)
-
-    # Update protocols if present
-    if identify_msg.protocols:
-        try:
-            peerstore.add_protocols(peer_id, identify_msg.protocols)
-        except Exception as e:
-            logger.error("Error updating protocols for peer %s: %s", peer_id, e)
-
-    # Update from signed peer record if present
-    if identify_msg.HasField("signedPeerRecord"):
-        try:
-            envelope, record = consume_envelope(
-                identify_msg.signedPeerRecord, "libp2p-peer-record"
-            )
-            # Cross-check peer-id consistency
-            # Security: Reject signed peer records where the peer ID doesn't match
-            # the sender's peer ID to prevent peer ID spoofing attacks
-            if record.peer_id != peer_id:
-                logger.warning(
-                    "SignedPeerRecord peer-id mismatch: record=%s, sender=%s. "
-                    "Ignoring.",
-                    record.peer_id,
-                    peer_id,
-                )
-                return  # Reject forged record - peer ID mismatch
-
-            if not peerstore.consume_peer_record(envelope, 7200):
-                logger.error(
-                    "Updating Certified-Addr-Book was unsuccessful for %s", peer_id
-                )
-        except Exception as e:
-            logger.error(
-                "Error updating the certified addr book for peer %s: %s", peer_id, e
-            )
-
-    # Update observed address if present
-    if identify_msg.HasField("observed_addr") and identify_msg.observed_addr:
-        try:
-            observed_addr = Multiaddr(identify_msg.observed_addr)
-            peerstore.add_addr(peer_id, observed_addr, 7200)
-        except Exception as e:
-            logger.error("Error updating observed address for peer %s: %s", peer_id, e)
-
-
 async def push_identify_to_peer(
     host: IHost,
     peer_id: ID,
     observed_multiaddr: Multiaddr | None = None,
-    limit: trio.Semaphore = trio.Semaphore(CONCURRENCY_LIMIT),
+    limit: trio.CapacityLimiter | None = None,
     use_varint_format: bool = True,
 ) -> bool:
     """
@@ -197,7 +134,10 @@ async def push_identify_to_peer(
         bool: True if the push was successful, False otherwise.
 
     """
+    if limit is None:
+        limit = _get_push_capacity()
     async with limit:
+        stream = None
         try:
             # Create a new stream to the peer using the identify/push protocol
             stream = await host.new_stream(peer_id, [ID_PUSH])
@@ -207,33 +147,27 @@ async def push_identify_to_peer(
             response = identify_msg.SerializeToString()
 
             if use_varint_format:
-                # Send length-prefixed identify message
-                await stream.write(varint.encode_uvarint(len(response)))
-                await stream.write(response)
+                # Combine length prefix and response into a single write to avoid races
+                length_prefix = varint.encode_uvarint(len(response))
+                await stream.write(length_prefix + response)
             else:
                 # Send raw protobuf message
                 await stream.write(response)
 
-            # Wait for acknowledgment from the receiver with timeout
-            # This ensures the message was processed before closing
-            try:
-                with trio.move_on_after(1.0):  # 1 second timeout
-                    ack = await stream.read(2)  # Read "OK" acknowledgment
-                    if ack != b"OK":
-                        logger.warning(
-                            "Unexpected acknowledgment from peer %s: %s", peer_id, ack
-                        )
-            except Exception as e:
-                logger.debug("No acknowledgment received from peer %s: %s", peer_id, e)
-                # Continue anyway, as the message might have been processed
-
-            # Close the stream after acknowledgment (or timeout)
+            # Per the identify-push spec, the receiver should NOT reply;
+            # just close the stream after sending.
             await stream.close()
+            stream = None
 
             logger.debug("Successfully pushed identify to peer %s", peer_id)
             return True
         except Exception as e:
             logger.error("Error pushing identify to peer %s: %s", peer_id, e)
+            if stream is not None:
+                try:
+                    await stream.reset()
+                except Exception:
+                    pass
             return False
 
 
@@ -259,8 +193,8 @@ async def push_identify_to_peers(
         # Get all connected peers
         peer_ids = set(host.get_connected_peers())
 
-    # Create a single shared semaphore for concurrency control
-    limit = trio.Semaphore(CONCURRENCY_LIMIT)
+    # Use a single shared limiter for concurrency control
+    limit = _get_push_capacity()
 
     # Push to each peer in parallel using a trio.Nursery
     # limiting concurrent connections to CONCURRENCY_LIMIT

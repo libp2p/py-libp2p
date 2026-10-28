@@ -1,5 +1,8 @@
 from collections.abc import Sequence
 import logging
+import socket
+import ssl
+import threading
 from typing import Any
 
 import pytest
@@ -11,6 +14,7 @@ except ImportError:
         from exceptiongroup import ExceptionGroup  # type: ignore[assignment]
     except ImportError:  # pragma: no cover - fallback if dependency missing
         ExceptionGroup = Exception  # type: ignore[assignment]
+from cryptography.hazmat.primitives import serialization
 from multiaddr import Multiaddr
 import trio
 
@@ -21,13 +25,18 @@ from libp2p.network.swarm import Swarm
 from libp2p.peer.id import ID
 from libp2p.peer.peerstore import PeerStore
 from libp2p.security.insecure.transport import InsecureTransport
+from libp2p.security.tls.certificate import generate_self_signed_cert
 from libp2p.stream_muxer.yamux.yamux import Yamux
+from libp2p.transport.exceptions import OpenConnectionError
 from libp2p.transport.upgrader import TransportUpgrader
 from libp2p.transport.websocket.multiaddr_utils import (
     is_valid_websocket_multiaddr,
     parse_websocket_multiaddr,
 )
-from libp2p.transport.websocket.transport import WebsocketTransport
+from libp2p.transport.websocket.transport import (
+    WebsocketConfig,
+    WebsocketTransport,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +62,7 @@ async def make_host(
 
     # Transport + Swarm + Host
     transport = WebsocketTransport(upgrader)
-    swarm = Swarm(peer_id, peer_store, upgrader, transport)
+    swarm = Swarm(peer_id, peer_store, upgrader, [transport])
     host = BasicHost(swarm)
 
     # Optionally run/listen
@@ -101,6 +110,26 @@ async def test_listener_basic_listen():
     assert ma.value_for_protocol("tcp") == "0"
 
     # Test that listener can be closed
+    await listener.close()
+
+
+@pytest.mark.trio
+async def test_listener_listen_returns_none():
+    """Test listener.listen returns None on successful start."""
+    upgrader = create_upgrader()
+    transport = WebsocketTransport(upgrader)
+    ma = Multiaddr("/ip4/127.0.0.1/tcp/0/ws")
+
+    async def dummy_handler(conn):
+        await trio.sleep(0)
+
+    listener = transport.create_listener(dummy_handler)
+
+    async with trio.open_nursery() as nursery:
+        result = await listener.listen(ma)
+        assert result is None
+        nursery.cancel_scope.cancel()
+
     await listener.close()
 
 
@@ -338,9 +367,10 @@ async def test_dial_invalid_address():
 
 
 @pytest.mark.trio
-async def test_listen_invalid_address():
-    """Test listening on invalid addresses"""
-    # upgrader = create_upgrader()  # Not used in this test
+async def test_listen_invalid_address(nursery):
+    """Test listening on invalid addresses raises OpenConnectionError."""
+    upgrader = create_upgrader()
+    transport = WebsocketTransport(upgrader)
 
     # Test listening on non-WebSocket addresses
     invalid_addresses = [
@@ -348,15 +378,14 @@ async def test_listen_invalid_address():
         Multiaddr("/ip4/127.0.0.1/ws"),  # No tcp
     ]
 
-    # Test that invalid addresses are properly identified
+    async def dummy_handler(conn):
+        await trio.sleep(0)
+
+    # Invalid listen addresses should fail fast with transport-level exception.
     for ma in invalid_addresses:
-        # Test that the address parsing works correctly
-        if "/ws" in str(ma) and "tcp" not in str(ma):
-            # This should be invalid
-            assert "tcp" not in str(ma)
-        elif "/ws" not in str(ma):
-            # This should be invalid
-            assert "/ws" not in str(ma)
+        listener = transport.create_listener(dummy_handler)
+        with pytest.raises(OpenConnectionError, match="WebSocket multiaddr"):
+            await listener.listen(ma)
 
 
 @pytest.mark.trio
@@ -808,6 +837,13 @@ def test_wss_multiaddr_parsing():
     assert parsed.rest_multiaddr.value_for_protocol("ip4") == "127.0.0.1"
     assert parsed.rest_multiaddr.value_for_protocol("tcp") == "8080"
 
+    # Test /tls/sni/<name>/ws format
+    sni_ma = Multiaddr("/ip4/127.0.0.1/tcp/8080/tls/sni/example.com/ws")
+    parsed = parse_websocket_multiaddr(sni_ma)
+    assert parsed.is_wss
+    assert parsed.sni == "example.com"
+    assert str(parsed.rest_multiaddr) == "/ip4/127.0.0.1/tcp/8080"
+
     # Test regular /ws format
     ws_ma = Multiaddr("/ip4/127.0.0.1/tcp/8080/ws")
     parsed = parse_websocket_multiaddr(ws_ma)
@@ -920,8 +956,7 @@ async def test_wss_listen_without_tls_config():
 
     # This should raise an error when TLS config is not provided
     try:
-        async with trio.open_nursery() as nursery:
-            await listener.listen(wss_maddr, nursery)
+        await listener.listen(wss_maddr)
         pytest.fail("WSS listen without TLS config should have failed")
     except Exception as e:
         # Handle any exception and check if it contains the TLS configuration error
@@ -988,40 +1023,6 @@ async def test_wss_listen_with_tls_config():
         pytest.fail(f"WSS listen with TLS config failed: {e}")
 
     await listener.close()
-
-
-def test_wss_transport_registry():
-    """Test WSS support in transport registry."""
-    from libp2p.transport.transport_registry import (
-        create_transport_for_multiaddr,
-        get_supported_transport_protocols,
-    )
-
-    # Test that WSS is supported
-    supported = get_supported_transport_protocols()
-    assert "ws" in supported
-    assert "wss" in supported
-
-    # Test transport creation for WSS multiaddrs
-    upgrader = create_upgrader()
-
-    # Test WS multiaddr
-    ws_maddr = Multiaddr("/ip4/127.0.0.1/tcp/8080/ws")
-    ws_transport = create_transport_for_multiaddr(ws_maddr, upgrader)
-    assert ws_transport is not None
-    assert isinstance(ws_transport, WebsocketTransport)
-
-    # Test WSS multiaddr
-    wss_maddr = Multiaddr("/ip4/127.0.0.1/tcp/8080/wss")
-    wss_transport = create_transport_for_multiaddr(wss_maddr, upgrader)
-    assert wss_transport is not None
-    assert isinstance(wss_transport, WebsocketTransport)
-
-    # Test TLS/WS multiaddr
-    tls_ws_maddr = Multiaddr("/ip4/127.0.0.1/tcp/8080/tls/ws")
-    tls_ws_transport = create_transport_for_multiaddr(tls_ws_maddr, upgrader)
-    assert tls_ws_transport is not None
-    assert isinstance(tls_ws_transport, WebsocketTransport)
 
 
 def test_wss_multiaddr_formats():
@@ -1140,15 +1141,17 @@ async def test_handshake_timeout_creation():
     upgrader = create_upgrader()
 
     # Test creating transport with handshake timeout via create_transport
-    from libp2p.transport import create_transport
+    from libp2p.transport.websocket.transport import WebsocketConfig, WebsocketTransport
 
-    transport = create_transport("ws", upgrader, handshake_timeout=5.0)
+    config1 = WebsocketConfig(handshake_timeout=5.0)
+    transport = WebsocketTransport(upgrader, config=config1)
     # Type assertion to access private attribute for testing
     assert hasattr(transport, "_handshake_timeout")
     assert getattr(transport, "_handshake_timeout") == 5.0
 
     # Test default timeout
-    transport_default = create_transport("ws", upgrader)
+    config2 = WebsocketConfig()
+    transport_default = WebsocketTransport(upgrader, config=config2)
     assert hasattr(transport_default, "_handshake_timeout")
     assert getattr(transport_default, "_handshake_timeout") == 15.0
 
@@ -1313,11 +1316,15 @@ async def test_websocket_listener_addr_format():
         await trio.sleep(0)
 
     listener_wss = transport_wss.create_listener(dummy_handler_wss)
-    # Type assertion to access private attributes for testing
-    assert hasattr(listener_wss, "_tls_config")
-    assert getattr(listener_wss, "_tls_config") is not None
-    assert hasattr(listener_wss, "_handshake_timeout")
-    assert getattr(listener_wss, "_handshake_timeout") == 15.0
+    try:
+        # Type assertion to access private attributes for testing
+        assert hasattr(listener_wss, "_tls_config")
+        assert getattr(listener_wss, "_tls_config") is not None
+        assert hasattr(listener_wss, "_handshake_timeout")
+        assert getattr(listener_wss, "_handshake_timeout") == 15.0
+    finally:
+        await listener_ws.close()
+        await listener_wss.close()
 
 
 @pytest.mark.trio
@@ -1351,15 +1358,14 @@ async def test_sni_resolution_limitation():
 @pytest.mark.trio
 async def test_websocket_transport_can_dial():
     """Test WebSocket transport CanDial functionality similar to Go implementation."""
-    # upgrader = create_upgrader()  # Not used in this test
-    # transport = WebsocketTransport(upgrader)  # Not used in this test
+    transport = WebsocketTransport(create_upgrader())
 
     # Test valid WebSocket addresses that should be dialable
     valid_addresses = [
         "/ip4/127.0.0.1/tcp/5555/ws",
         "/ip4/127.0.0.1/tcp/5555/wss",
         "/ip4/127.0.0.1/tcp/5555/tls/ws",
-        # Note: SNI addresses not supported by Python multiaddr library
+        "/ip4/127.0.0.1/tcp/5555/tls/sni/example.com/ws",
     ]
 
     for addr_str in valid_addresses:
@@ -1368,6 +1374,7 @@ async def test_websocket_transport_can_dial():
         assert is_valid_websocket_multiaddr(maddr), (
             f"Address {addr_str} should be valid"
         )
+        assert transport.can_dial(maddr), f"Address {addr_str} should be dialable"
 
     # Test invalid addresses that should not be dialable
     invalid_addresses = [
@@ -1381,3 +1388,388 @@ async def test_websocket_transport_can_dial():
         assert not is_valid_websocket_multiaddr(maddr), (
             f"Address {addr_str} should be invalid"
         )
+
+
+def _self_signed_tls_server_context(tmp_path: Any) -> ssl.SSLContext:
+    """A server TLS context holding a fresh self-signed certificate."""
+    key, cert = generate_self_signed_cert()
+    cert_path = tmp_path / "cert.pem"
+    key_path = tmp_path / "key.pem"
+    cert_path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    key_path.write_bytes(
+        key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+    )
+    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    context.load_cert_chain(certfile=str(cert_path), keyfile=str(key_path))
+    return context
+
+
+@pytest.mark.trio
+async def test_failed_dial_closes_the_tcp_connection(nursery):
+    """
+    A dial that never completes the WebSocket upgrade still closes its socket.
+
+    The handshake used to run in the Swarm's background nursery, so when it did
+    not complete nothing owned the stream and the descriptor stayed open for the
+    lifetime of the Swarm. The server checks this the only way a peer can: it
+    reads again after the upgrade request and sees whether the client hung up.
+    """
+    disconnected = trio.Event()
+
+    async def accept_and_never_answer(stream: trio.SocketStream) -> None:
+        await stream.receive_some(4096)  # the upgrade request
+        # No reply. The client must give up and close.
+        try:
+            while await stream.receive_some(4096):
+                pass
+        except trio.BrokenResourceError:
+            pass
+        disconnected.set()
+
+    listeners = await trio.open_tcp_listeners(0, host="127.0.0.1")
+    port = int(listeners[0].socket.getsockname()[1])
+    nursery.start_soon(trio.serve_listeners, accept_and_never_answer, listeners)
+
+    transport = WebsocketTransport(
+        create_upgrader(), config=WebsocketConfig(handshake_timeout=2.0)
+    )
+    transport.set_background_nursery(nursery)
+    with pytest.raises(OpenConnectionError):
+        await transport.dial(Multiaddr(f"/ip4/127.0.0.1/tcp/{port}/ws"))
+
+    with trio.move_on_after(5):
+        await disconnected.wait()
+    assert disconnected.is_set(), (
+        "the server never saw the client disconnect: the failed dial left its "
+        "TCP socket open"
+    )
+    nursery.cancel_scope.cancel()
+
+
+@pytest.mark.trio
+async def test_wss_dial_reports_the_certificate_error(nursery, tmp_path):
+    """
+    A refused certificate is reported as such, not as a handshake timeout.
+
+    The TLS handshake used to happen in a task the dialer did not await, so the
+    dialer waited out handshake_timeout and raised a timeout, hiding the reason
+    and making a rejected certificate look like an unreachable peer.
+    """
+    server_context = _self_signed_tls_server_context(tmp_path)
+
+    async def serve_tls(stream: trio.SocketStream) -> None:
+        tls_stream = trio.SSLStream(stream, server_context, server_side=True)
+        try:
+            await tls_stream.do_handshake()
+        except Exception:
+            pass
+        finally:
+            with trio.CancelScope(shield=True):  # type: ignore[call-arg]
+                await trio.aclose_forcefully(stream)
+
+    listeners = await trio.open_tcp_listeners(0, host="127.0.0.1")
+    port = int(listeners[0].socket.getsockname()[1])
+    nursery.start_soon(trio.serve_listeners, serve_tls, listeners)
+
+    # An explicitly verifying client context, so this test states the behaviour
+    # it cares about instead of depending on what the default happens to be.
+    transport = WebsocketTransport(
+        create_upgrader(),
+        config=WebsocketConfig(
+            handshake_timeout=10.0, tls_client_config=ssl.create_default_context()
+        ),
+    )
+    transport.set_background_nursery(nursery)
+
+    started = trio.current_time()
+    with pytest.raises(OpenConnectionError) as excinfo:
+        await transport.dial(Multiaddr(f"/ip4/127.0.0.1/tcp/{port}/wss"))
+    elapsed = trio.current_time() - started
+
+    assert "certificate" in str(excinfo.value).lower(), (
+        f"the error should name the certificate, got: {excinfo.value}"
+    )
+    assert isinstance(excinfo.value.__cause__, ssl.SSLCertVerificationError), (
+        f"the cause should be the ssl error, got {excinfo.value.__cause__!r}"
+    )
+    assert elapsed < 5.0, (
+        f"took {elapsed:.1f}s of a 10s timeout: the dial waited out the "
+        "handshake timeout instead of failing on the certificate"
+    )
+    nursery.cancel_scope.cancel()
+
+
+@pytest.mark.trio
+async def test_dns_address_is_dialed_by_name(nursery):
+    """
+    A /dns4 WebSocket address reaches the server by its name.
+
+    A TLS-terminating proxy in front of a peer (a CDN edge, a tunnel) selects
+    the origin by the TLS server name and the Host header, so the handshake
+    must carry the name, not the address it resolves to. The Host header of
+    the upgrade request is checked; the server name is the same string.
+    """
+    seen: dict[str, bytes] = {}
+
+    async def record(stream: trio.SocketStream) -> None:
+        seen["request"] = await stream.receive_some(4096)
+        await stream.aclose()
+
+    listeners = await trio.open_tcp_listeners(0, host="127.0.0.1")
+    port = listeners[0].socket.getsockname()[1]
+    nursery.start_soon(trio.serve_listeners, record, listeners)
+
+    transport = WebsocketTransport(
+        create_upgrader(), config=WebsocketConfig(handshake_timeout=2.0)
+    )
+    transport.set_background_nursery(nursery)
+    with pytest.raises(OpenConnectionError):
+        await transport.dial(Multiaddr(f"/dns4/localhost/tcp/{port}/ws"))
+
+    request = seen["request"].decode(errors="replace").lower()
+    assert f"\r\nhost: localhost:{port}\r\n" in request, request
+    nursery.cancel_scope.cancel()
+
+
+@pytest.mark.trio
+async def test_dnsaddr_address_is_resolved_before_dialing(nursery, monkeypatch):
+    """A /dnsaddr address names TXT records; those are dialed, by name too."""
+    dialed: list[Multiaddr] = []
+
+    async def resolve(maddr, resolver, max_retries, timeout_seconds):
+        assert str(maddr) == "/dnsaddr/bootstrap.example/tcp/443/wss"
+        return [Multiaddr("/dns4/edge.example/tcp/443/wss")]
+
+    async def dial_resolved(maddr):
+        dialed.append(maddr)
+        raise OpenConnectionError("not dialing in this test")
+
+    monkeypatch.setattr(
+        "libp2p.transport.websocket.transport.resolve_multiaddr_with_retry",
+        resolve,
+    )
+    transport = WebsocketTransport(create_upgrader())
+    transport.set_background_nursery(nursery)
+    monkeypatch.setattr(transport, "_dial_resolved", dial_resolved)
+    with pytest.raises(OpenConnectionError):
+        await transport.dial(Multiaddr("/dnsaddr/bootstrap.example/tcp/443/wss"))
+    assert [str(m) for m in dialed] == ["/dns4/edge.example/tcp/443/wss"]
+
+
+async def _record_wss_dial(
+    nursery: Any, tmp_path: Any, address: str
+) -> tuple[list[str | None], str, int]:
+    """
+    Dial ``address`` against a local TLS server and return what the server saw.
+
+    ``address`` takes the server's port as ``{port}``. Returns the server name
+    of each TLS handshake as the server's ``sni_callback`` received it (None
+    when the client sent none), the WebSocket upgrade request, and the port.
+    The server never answers the upgrade, so the dial itself fails.
+    """
+    server_names: list[str | None] = []
+    requests: list[bytes] = []
+    server_context = _self_signed_tls_server_context(tmp_path)
+
+    def record_server_name(
+        ssl_object: ssl.SSLObject, server_name: str | None, context: ssl.SSLContext
+    ) -> None:
+        server_names.append(server_name)
+
+    server_context.sni_callback = record_server_name
+
+    async def record_request(stream: trio.SocketStream) -> None:
+        tls_stream = trio.SSLStream(stream, server_context, server_side=True)
+        try:
+            requests.append(await tls_stream.receive_some(4096))
+        except trio.BrokenResourceError:
+            pass
+        finally:
+            with trio.CancelScope(shield=True):  # type: ignore[call-arg]
+                await trio.aclose_forcefully(tls_stream)
+
+    listeners = await trio.open_tcp_listeners(0, host="127.0.0.1")
+    port = int(listeners[0].socket.getsockname()[1])
+    nursery.start_soon(trio.serve_listeners, record_request, listeners)
+
+    # The certificate is self-signed: these tests check the name the client
+    # asks for, not whether it accepts the certificate it gets back.
+    transport = WebsocketTransport(
+        create_upgrader(),
+        config=WebsocketConfig(handshake_timeout=2.0, insecure_skip_verify=True),
+    )
+    transport.set_background_nursery(nursery)
+    with pytest.raises(OpenConnectionError):
+        await transport.dial(Multiaddr(address.format(port=port)))
+
+    assert len(requests) == 1, "the server never received the upgrade request"
+    return server_names, requests[0].decode(errors="replace").lower(), port
+
+
+@pytest.mark.trio
+@pytest.mark.parametrize(
+    "address",
+    [
+        "/ip4/127.0.0.1/tcp/{port}/tls/sni/edge.example/ws",
+        "/dns4/localhost/tcp/{port}/tls/sni/edge.example/ws",
+    ],
+)
+async def test_sni_address_is_dialed_with_the_sni_name(nursery, tmp_path, address):
+    """
+    A /tls/sni/<name>/ws address connects to its host and asks for <name>.
+
+    The /sni/ form names the peer next to an address that is already known, so
+    a peer behind a TLS-terminating proxy (a CDN edge, a tunnel) is reachable
+    without DNS. The socket goes to the host before /tls (``edge.example`` does
+    not resolve, so reaching the server at all shows that), while the TLS
+    server name and the Host header carry <name>, as in go-libp2p and
+    js-libp2p.
+    """
+    server_names, request, port = await _record_wss_dial(nursery, tmp_path, address)
+
+    assert server_names == ["edge.example"], (
+        f"the TLS handshake should ask for edge.example, got {server_names}"
+    )
+    assert f"\r\nhost: edge.example:{port}\r\n" in request, request
+    nursery.cancel_scope.cancel()
+
+
+@pytest.mark.trio
+@pytest.mark.parametrize(
+    "address, server_name, host",
+    [
+        # An IP address is never sent as a TLS server name.
+        ("/ip4/127.0.0.1/tcp/{port}/tls/ws", None, "127.0.0.1"),
+        ("/ip4/127.0.0.1/tcp/{port}/wss", None, "127.0.0.1"),
+        ("/dns4/localhost/tcp/{port}/wss", "localhost", "localhost"),
+    ],
+)
+async def test_tls_address_without_sni_is_dialed_by_its_host(
+    nursery, tmp_path, address, server_name, host
+):
+    """Without /sni/ the TLS server name and the Host header stay the host."""
+    server_names, request, port = await _record_wss_dial(nursery, tmp_path, address)
+
+    assert server_names == [server_name]
+    assert f"\r\nhost: {host}:{port}\r\n" in request, request
+    nursery.cancel_scope.cancel()
+
+
+def test_default_client_tls_config_verifies_the_certificate():
+    """
+    A wss dial with no explicit client configuration verifies.
+
+    go-libp2p dials with a zero tls.Config and js-libp2p uses the platform TLS
+    stack; both check the certificate against the system roots and check the
+    hostname. Accepting any certificate by default is not what `wss://` means.
+    """
+    transport = WebsocketTransport(create_upgrader())
+
+    context = transport._default_client_ssl_context()
+
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname
+
+
+def test_insecure_skip_verify_opts_out_of_verification():
+    """The old unverified behaviour stays reachable, but only on request."""
+    transport = WebsocketTransport(
+        create_upgrader(), config=WebsocketConfig(insecure_skip_verify=True)
+    )
+
+    context = transport._default_client_ssl_context()
+
+    assert context.verify_mode == ssl.CERT_NONE
+    assert not context.check_hostname
+
+
+def test_explicit_tls_client_config_still_wins():
+    """An explicitly supplied context is handed back untouched."""
+    supplied = ssl.create_default_context()
+    supplied.check_hostname = False
+    supplied.verify_mode = ssl.CERT_NONE
+    transport = WebsocketTransport(create_upgrader(), tls_client_config=supplied)
+
+    assert transport._default_client_ssl_context() is supplied
+
+
+def _tls_handshake_against_self_signed(
+    client_context: ssl.SSLContext, server_context: ssl.SSLContext
+) -> BaseException | None:
+    """
+    Run one real TLS handshake and return the client's error, if any.
+
+    Plain sockets in a thread rather than trio: this asserts on what the
+    ``ssl`` layer decides about the certificate, and stdlib reports that
+    decision as a precise ``SSLCertVerificationError`` on the client.
+    """
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+
+    def serve() -> None:
+        # The server's own error is uninteresting: a refused certificate ends
+        # its handshake with an "unknown ca" alert, which is the same outcome
+        # the client's error already describes.
+        conn, _ = listener.accept()
+        tls_conn: ssl.SSLSocket | None = None
+        try:
+            tls_conn = server_context.wrap_socket(conn, server_side=True)
+        except OSError:
+            pass
+        finally:
+            (tls_conn or conn).close()
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    sock = socket.create_connection(("127.0.0.1", port), timeout=5)
+    tls_sock: ssl.SSLSocket | None = None
+    try:
+        # wrap_socket detaches `sock` and handshakes straight away, so the
+        # wrapper owns the descriptor from here on and has to be closed.
+        tls_sock = client_context.wrap_socket(sock, server_hostname="127.0.0.1")
+        return None
+    except OSError as exc:
+        return exc
+    finally:
+        (tls_sock or sock).close()
+        thread.join(5)
+        listener.close()
+
+
+def test_default_client_config_rejects_a_self_signed_certificate(tmp_path):
+    """
+    The context a wss dial uses by default refuses a self-signed certificate.
+
+    This is the behaviour go-libp2p and js-libp2p already have. Before this
+    change the default context set CERT_NONE and completed this handshake.
+    """
+    transport = WebsocketTransport(create_upgrader())
+
+    error = _tls_handshake_against_self_signed(
+        transport._default_client_ssl_context(),
+        _self_signed_tls_server_context(tmp_path),
+    )
+
+    assert isinstance(error, ssl.SSLCertVerificationError), (
+        f"expected the certificate to be refused, got {error!r}"
+    )
+
+
+def test_insecure_skip_verify_accepts_a_self_signed_certificate(tmp_path):
+    """The old behaviour stays reachable for an endpoint the caller trusts."""
+    transport = WebsocketTransport(
+        create_upgrader(), config=WebsocketConfig(insecure_skip_verify=True)
+    )
+
+    error = _tls_handshake_against_self_signed(
+        transport._default_client_ssl_context(),
+        _self_signed_tls_server_context(tmp_path),
+    )
+
+    assert error is None, f"handshake should have been accepted, got {error!r}"

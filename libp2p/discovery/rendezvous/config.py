@@ -30,5 +30,9 @@ MAX_REGISTRATIONS = 1000
 # Network Configuration
 DEFAULT_TIMEOUT = 30.0
 
+# Cap on varint-prefixed rendezvous payloads. Reject larger claimed lengths
+# before reading to avoid remote memory exhaustion (GHSA-xqvc-92cf-94j4).
+MAX_MESSAGE_SIZE = 4 * 1024 * 1024  # 4 MiB
+
 # Cache Configuration
 DEFAULT_CACHE_TTL = 300

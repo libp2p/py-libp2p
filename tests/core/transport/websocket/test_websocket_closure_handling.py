@@ -9,24 +9,11 @@ This test verifies that:
 """
 
 import pytest
+from trio_websocket import CloseReason, ConnectionClosed
 
 from libp2p.io.exceptions import ConnectionClosedError, IOException
 from libp2p.io.utils import read_exactly
 from libp2p.transport.websocket.connection import P2PWebSocketConnection
-
-# ---------------------------------------------------------------------------
-# Helpers — mock trio_websocket's ConnectionClosed exception
-# ---------------------------------------------------------------------------
-
-
-class _MockConnectionClosed(Exception):
-    """Simulate trio_websocket's ConnectionClosed with code/reason attrs."""
-
-    def __init__(self, code: int, reason: str):
-        self.code = code
-        self.reason = reason
-        super().__init__(f"Connection closed: {reason}")
-
 
 # ---------------------------------------------------------------------------
 # Tests
@@ -50,7 +37,7 @@ async def test_websocket_read_raises_on_closed_connection():
         async def get_message(self):
             self.read_count += 1
             if self.read_count > 1:
-                raise _MockConnectionClosed(code=1000, reason="Peer closed connection")
+                raise ConnectionClosed(CloseReason(1000, "Peer closed connection"))
             if self.messages:
                 return self.messages.pop(0)
             return b""
@@ -99,7 +86,7 @@ async def test_websocket_message_boundary_handling():
                 msg = self.messages[self.read_count]
                 self.read_count += 1
                 return msg
-            raise _MockConnectionClosed(code=1000, reason="Connection closed")
+            raise ConnectionClosed(CloseReason(1000, "Connection closed"))
 
         async def send_message(self, data):
             pass
@@ -136,7 +123,7 @@ async def test_websocket_close_code_and_reason_in_error():
 
         async def get_message(self):
             self.closed = True
-            raise _MockConnectionClosed(code=1001, reason="Going away")
+            raise ConnectionClosed(CloseReason(1001, "Going away"))
 
         async def send_message(self, data):
             pass
@@ -201,7 +188,7 @@ async def test_read_exactly_detects_closure_immediately():
 
         async def get_message(self):
             self.closed = True
-            raise _MockConnectionClosed(code=1000, reason="Peer closed")
+            raise ConnectionClosed(CloseReason(1000, "Peer closed"))
 
         async def send_message(self, data):
             pass
@@ -230,7 +217,7 @@ async def test_connection_closed_error_is_subclass_of_ioexception():
 
     class MockWebSocketConnection:
         async def get_message(self):
-            raise _MockConnectionClosed(code=1000, reason="Normal closure")
+            raise ConnectionClosed(CloseReason(1000, "Normal closure"))
 
         async def send_message(self, data):
             pass

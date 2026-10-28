@@ -44,6 +44,7 @@ class TestExamplesAddressParadigm:
             "bootstrap/bootstrap.py",
             "pubsub/pubsub.py",
             "identify/identify.py",
+            "dht_chat/dht_chat.py",
         ]
 
         paradigm_functions = [

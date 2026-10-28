@@ -1,4 +1,5 @@
 import logging
+import socket as stdlib_socket
 
 import pytest
 import multiaddr
@@ -9,7 +10,7 @@ import trio
 
 from examples.ping.ping import PING_LENGTH, PING_PROTOCOL_ID
 from libp2p import new_host
-from libp2p.abc import INetStream
+from libp2p.abc import INetStream, IRawConnection
 from libp2p.network.connection.raw_connection import (
     RawConnection,
 )
@@ -39,11 +40,146 @@ async def test_tcp_listener(nursery):
         pass
 
     listener = transport.create_listener(handler)
-    assert len(listener.get_addrs()) == 0
-    await listener.listen(LISTEN_MADDR, nursery)
-    assert len(listener.get_addrs()) == 1
-    await listener.listen(LISTEN_MADDR, nursery)
+    try:
+        assert len(listener.get_addrs()) == 0
+        result = await listener.listen(LISTEN_MADDR)
+        assert result is None
+        assert len(listener.get_addrs()) == 1
+        result = await listener.listen(LISTEN_MADDR)
+        assert result is None
+        assert len(listener.get_addrs()) == 2
+    finally:
+        await listener.close()
+
+
+@pytest.mark.trio
+async def test_tcp_listener_raises_on_missing_port(nursery):
+    """listen() raises OpenConnectionError when TCP port is missing in multiaddr."""
+
+    async def noop_handler(_s):
+        pass
+
+    transport = TCP()
+    listener = transport.create_listener(noop_handler)
+    try:
+        with pytest.raises(OpenConnectionError, match="TCP port is missing"):
+            await listener.listen(Multiaddr("/ip4/127.0.0.1"))
+    finally:
+        await listener.close()
+
+
+@pytest.mark.trio
+async def test_tcp_dial_raises_open_connection_error_for_non_tcp_addr():
+    """dial() must not leak ProtocolLookupError for non-TCP multiaddrs (#391)."""
+    transport = TCP()
+    with pytest.raises(OpenConnectionError, match="no TCP component"):
+        await transport.dial(Multiaddr("/ip4/127.0.0.1/udp/9090"))
+
+
+def test_tcp_can_dial_rejects_udp_and_quic():
+    transport = TCP()
+    assert transport.can_dial(Multiaddr("/ip4/127.0.0.1/tcp/9000")) is True
+    assert transport.can_dial(Multiaddr("/ip4/127.0.0.1/udp/9090")) is False
+    assert transport.can_dial(Multiaddr("/ip4/127.0.0.1/udp/9090/quic")) is False
+    assert transport.can_dial(Multiaddr("/ip4/127.0.0.1/udp/9090/quic-v1")) is False
+
+
+@pytest.mark.trio
+async def test_tcp_listener_raises_on_bind_failure(nursery):
+    """listen() raises OpenConnectionError (not a raw OSError) when port is in use."""
+    import socket as stdlib_socket
+
+    async def noop_handler(_s):
+        pass
+
+    transport = TCP()
+
+    # Occupy a port with a plain socket WITHOUT SO_REUSEPORT, so our
+    # reuseport listener cannot take it either. On Windows SO_REUSEADDR
+    # alone still permits a second bind, so use SO_EXCLUSIVEADDRUSE there
+    # (looked up dynamically: typesheds only know the local platform).
+    holder = stdlib_socket.socket(stdlib_socket.AF_INET, stdlib_socket.SOCK_STREAM)
+    exclusive_use = getattr(stdlib_socket, "SO_EXCLUSIVEADDRUSE", None)
+    if exclusive_use is not None:
+        holder.setsockopt(stdlib_socket.SOL_SOCKET, exclusive_use, 1)
+    else:
+        holder.setsockopt(stdlib_socket.SOL_SOCKET, stdlib_socket.SO_REUSEADDR, 1)
+    try:
+        holder.bind(("127.0.0.1", 0))
+        holder.listen(1)
+        bound_port = holder.getsockname()[1]
+
+        # Attempting to bind the taken port should raise
+        # OpenConnectionError, not a raw OSError.
+        listener2 = transport.create_listener(noop_handler)
+        try:
+            with pytest.raises(
+                OpenConnectionError, match="Failed to start TCP listener"
+            ):
+                await listener2.listen(Multiaddr(f"/ip4/127.0.0.1/tcp/{bound_port}"))
+        finally:
+            await listener2.close()
+    finally:
+        holder.close()
+
+
+@pytest.mark.skipif(
+    not hasattr(stdlib_socket, "SO_REUSEPORT"),
+    reason="SO_REUSEPORT not available on this platform",
+)
+@pytest.mark.trio
+async def test_tcp_listeners_can_share_port_with_reuseport(nursery):
+    """Two listeners can share one port (SO_REUSEPORT for hole punching)."""
+
+    async def noop_handler(_s):
+        pass
+
+    transport = TCP()
+    listener1 = transport.create_listener(noop_handler)
+    try:
+        await listener1.listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
+        bound_port = listener1.get_addrs()[0].value_for_protocol("tcp")
+
+        listener2 = transport.create_listener(noop_handler)
+        try:
+            await listener2.listen(Multiaddr(f"/ip4/127.0.0.1/tcp/{bound_port}"))
+            ports = {a.value_for_protocol("tcp") for a in listener2.get_addrs()}
+            assert str(bound_port) in ports
+        finally:
+            await listener2.close()
+    finally:
+        await listener1.close()
+
+
+@pytest.mark.trio
+async def test_tcp_listener_close_cancels_all_binds(nursery):
+    """
+    close() tears down every bind from a multi-bind listener and is idempotent.
+
+    Validates that TCPListener owns a single long-lived nursery across
+    repeated listen() calls, so close() cancels all of them — and that a
+    second close() and a post-close listen() both behave sanely.
+    """
+
+    async def noop_handler(_s):
+        pass
+
+    transport = TCP()
+    listener = transport.create_listener(noop_handler)
+
+    await listener.listen(LISTEN_MADDR)
+    await listener.listen(LISTEN_MADDR)
     assert len(listener.get_addrs()) == 2
+
+    await listener.close()
+    assert listener.get_addrs() == ()
+
+    # Second close() is a safe no-op.
+    await listener.close()
+
+    # listen() after close() is rejected rather than silently reopening.
+    with pytest.raises(OpenConnectionError, match="listener is closed"):
+        await listener.listen(LISTEN_MADDR)
 
 
 @pytest.mark.trio
@@ -64,17 +200,26 @@ async def test_tcp_dial(nursery):
         await transport.dial(Multiaddr("/ip4/127.0.0.1/tcp/1"))
 
     listener = transport.create_listener(handler)
-    await listener.listen(LISTEN_MADDR, nursery)
-    addrs = listener.get_addrs()
-    assert len(addrs) == 1
-    listen_addr = addrs[0]
-    raw_conn = await transport.dial(listen_addr)
-    await event.wait()
+    raw_conn: IRawConnection | None = None
+    try:
+        await listener.listen(LISTEN_MADDR)
+        addrs = listener.get_addrs()
+        assert len(addrs) == 1
+        listen_addr = addrs[0]
+        raw_conn = await transport.dial(listen_addr)
+        await event.wait()
 
-    data = b"123"
-    assert raw_conn_other_side is not None
-    await raw_conn_other_side.write(data)
-    assert (await raw_conn.read(len(data))) == data
+        data = b"123"
+        assert raw_conn is not None
+        assert raw_conn_other_side is not None
+        await raw_conn_other_side.write(data)
+        assert (await raw_conn.read(len(data))) == data
+    finally:
+        if raw_conn is not None:
+            await raw_conn.close()
+        if raw_conn_other_side is not None:
+            await raw_conn_other_side.close()
+        await listener.close()
 
 
 @pytest.mark.trio
@@ -91,6 +236,7 @@ async def test_tcp_yamux_stress_ping():
 
     # === Server Setup ===
     server_host = new_host(listen_addrs=[listen_addr])
+    client_host = None
 
     async def handle_ping(stream: INetStream) -> None:
         try:
@@ -104,99 +250,109 @@ async def test_tcp_yamux_stress_ping():
 
     server_host.set_stream_handler(PING_PROTOCOL_ID, handle_ping)
 
-    async with server_host.run(listen_addrs=[listen_addr]):
-        # Wait for server to actually be listening
-        while not server_host.get_addrs():
-            await trio.sleep(0.01)
-
-        # === Client Setup ===
-        destination = str(server_host.get_addrs()[0])
-        maddr = multiaddr.Multiaddr(destination)
-        info = info_from_p2p_addr(maddr)
-
-        client_listen_addr = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0")
-        client_host = new_host(listen_addrs=[client_listen_addr])
-
-        async with client_host.run(listen_addrs=[client_listen_addr]):
-            await client_host.connect(info)
-
-            # Wait for connection to be established and ready
-            network = client_host.get_network()
-            connections_map = network.get_connections_map()
-            while (
-                info.peer_id not in connections_map or not connections_map[info.peer_id]
-            ):
+    try:
+        async with server_host.run(listen_addrs=[listen_addr]):
+            # Wait for server to actually be listening
+            while not server_host.get_addrs():
                 await trio.sleep(0.01)
-                connections_map = network.get_connections_map()
 
-            # Wait for connection's event_started to ensure it's ready for streams
-            connections = connections_map[info.peer_id]
-            if connections:
-                swarm_conn = connections[0]
-                if hasattr(swarm_conn, "event_started"):
-                    await swarm_conn.event_started.wait()
-                await trio.sleep(0.05)
+            # === Client Setup ===
+            destination = str(server_host.get_addrs()[0])
+            maddr = multiaddr.Multiaddr(destination)
+            info = info_from_p2p_addr(maddr)
 
-            async def ping_stream(i: int):
-                stream = None
+            client_listen_addr = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0")
+            client_host = new_host(listen_addrs=[client_listen_addr])
+
+            async with client_host.run(listen_addrs=[client_listen_addr]):
                 try:
-                    start = trio.current_time()
+                    await client_host.connect(info)
 
-                    stream = await client_host.new_stream(
-                        info.peer_id, [PING_PROTOCOL_ID]
-                    )
+                    # Wait for connection to be established and ready
+                    network = client_host.get_network()
+                    connections_map = network.get_connections_map()
+                    while (
+                        info.peer_id not in connections_map
+                        or not connections_map[info.peer_id]
+                    ):
+                        await trio.sleep(0.01)
+                        connections_map = network.get_connections_map()
 
-                    await stream.write(b"\x01" * PING_LENGTH)
+                    # Wait for event_started so the connection is ready for streams
+                    connections = connections_map[info.peer_id]
+                    if connections:
+                        swarm_conn = connections[0]
+                        if hasattr(swarm_conn, "event_started"):
+                            await swarm_conn.event_started.wait()
+                        await trio.sleep(0.05)
 
-                    with trio.fail_after(30):
-                        response = await stream.read(PING_LENGTH)
-
-                    if response == b"\x01" * PING_LENGTH:
-                        latency_ms = int((trio.current_time() - start) * 1000)
-                        latencies.append(latency_ms)
-                        print(f"[TCP Ping #{i}] Latency: {latency_ms} ms")
-                    await stream.close()
-                except Exception as e:
-                    print(f"[TCP Ping #{i}] Failed: {e}")
-                    failures.append(i)
-                    if stream:
+                    async def ping_stream(i: int):
+                        stream = None
                         try:
-                            await stream.reset()
-                        except Exception:
-                            pass
+                            start = trio.current_time()
+                            assert client_host is not None
+
+                            stream = await client_host.new_stream(
+                                info.peer_id, [PING_PROTOCOL_ID]
+                            )
+
+                            await stream.write(b"\x01" * PING_LENGTH)
+
+                            with trio.fail_after(30):
+                                response = await stream.read(PING_LENGTH)
+
+                            if response == b"\x01" * PING_LENGTH:
+                                latency_ms = int((trio.current_time() - start) * 1000)
+                                latencies.append(latency_ms)
+                                logger.debug(
+                                    "[TCP Ping #%d] Latency: %d ms", i, latency_ms
+                                )
+                            await stream.close()
+                        except Exception as e:
+                            logger.warning("[TCP Ping #%d] Failed: %s", i, e)
+                            failures.append(i)
+                            if stream:
+                                try:
+                                    await stream.reset()
+                                except Exception:
+                                    pass
+                        finally:
+                            async with completed_lock:
+                                completed_count[0] += 1
+                                if completed_count[0] == STREAM_COUNT:
+                                    completion_event.set()
+
+                    # No semaphore limit - run all streams concurrently
+                    async with trio.open_nursery() as nursery:
+                        for i in range(STREAM_COUNT):
+                            nursery.start_soon(ping_stream, i)
+
+                        with trio.fail_after(120):
+                            await completion_event.wait()
                 finally:
-                    async with completed_lock:
-                        completed_count[0] += 1
-                        if completed_count[0] == STREAM_COUNT:
-                            completion_event.set()
+                    await client_host.close()
 
-            # No semaphore limit - run all streams concurrently
-            async with trio.open_nursery() as nursery:
-                for i in range(STREAM_COUNT):
-                    nursery.start_soon(ping_stream, i)
+            # === Result Summary ===
+            logger.info("TCP Ping Stress Test Summary")
+            logger.info(f"Total Streams Launched: {STREAM_COUNT}")
+            logger.info(f"Successful Pings: {len(latencies)}")
+            logger.info(f"Failed Pings: {len(failures)}")
+            if failures:
+                logger.warning(f"Failed stream indices: {failures}")
 
-                with trio.fail_after(120):
-                    await completion_event.wait()
+            # === Assertions ===
+            assert len(latencies) == STREAM_COUNT, (
+                f"Expected {STREAM_COUNT} successful streams, got {len(latencies)}"
+            )
+            assert all(isinstance(x, int) and x >= 0 for x in latencies), (
+                "Invalid latencies"
+            )
 
-        # === Result Summary ===
-        logger.info("TCP Ping Stress Test Summary")
-        logger.info(f"Total Streams Launched: {STREAM_COUNT}")
-        logger.info(f"Successful Pings: {len(latencies)}")
-        logger.info(f"Failed Pings: {len(failures)}")
-        if failures:
-            logger.warning(f"Failed stream indices: {failures}")
-
-        # === Assertions ===
-        assert len(latencies) == STREAM_COUNT, (
-            f"Expected {STREAM_COUNT} successful streams, got {len(latencies)}"
-        )
-        assert all(isinstance(x, int) and x >= 0 for x in latencies), (
-            "Invalid latencies"
-        )
-
-        avg_latency = sum(latencies) / len(latencies)
-        logger.info(f"Average Latency: {avg_latency:.2f} ms")
-        assert avg_latency < 1000
+            avg_latency = sum(latencies) / len(latencies)
+            logger.info(f"Average Latency: {avg_latency:.2f} ms")
+            assert avg_latency < 1000
+    finally:
+        await server_host.close()
 
 
 @pytest.mark.trio
@@ -218,18 +374,11 @@ async def test_ipv6_tcp_dial_fails_on_nonexistent_server():
     """
     transport = TCP()
 
-    try:
+    with pytest.raises(OpenConnectionError):
         await transport.dial(Multiaddr("/ip6/::1/tcp/1"))
-        assert False, "Should have raised OpenConnectionError"
-    except Exception as e:
-        assert "Failed to open TCP stream" in str(e) or "Failed to dial" in str(e)
 
 
 @pytest.mark.trio
-@pytest.mark.skip(
-    reason="IPv6 listener hangs - trio.serve_tcp may need IPv6-specific configuration"
-)
-# TODO: Open follow-up issue to re-enable when IPv6 listen/dial is stable
 async def test_ipv6_tcp_listen_and_dial(nursery):
     """Test that TCP transport can listen and dial using IPv6 addresses."""
     transport = TCP()
@@ -245,24 +394,33 @@ async def test_ipv6_tcp_listen_and_dial(nursery):
     # Listen on IPv6 loopback
     listen_addr = Multiaddr("/ip6/::1/tcp/0")
     listener = transport.create_listener(handler)
-    await listener.listen(listen_addr, nursery)
-    addrs = listener.get_addrs()
-    assert len(addrs) == 1
+    raw_conn: IRawConnection | None = None
+    try:
+        await listener.listen(listen_addr)
+        addrs = listener.get_addrs()
+        assert len(addrs) == 1
 
-    # Verify that the address is IPv6
-    listen_addr = addrs[0]
-    protocol = get_ip_protocol_from_multiaddr(listen_addr)
-    assert protocol == "ip6", f"Expected ip6 protocol, got {protocol}"
+        # Verify that the address is IPv6
+        listen_addr = addrs[0]
+        protocol = get_ip_protocol_from_multiaddr(listen_addr)
+        assert protocol == "ip6", f"Expected ip6 protocol, got {protocol}"
 
-    # Dial to IPv6 address
-    raw_conn = await transport.dial(listen_addr)
-    await event.wait()
+        # Dial to IPv6 address
+        raw_conn = await transport.dial(listen_addr)
+        await event.wait()
 
-    # Test data transfer
-    data = b"test_ipv6_data"
-    assert raw_conn_other_side is not None
-    await raw_conn_other_side.write(data)
-    assert (await raw_conn.read(len(data))) == data
+        # Test data transfer
+        data = b"test_ipv6_data"
+        assert raw_conn is not None
+        assert raw_conn_other_side is not None
+        await raw_conn_other_side.write(data)
+        assert (await raw_conn.read(len(data))) == data
+    finally:
+        if raw_conn is not None:
+            await raw_conn.close()
+        if raw_conn_other_side is not None:
+            await raw_conn_other_side.close()
+        await listener.close()
 
 
 @pytest.mark.trio
@@ -281,24 +439,33 @@ async def test_ipv6_tcp_dial_with_ipv4_fallback(nursery):
     # Listen on IPv4 loopback
     listen_addr = Multiaddr("/ip4/127.0.0.1/tcp/0")
     listener = transport.create_listener(handler)
-    await listener.listen(listen_addr, nursery)
-    addrs = listener.get_addrs()
-    assert len(addrs) == 1
+    raw_conn: IRawConnection | None = None
+    try:
+        await listener.listen(listen_addr)
+        addrs = listener.get_addrs()
+        assert len(addrs) == 1
 
-    # Verify that the address is IPv4
-    listen_addr = addrs[0]
-    protocol = get_ip_protocol_from_multiaddr(listen_addr)
-    assert protocol == "ip4", f"Expected ip4 protocol, got {protocol}"
+        # Verify that the address is IPv4
+        listen_addr = addrs[0]
+        protocol = get_ip_protocol_from_multiaddr(listen_addr)
+        assert protocol == "ip4", f"Expected ip4 protocol, got {protocol}"
 
-    # Dial to IPv4 address (should still work)
-    raw_conn = await transport.dial(listen_addr)
-    await event.wait()
+        # Dial to IPv4 address (should still work)
+        raw_conn = await transport.dial(listen_addr)
+        await event.wait()
 
-    # Test data transfer
-    data = b"test_ipv4_data"
-    assert raw_conn_other_side is not None
-    await raw_conn_other_side.write(data)
-    assert (await raw_conn.read(len(data))) == data
+        # Test data transfer
+        data = b"test_ipv4_data"
+        assert raw_conn is not None
+        assert raw_conn_other_side is not None
+        await raw_conn_other_side.write(data)
+        assert (await raw_conn.read(len(data))) == data
+    finally:
+        if raw_conn is not None:
+            await raw_conn.close()
+        if raw_conn_other_side is not None:
+            await raw_conn_other_side.close()
+        await listener.close()
 
 
 def test_extract_ip_from_multiaddr():

@@ -58,6 +58,9 @@ class MockHost:
     def set_stream_handler(self, protocol, handler):
         pass
 
+    def remove_stream_handler(self, protocol):
+        pass
+
 
 @pytest.fixture
 def mock_host():

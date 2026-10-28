@@ -33,12 +33,6 @@ if ENABLE_INLINING:
         def digest(self) -> bytes:
             return self._digest
 
-    # Register identity hash function if FuncReg is available
-    if hasattr(multihash, "FuncReg"):
-        multihash.FuncReg.register(
-            IDENTITY_MULTIHASH_CODE, "identity", hash_new=lambda: IdentityHash()
-        )
-
 
 class ID:
     _bytes: bytes
@@ -186,6 +180,11 @@ class ID:
             return NotImplemented
 
     def __hash__(self) -> int:
+        # Hash the raw bytes (cheap, cached by CPython), NOT the base58 string.
+        # base58 encoding is pure-Python big-integer division — computing it
+        # on every hash made peer-ID hashing (dict/set lookups, peer_ids()
+        # scans over tens of thousands of peers) the dominant CPU cost on
+        # production nodes.  Consistent with __eq__ (which compares _bytes).
         return hash(self._bytes)
 
     @classmethod
@@ -196,12 +195,46 @@ class ID:
 
     @classmethod
     def from_pubkey(cls, key: PublicKey) -> "ID":
+        """
+        Create a deterministic peer ID from a public key.
+
+        This method generates a peer ID by hashing the serialized public key.
+        The same public key will ALWAYS produce the same peer ID, which is
+        fundamental for identity persistence in libp2p.
+
+        For small keys (≤42 bytes, like Ed25519), the key is embedded directly
+        in the peer ID using an identity multihash. For larger keys (like RSA),
+        a SHA-256 hash is used.
+
+        :param key: The public key to generate a peer ID from
+        :return: A deterministic peer ID derived from the public key
+
+        Example:
+            >>> from libp2p.crypto.ed25519 import create_new_key_pair
+            >>> from libp2p.peer.id import ID
+            >>> kp1 = create_new_key_pair()
+            >>> kp2 = create_new_key_pair()
+            >>> # Same keypair produces same peer ID
+            >>> id1_a = ID.from_pubkey(kp1.public_key)
+            >>> id1_b = ID.from_pubkey(kp1.public_key)
+            >>> id1_a == id1_b
+            True
+            >>> # Different keypairs produce different peer IDs
+            >>> id2 = ID.from_pubkey(kp2.public_key)
+            >>> id1_a == id2
+            False
+
+        """
         serialized_key = key.serialize()
-        algo = multihash.Func.sha2_256
+        # Use identity hash (no hashing) for small keys, otherwise use SHA2-256
         if ENABLE_INLINING and len(serialized_key) <= MAX_INLINE_KEY_LENGTH:
-            algo = IDENTITY_MULTIHASH_CODE
-        mh_digest = multihash.digest(serialized_key, algo)
-        return cls(mh_digest.encode())
+            # Identity multihash: just encode the key directly with code 0x00
+            mh_bytes = multihash.encode(serialized_key, IDENTITY_MULTIHASH_CODE)
+        else:
+            # SHA2-256: hash first, then encode
+            digest = hashlib.sha256(serialized_key).digest()
+            mh_bytes = multihash.encode(digest, "sha2-256")
+        return cls(mh_bytes)
 
     def extract_public_key(self) -> PublicKey | None:
         """

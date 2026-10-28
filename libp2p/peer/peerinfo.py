@@ -33,6 +33,9 @@ class PeerInfo:
             and self.addrs == other.addrs
         )
 
+    def __hash__(self) -> int:
+        return hash(self.peer_id)
+
 
 def info_from_p2p_addr(addr: multiaddr.Multiaddr) -> PeerInfo:
     if not addr:
@@ -79,6 +82,8 @@ def peer_info_from_bytes(data: bytes) -> PeerInfo:
         peer_id = ID.from_string(lines[0])
         addrs = [multiaddr.Multiaddr(addr_str) for addr_str in lines[1:]]
         return PeerInfo(peer_id, addrs)
+    except InvalidAddrError:
+        raise
     except Exception as e:
         raise InvalidAddrError(f"failed to decode PeerInfo: {e}")
 

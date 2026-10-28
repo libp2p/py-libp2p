@@ -9,7 +9,6 @@ import pytest
 import trio
 
 from libp2p.discovery.random_walk.config import (
-    MIN_RT_REFRESH_THRESHOLD,
     RANDOM_WALK_CONCURRENCY,
     REFRESH_INTERVAL,
 )
@@ -34,6 +33,9 @@ class DummyRoutingTable:
         self.added_peers.append(peer_obj)
         self._size += 1
         return True
+
+    def get_target_keys_for_refresh(self) -> list[bytes]:
+        return []
 
 
 @pytest.fixture
@@ -69,7 +71,6 @@ async def test_rt_refresh_manager_initialization(
         query_function=dummy_query_function,
         enable_auto_refresh=True,
         refresh_interval=REFRESH_INTERVAL,
-        min_refresh_threshold=MIN_RT_REFRESH_THRESHOLD,
     )
     assert manager.host == mock_host
     assert manager.routing_table == rt
@@ -83,7 +84,7 @@ async def test_rt_refresh_manager_refresh_logic(
 ):
     rt = DummyRoutingTable(size=2)
     # Simulate refresh logic
-    if rt.size() < MIN_RT_REFRESH_THRESHOLD:
+    if rt.size() < 4:
         await rt.add_peer(Mock())
     assert rt.size() >= 3
 
@@ -113,7 +114,6 @@ async def test_rt_refresh_manager_error_handling(mock_host, local_peer_id):
         query_function=failing_query,
         enable_auto_refresh=True,
         refresh_interval=REFRESH_INTERVAL,
-        min_refresh_threshold=MIN_RT_REFRESH_THRESHOLD,
     )
     with pytest.raises(RandomWalkError):
         await manager.query_function(b"key")
@@ -132,7 +132,6 @@ async def test_rt_refresh_manager_start_method(
         query_function=dummy_query_function,
         enable_auto_refresh=False,  # Disable auto-refresh to control the test
         refresh_interval=0.1,
-        min_refresh_threshold=MIN_RT_REFRESH_THRESHOLD,
     )
 
     # Mock the random walk to return some peers
@@ -171,7 +170,6 @@ async def test_rt_refresh_manager_main_loop_with_auto_refresh(
         query_function=dummy_query_function,
         enable_auto_refresh=True,
         refresh_interval=0.1,
-        min_refresh_threshold=MIN_RT_REFRESH_THRESHOLD,
     )
 
     # Mock the random walk to return some peers
@@ -206,7 +204,6 @@ async def test_rt_refresh_manager_main_loop_without_auto_refresh(
         query_function=dummy_query_function,
         enable_auto_refresh=False,
         refresh_interval=0.1,
-        min_refresh_threshold=MIN_RT_REFRESH_THRESHOLD,
     )
 
     with patch.object(
@@ -237,7 +234,6 @@ async def test_rt_refresh_manager_main_loop_initial_refresh_exception(
         query_function=dummy_query_function,
         enable_auto_refresh=True,
         refresh_interval=0.1,
-        min_refresh_threshold=MIN_RT_REFRESH_THRESHOLD,
     )
 
     # Mock _do_refresh to raise an exception on the initial call
@@ -262,7 +258,6 @@ async def test_do_refresh_force_refresh(mock_host, local_peer_id, dummy_query_fu
         query_function=dummy_query_function,
         enable_auto_refresh=True,
         refresh_interval=REFRESH_INTERVAL,
-        min_refresh_threshold=MIN_RT_REFRESH_THRESHOLD,
     )
 
     # Mock the random walk to return some peers
@@ -280,7 +275,9 @@ async def test_do_refresh_force_refresh(mock_host, local_peer_id, dummy_query_fu
 
         # Verify random walk was called
         mock_random_walk.assert_called_once_with(
-            count=RANDOM_WALK_CONCURRENCY, current_routing_table_size=10
+            count=RANDOM_WALK_CONCURRENCY,
+            current_routing_table_size=10,
+            target_keys=[],
         )
 
         # Verify peers were added to routing table
@@ -301,7 +298,6 @@ async def test_do_refresh_skip_due_to_interval(
         query_function=dummy_query_function,
         enable_auto_refresh=True,
         refresh_interval=100.0,  # Long interval
-        min_refresh_threshold=MIN_RT_REFRESH_THRESHOLD,
     )
 
     # Set last refresh time to recent
@@ -323,40 +319,6 @@ async def test_do_refresh_skip_due_to_interval(
 
 
 @pytest.mark.trio
-async def test_do_refresh_skip_due_to_rt_size(
-    mock_host, local_peer_id, dummy_query_function
-):
-    """Test _do_refresh skips refresh when RT size is above threshold."""
-    rt = DummyRoutingTable(size=20)  # Large size above threshold
-    manager = RTRefreshManager(
-        host=mock_host,
-        routing_table=rt,
-        local_peer_id=local_peer_id,
-        query_function=dummy_query_function,
-        enable_auto_refresh=True,
-        refresh_interval=0.1,  # Short interval
-        min_refresh_threshold=MIN_RT_REFRESH_THRESHOLD,
-    )
-
-    # Set last refresh time to old
-    manager._last_refresh_time = 0.0
-
-    with patch.object(
-        manager.random_walk, "run_concurrent_random_walks"
-    ) as mock_random_walk:
-        with patch(
-            "libp2p.discovery.random_walk.rt_refresh_manager.logger"
-        ) as mock_logger:
-            await manager._do_refresh(force=False)
-
-            # Verify refresh was skipped
-            mock_random_walk.assert_not_called()
-            mock_logger.debug.assert_called_with(
-                "Skipping refresh: routing table size above threshold"
-            )
-
-
-@pytest.mark.trio
 async def test_refresh_done_callbacks(mock_host, local_peer_id, dummy_query_function):
     """Test refresh completion callbacks functionality."""
     rt = DummyRoutingTable(size=1)
@@ -367,7 +329,6 @@ async def test_refresh_done_callbacks(mock_host, local_peer_id, dummy_query_func
         query_function=dummy_query_function,
         enable_auto_refresh=True,
         refresh_interval=0.1,
-        min_refresh_threshold=MIN_RT_REFRESH_THRESHOLD,
     )
 
     # Create mock callbacks
@@ -412,7 +373,6 @@ async def test_stop_when_not_running(mock_host, local_peer_id, dummy_query_funct
         query_function=dummy_query_function,
         enable_auto_refresh=True,
         refresh_interval=0.1,
-        min_refresh_threshold=MIN_RT_REFRESH_THRESHOLD,
     )
 
     # Manager is not running
@@ -434,7 +394,6 @@ async def test_periodic_refresh_task(mock_host, local_peer_id, dummy_query_funct
         query_function=dummy_query_function,
         enable_auto_refresh=True,
         refresh_interval=0.05,  # Very short interval for testing
-        min_refresh_threshold=MIN_RT_REFRESH_THRESHOLD,
     )
 
     # Mock _do_refresh to track calls
@@ -449,3 +408,54 @@ async def test_periodic_refresh_task(mock_host, local_peer_id, dummy_query_funct
 
         # Verify _do_refresh was called at least once
         assert mock_do_refresh.call_count >= 1
+
+
+@pytest.mark.trio
+async def test_trigger_refresh_on_demand(
+    mock_host, local_peer_id, dummy_query_function
+):
+    """Test trigger_refresh executes on-demand refresh."""
+    rt = DummyRoutingTable(size=5)
+    manager = RTRefreshManager(
+        host=mock_host,
+        routing_table=rt,
+        local_peer_id=local_peer_id,
+        query_function=dummy_query_function,
+        enable_auto_refresh=True,
+    )
+    manager._running = True
+
+    with patch.object(manager, "_do_refresh", new_callable=AsyncMock) as mock_refresh:
+        await manager.trigger_refresh()
+        assert mock_refresh.call_count == 1
+
+
+@pytest.mark.trio
+async def test_refresh_with_targeted_routing_table_keys(
+    mock_host, local_peer_id, dummy_query_function
+):
+    """Test that _do_refresh queries targeted keys from the routing table."""
+    rt = DummyRoutingTable(size=5)
+    target_keys = [b"\x01" * 32, b"\x02" * 32]
+    rt.get_target_keys_for_refresh = Mock(return_value=target_keys)
+
+    manager = RTRefreshManager(
+        host=mock_host,
+        routing_table=rt,
+        local_peer_id=local_peer_id,
+        query_function=dummy_query_function,
+        enable_auto_refresh=True,
+    )
+
+    with patch.object(
+        manager.random_walk,
+        "run_concurrent_random_walks",
+        new_callable=AsyncMock,
+        return_value=[],
+    ) as mock_walk:
+        await manager._do_refresh(force=True)
+        mock_walk.assert_called_once_with(
+            count=RANDOM_WALK_CONCURRENCY,
+            current_routing_table_size=5,
+            target_keys=target_keys,
+        )

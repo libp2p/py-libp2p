@@ -41,7 +41,9 @@ class MemoryConfig:
 class PerformanceConfig:
     """Performance-related configuration."""
 
-    enable_connection_pooling: bool = True
+    # Off by default: the connection pool is not wired into any acquire/
+    # release path (Bug 12).
+    enable_connection_pooling: bool = False
     enable_memory_pooling: bool = True
     enable_lockfree_structures: bool = True
     enable_preallocation: bool = True
@@ -205,7 +207,7 @@ class ProductionConfig:
         # Performance settings
         performance = PerformanceConfig(
             enable_connection_pooling=os.getenv(
-                "ENABLE_CONNECTION_POOLING", "true"
+                "ENABLE_CONNECTION_POOLING", "false"
             ).lower()
             == "true",
             enable_memory_pooling=os.getenv("ENABLE_MEMORY_POOLING", "true").lower()

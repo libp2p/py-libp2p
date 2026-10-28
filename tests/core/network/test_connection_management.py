@@ -2,6 +2,9 @@
 Unit tests for connection management components (go-libp2p style).
 """
 
+import socket
+from unittest.mock import patch
+
 import pytest
 from multiaddr import Multiaddr
 
@@ -52,10 +55,20 @@ class TestExtractIpFromMultiaddr:
         assert "127.0.0.1" in ips or "::1" in ips
 
     async def test_invalid_dns(self):
-        # Test with invalid DNS name
+        # Test with invalid DNS name — mock resolution so the test does not
+        # depend on resolver/NXDOMAIN-hijacking behaviour (some ISPs return
+        # 127.0.0.1 for unknown names).
         addr = Multiaddr("/dns4/this-domain-does-not-exist-12345.com/tcp/1234")
-        ips = await extract_ip_from_multiaddr(addr)
-        # Should return empty list on resolution failure
+
+        async def _raise_gaierror(*_args, **_kwargs):
+            raise socket.gaierror(socket.EAI_NONAME, "Name or service not known")
+
+        with patch(
+            "libp2p.network.connection_gate.trio.socket.getaddrinfo",
+            _raise_gaierror,
+        ):
+            ips = await extract_ip_from_multiaddr(addr)
+
         assert ips == []
 
     async def test_p2p_circuit_address(self):

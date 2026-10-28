@@ -1,9 +1,11 @@
 from collections.abc import (
     Awaitable,
     Callable,
+    Sequence,
 )
 import logging
 
+import multiaddr
 import trio
 
 from libp2p.abc import (
@@ -16,6 +18,9 @@ from libp2p.network.stream.exceptions import (
 from libp2p.network.swarm import (
     Swarm,
 )
+from libp2p.peer.id import (
+    ID,
+)
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
 )
@@ -23,6 +28,33 @@ from libp2p.peer.peerinfo import (
 from .constants import (
     MAX_READ_LEN,
 )
+
+
+async def wait_for_peerstore_addrs(
+    host: IHost,
+    peer_id: ID,
+    *,
+    expected_addrs: Sequence[multiaddr.Multiaddr] | None = None,
+    timeout: float = 5.0,
+) -> None:
+    """Wait until the peerstore lists addresses for ``peer_id``."""
+    deadline = trio.current_time() + timeout
+    while trio.current_time() < deadline:
+        try:
+            known = host.get_peerstore().addrs(peer_id)
+        except Exception:
+            known = []
+        if expected_addrs is not None:
+            if known and all(addr in known for addr in expected_addrs):
+                return
+        elif known:
+            return
+        await trio.sleep(0.01)
+    if expected_addrs is not None:
+        raise TimeoutError(
+            f"Peerstore for {peer_id} missing expected addrs within {timeout}s"
+        )
+    raise TimeoutError(f"Peerstore for {peer_id} has no addrs within {timeout}s")
 
 
 async def connect_swarm(swarm_0: Swarm, swarm_1: Swarm) -> None:

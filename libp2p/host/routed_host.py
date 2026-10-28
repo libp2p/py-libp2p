@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+from collections.abc import (
+    Sequence,
+)
+
+import multiaddr
+
 from libp2p.abc import (
     INetworkService,
     IPeerRouting,
 )
 from libp2p.host.basic_host import (
+    AddrsFactory,
     BasicHost,
 )
 from libp2p.host.exceptions import (
@@ -33,13 +40,15 @@ class RoutedHost(BasicHost):
         router: IPeerRouting,
         enable_mDNS: bool = False,
         enable_upnp: bool = False,
-        enable_autotls: bool = False,
         bootstrap: list[str] | None = None,
         resource_manager: ResourceManager | None = None,
         *,
         bootstrap_allow_ipv6: bool = False,
         bootstrap_dns_timeout: float = 10.0,
         bootstrap_dns_max_retries: int = 3,
+        announce_addrs: Sequence[multiaddr.Multiaddr] | None = None,
+        addrs_factory: AddrsFactory | None = None,
+        disable_identify_address_discovery: bool = False,
     ):
         """
         Initialize a RoutedHost instance.
@@ -55,17 +64,24 @@ class RoutedHost(BasicHost):
         :param bootstrap_allow_ipv6: If True, bootstrap uses IPv6+TCP when available.
         :param bootstrap_dns_timeout: DNS resolution timeout in seconds per attempt.
         :param bootstrap_dns_max_retries: Max DNS resolution retries (with backoff).
+        :param announce_addrs: If set, replace listen addrs in get_addrs()
+        :param addrs_factory: Optional callable AddrsFactory (mutually exclusive
+            with ``announce_addrs``)
+        :param disable_identify_address_discovery: Opt out of Identify observed
+            address recording
         """
         super().__init__(
-            network,
-            enable_mDNS,
-            enable_upnp,
-            enable_autotls,
-            bootstrap,
+            network=network,
+            enable_mDNS=enable_mDNS,
+            enable_upnp=enable_upnp,
+            bootstrap=bootstrap,
             resource_manager=resource_manager,
             bootstrap_allow_ipv6=bootstrap_allow_ipv6,
             bootstrap_dns_timeout=bootstrap_dns_timeout,
             bootstrap_dns_max_retries=bootstrap_dns_max_retries,
+            announce_addrs=announce_addrs,
+            addrs_factory=addrs_factory,
+            disable_identify_address_discovery=disable_identify_address_discovery,
         )
         self._router = router
 

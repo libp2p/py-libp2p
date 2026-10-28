@@ -1,3 +1,4 @@
+import logging
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -7,11 +8,13 @@ import trio
 from libp2p.crypto.ed25519 import (
     create_new_key_pair,
 )
+from libp2p.peer.id import ID
 from libp2p.transport.quic.connection import QUICConnection
 from libp2p.transport.quic.exceptions import (
     QUICListenError,
 )
 from libp2p.transport.quic.listener import QUICListener
+from libp2p.transport.quic.security import QUICTLSConfigManager
 from libp2p.transport.quic.transport import (
     QUICTransport,
     QUICTransportConfig,
@@ -19,6 +22,8 @@ from libp2p.transport.quic.transport import (
 from libp2p.transport.quic.utils import (
     create_quic_multiaddr,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class TestQUICListener:
@@ -62,11 +67,10 @@ class TestQUICListener:
     @pytest.mark.trio
     async def test_listener_invalid_multiaddr(self, listener: QUICListener):
         """Test listener with invalid multiaddr."""
-        async with trio.open_nursery() as nursery:
-            invalid_addr = Multiaddr("/ip4/127.0.0.1/tcp/4001")
+        invalid_addr = Multiaddr("/ip4/127.0.0.1/tcp/4001")
 
-            with pytest.raises(QUICListenError, match="Invalid QUIC multiaddr"):
-                await listener.listen(invalid_addr, nursery)
+        with pytest.raises(QUICListenError, match="Invalid QUIC multiaddr"):
+            await listener.listen(invalid_addr)
 
     @pytest.mark.trio
     async def test_listener_basic_lifecycle(self, listener: QUICListener):
@@ -75,8 +79,8 @@ class TestQUICListener:
 
         async with trio.open_nursery() as nursery:
             # Start listening
-            success = await listener.listen(listen_addr, nursery)
-            assert success
+            result = await listener.listen(listen_addr)
+            assert result is None
             assert listener.is_listening()
 
             # Check bound addresses
@@ -102,15 +106,14 @@ class TestQUICListener:
 
         try:
             async with trio.open_nursery() as nursery:
-                success = await listener.listen(listen_addr, nursery)
-                assert success
+                await listener.listen(listen_addr)
                 await trio.sleep(0.01)
 
                 addrs = listener.get_addrs()
                 assert len(addrs) > 0
                 async with trio.open_nursery() as nursery2:
                     with pytest.raises(QUICListenError, match="Already listening"):
-                        await listener.listen(listen_addr, nursery2)
+                        await listener.listen(listen_addr)
                         nursery2.cancel_scope.cancel()
 
                 nursery.cancel_scope.cancel()
@@ -124,8 +127,7 @@ class TestQUICListener:
 
         try:
             async with trio.open_nursery() as nursery:
-                success = await listener.listen(listen_addr, nursery)
-                assert success
+                await listener.listen(listen_addr)
                 await trio.sleep(0.5)
 
                 addrs = listener.get_addrs()
@@ -137,7 +139,7 @@ class TestQUICListener:
 
         # By the time we get here, the listener and its tasks have been fully
         # shut down, allowing the nursery to exit without hanging.
-        print("TEST COMPLETED SUCCESSFULLY.")
+        logger.debug("Test completed successfully.")
 
     @pytest.mark.trio
     async def test_listener_stats_tracking(self, listener):
@@ -238,9 +240,7 @@ async def test_connection_id_tracking_with_real_connection():
         async with trio.open_nursery() as nursery:
             # Start server
             server_transport.set_background_nursery(nursery)
-            success = await listener.listen(listen_addr, nursery)
-            assert success, "Failed to start server listener"
-
+            await listener.listen(listen_addr)
             server_addrs = listener.get_addrs()
             assert len(server_addrs) > 0, "Server should have listen addresses"
 
@@ -361,11 +361,17 @@ class TestQUICListenerRaceConditions:
         return listener_obj
 
     @pytest.fixture
-    def mock_quic_connection(self):
-        """Create mock aioquic QuicConnection."""
+    def mock_quic_connection(self, private_key):
+        """Create mock aioquic QuicConnection with TLS handshake state."""
+        peer_id = ID.from_pubkey(private_key.get_public_key())
+        manager = QUICTLSConfigManager(libp2p_private_key=private_key, peer_id=peer_id)
+
         mock = Mock()
         mock.configuration = Mock()
         mock.configuration.is_client = False
+        mock._handshake_complete = True
+        mock.tls = Mock()
+        mock.tls._peer_certificate = manager.tls_config.certificate
         mock.next_event.return_value = None
         mock.datagrams_to_send.return_value = []
         mock.get_timer.return_value = None
@@ -415,12 +421,12 @@ class TestQUICListenerRaceConditions:
                     except Exception:
                         pass  # Some attempts may fail, that's expected
 
-                # Launch multiple concurrent promotion attempts
-                for _ in range(10):
-                    nursery.start_soon(attempt_promotion)
-
-                # Give time for promotions to complete
-                await trio.sleep(0.1)
+                # Launch concurrent promotion attempts. Wait for all of them to
+                # finish by joining a dedicated nursery instead of sleeping a
+                # fixed amount, which races under load.
+                async with trio.open_nursery() as attempt_nursery:
+                    for _ in range(10):
+                        attempt_nursery.start_soon(attempt_promotion)
 
                 # Verify only one connection object was created
                 assert len(set(connection_objects)) <= 1, (
@@ -480,16 +486,15 @@ class TestQUICListenerRaceConditions:
                 await trio.sleep(0.2)
 
                 # Verify handler was called at most once
-                # (if connection was successfully created)
                 quic_key = id(mock_quic_connection)
                 connection_obj = listener._conn_by_quic_id.get(quic_key)
-                if connection_obj is not None:
-                    # If connection was created, handler should have been invoked
-                    assert quic_key in listener._handler_invoked_quic_ids, (
-                        "Handler should be marked as invoked when connection is created"
-                    )
-                # Note: connection_handler.call_count() would work
-                # if we had a proper mock. For now, we verify the tracking set
+                assert connection_obj is not None, (
+                    "Connection should be promoted with mock TLS certificate"
+                )
+                assert quic_key in listener._handler_invoked_quic_ids, (
+                    "Handler should be marked as invoked when connection is created"
+                )
+                assert connection_handler.call_count() <= 1
 
     @pytest.mark.trio
     async def test_multiple_cid_routing_concurrent_load(
@@ -521,23 +526,15 @@ class TestQUICListenerRaceConditions:
 
             # Patch before any connections are created
             with patch.object(QUICConnection, "connect", new=mock_connect):
-                # Promote the connection first
-                try:
-                    await listener._promote_pending_connection(
-                        mock_quic_connection, addr, primary_cid
-                    )
-                except Exception:
-                    # Promotion may fail due to mock limitations, skip test if so
-                    pytest.skip("Connection promotion failed due to mock limitations")
+                await listener._promote_pending_connection(
+                    mock_quic_connection, addr, primary_cid
+                )
 
-                # Get the connection object
                 quic_key = id(mock_quic_connection)
                 connection_obj = listener._conn_by_quic_id.get(quic_key)
-                if connection_obj is None:
-                    # If connection wasn't created, skip the test
-                    pytest.skip(
-                        "Connection not created, likely due to mock limitations"
-                    )
+                assert connection_obj is not None, (
+                    "Connection should be promoted with mock TLS certificate"
+                )
 
                 # Register additional CIDs for the same connection
                 await listener._registry.register_new_connection_id_for_existing_conn(
@@ -558,14 +555,15 @@ class TestQUICListenerRaceConditions:
                     if conn:
                         found_connections.append((cid, id(conn)))
 
-                # Route packets with different CIDs concurrently
+                # Route packets with different CIDs concurrently. Wait for every
+                # lookup to finish by joining a dedicated nursery rather than
+                # sleeping a fixed amount: under load a single lookup can take
+                # longer than the sleep, leaving found_connections empty.
                 cids = [primary_cid, secondary_cid1, secondary_cid2, secondary_cid3]
-                for _ in range(5):  # Multiple rounds
-                    for cid in cids:
-                        nursery.start_soon(route_packet, cid)
-
-                # Give time for routing to complete
-                await trio.sleep(0.1)
+                async with trio.open_nursery() as route_nursery:
+                    for _ in range(5):  # Multiple rounds
+                        for cid in cids:
+                            route_nursery.start_soon(route_packet, cid)
 
                 # Verify all CIDs route to the same connection object
                 connection_ids = {conn_id for _, conn_id in found_connections}

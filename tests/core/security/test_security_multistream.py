@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 import trio
 
@@ -18,6 +20,8 @@ from libp2p.stream_muxer.yamux.yamux import Yamux
 from tests.utils.factories import (
     host_pair_factory,
 )
+
+logger = logging.getLogger(__name__)
 
 initiator_key_pair = create_new_key_pair()
 
@@ -64,7 +68,7 @@ async def perform_simple_test(assertion_func, security_protocol):
                 return muxed_conn._connection
             # Last resort - warn but return the muxed_conn itself for type checking
             else:
-                print(f"Warning: Cannot find secured connection in {type(muxed_conn)}")
+                logger.warning("Cannot find secured connection in %s", type(muxed_conn))
                 return muxed_conn
 
         # Get secured connections for both peers

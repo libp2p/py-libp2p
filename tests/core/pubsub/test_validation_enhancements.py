@@ -416,7 +416,7 @@ class TestValidationIntegration:
 @pytest.mark.trio
 async def test_pubsub_with_enhanced_validation():
     """Test Pubsub with enhanced validation features enabled."""
-    from libp2p.tools.async_service import background_trio_service
+    from libp2p.tools.anyio_service import background_trio_service
     from tests.utils.factories import GossipsubFactory, HostFactory
 
     async with HostFactory.create_batch_and_listen(2) as hosts:

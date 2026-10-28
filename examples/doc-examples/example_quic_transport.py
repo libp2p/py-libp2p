@@ -38,9 +38,9 @@ async def main():
 
     # Start the host
     async with host.run(listen_addrs=quic_addrs):
-        print("libp2p has started with QUIC transport")
-        print("libp2p is listening on:", host.get_addrs())
-        print(f"Optimal address: {optimal_quic_str}")
+        print("libp2p has started with QUIC transport", flush=True)
+        print("libp2p is listening on:", host.get_addrs(), flush=True)
+        print(f"Optimal address: {optimal_quic_str}", flush=True)
         # Keep the host running
         await trio.sleep_forever()
 

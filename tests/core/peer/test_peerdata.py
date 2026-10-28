@@ -91,7 +91,7 @@ def test_first_supported_protocol_none():
     input_protocols = ["protocolA", "protocolB"]
     first = peer_data.first_supported_protocol(input_protocols)
 
-    assert first == "None supported"
+    assert first == ""
 
 
 # Test case when adding addresses

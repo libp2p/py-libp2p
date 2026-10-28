@@ -9,7 +9,6 @@ This module tests the enhanced peer scoring system in v1.4, including:
 """
 
 import pytest
-import trio
 
 from libp2p.pubsub.gossipsub import (
     PROTOCOL_ID_V14,
@@ -236,7 +235,8 @@ async def test_scoring_integration_with_rate_limiting():
 
         # Connect peers
         await connect(pubsubs[0].host, pubsubs[1].host)
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(pubsubs[1].host.get_id())
+        await pubsubs[1].wait_for_peer(pubsubs[0].host.get_id())
 
         peer0_id = pubsubs[0].host.get_id()
 

@@ -8,6 +8,7 @@ Subpackages
    :maxdepth: 4
 
    libp2p.network.connection
+   libp2p.network.health
    libp2p.network.stream
 
 Submodules

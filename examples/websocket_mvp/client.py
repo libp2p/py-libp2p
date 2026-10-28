@@ -130,14 +130,8 @@ class WebSocketClient:
             sec_opt={PLAINTEXT_PROTOCOL_ID: InsecureTransport(key_pair)},
             muxer_opt=create_yamux_muxer_option(),
             listen_addrs=[],  # Client doesn't need to listen
+            transports=[transport],
         )
-
-        # Replace the default transport with our configured one
-        from libp2p.network.swarm import Swarm
-
-        swarm = host.get_network()
-        if isinstance(swarm, Swarm):
-            swarm.transport = transport
 
         return host
 

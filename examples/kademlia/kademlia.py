@@ -33,7 +33,7 @@ from libp2p.kad_dht.kad_dht import (
     KadDHT,
 )
 from libp2p.records.validator import Validator
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     background_trio_service,
 )
 from libp2p.tools.utils import (

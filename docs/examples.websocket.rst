@@ -73,6 +73,29 @@ Use for production. Requires TLS configuration:
     wss_addr = Multiaddr("/ip4/127.0.0.1/tcp/8080/wss")
     host = new_host(listen_addrs=[wss_addr])
 
+**Dialing WSS:**
+
+A ``wss`` dial verifies the server certificate against the system trust store
+and checks the hostname, so a peer with a publicly issued certificate needs no
+client configuration at all. To reach a self-signed endpoint, either supply a
+context that trusts its certificate::
+
+    client_context = ssl.create_default_context(cafile="peer-ca.pem")
+    config = WebsocketConfig(tls_client_config=client_context)
+
+or turn verification off explicitly::
+
+    config = WebsocketConfig(insecure_skip_verify=True)
+
+``insecure_skip_verify`` accepts any certificate. libp2p's own handshake still
+authenticates the peer inside the WebSocket, so stream data cannot be read or
+forged, but anyone on the path can terminate the outer TLS unnoticed. Prefer
+trusting the certificate over disabling the check.
+
+With ``new_host``, pass ``tls_client_config=...`` for a custom trust store, or
+build a ``WebsocketTransport`` with ``WebsocketConfig(insecure_skip_verify=True)``
+when you need the explicit opt-out.
+
 SOCKS Proxy Configuration
 -------------------------
 

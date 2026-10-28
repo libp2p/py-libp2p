@@ -16,6 +16,15 @@ from libp2p.tools.utils import connect
 from tests.utils.factories import PubsubFactory
 
 
+async def _wait_pair_mesh_ready(pubsubs, topic: str) -> None:
+    await pubsubs[0].wait_for_peer(pubsubs[1].my_id)
+    await pubsubs[1].wait_for_peer(pubsubs[0].my_id)
+    await pubsubs[0].wait_for_subscription(pubsubs[1].my_id, topic)
+    await pubsubs[1].wait_for_subscription(pubsubs[0].my_id, topic)
+    await pubsubs[0].wait_for_mesh(pubsubs[1].my_id, topic)
+    await pubsubs[1].wait_for_mesh(pubsubs[0].my_id, topic)
+
+
 @pytest.mark.trio
 async def test_score_decreases_for_invalid_messages():
     """Test that peer score decreases when sending invalid messages."""
@@ -31,13 +40,12 @@ async def test_score_decreases_for_invalid_messages():
 
         # Connect hosts
         await connect(host0, host1)
-        await trio.sleep(0.5)
 
         # Both subscribe to the same topic
         topic = "test_invalid_messages"
         await pubsubs[0].subscribe(topic)
         await pubsubs[1].subscribe(topic)
-        await trio.sleep(1.0)  # Allow time for mesh formation
+        await _wait_pair_mesh_ready(pubsubs, topic)
 
         # Get initial score
         assert isinstance(gsub0, GossipSub)
@@ -71,13 +79,12 @@ async def test_score_decreases_for_duplicate_messages():
 
         # Connect hosts
         await connect(host0, host1)
-        await trio.sleep(0.5)
 
         # Both subscribe to the same topic
         topic = "test_duplicate_messages"
         await pubsubs[0].subscribe(topic)
         await pubsubs[1].subscribe(topic)
-        await trio.sleep(1.0)  # Allow time for mesh formation
+        await _wait_pair_mesh_ready(pubsubs, topic)
 
         # Get initial score
         assert isinstance(gsub0, GossipSub)
@@ -109,13 +116,12 @@ async def test_honest_peers_maintain_stable_scores():
 
         # Connect hosts
         await connect(host0, host1)
-        await trio.sleep(0.5)
 
         # Both subscribe to the same topic
         topic = "test_honest_peers"
         await pubsubs[0].subscribe(topic)
         await pubsubs[1].subscribe(topic)
-        await trio.sleep(1.0)  # Allow time for mesh formation
+        await _wait_pair_mesh_ready(pubsubs, topic)
 
         # Get initial score
         assert isinstance(gsub0, GossipSub)
@@ -155,13 +161,12 @@ async def test_low_scoring_peers_get_pruned():
 
         # Connect hosts
         await connect(host0, host1)
-        await trio.sleep(0.5)
 
         # Both subscribe to the same topic
         topic = "test_pruning"
         await pubsubs[0].subscribe(topic)
         await pubsubs[1].subscribe(topic)
-        await trio.sleep(1.0)  # Allow time for mesh formation
+        await _wait_pair_mesh_ready(pubsubs, topic)
 
         # Verify that hosts are in each other's mesh
         assert isinstance(gsub0, GossipSub)
@@ -201,13 +206,23 @@ async def test_score_based_message_propagation():
         # Connect hosts
         await connect(host0, host1)
         await connect(host0, host2)
-        await trio.sleep(0.5)
+        await pubsubs[0].wait_for_peer(pubsubs[1].my_id)
+        await pubsubs[1].wait_for_peer(pubsubs[0].my_id)
+        await pubsubs[0].wait_for_peer(pubsubs[2].my_id)
+        await pubsubs[2].wait_for_peer(pubsubs[0].my_id)
 
         # All subscribe to the same topic
         topic = "test_score_propagation"
         for pubsub in pubsubs:
             await pubsub.subscribe(topic)
-        await trio.sleep(1.0)  # Allow time for mesh formation
+        await pubsubs[0].wait_for_subscription(pubsubs[1].my_id, topic)
+        await pubsubs[1].wait_for_subscription(pubsubs[0].my_id, topic)
+        await pubsubs[0].wait_for_subscription(pubsubs[2].my_id, topic)
+        await pubsubs[2].wait_for_subscription(pubsubs[0].my_id, topic)
+        await pubsubs[0].wait_for_mesh(pubsubs[1].my_id, topic)
+        await pubsubs[1].wait_for_mesh(pubsubs[0].my_id, topic)
+        await pubsubs[0].wait_for_mesh(pubsubs[2].my_id, topic)
+        await pubsubs[2].wait_for_mesh(pubsubs[0].my_id, topic)
 
         # Give host1 a good score
         assert isinstance(gsub0, GossipSub)

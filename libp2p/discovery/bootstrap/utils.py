@@ -29,7 +29,7 @@ def validate_bootstrap_addresses(addrs: list[str]) -> list[str]:
             valid_addrs.append(addr_str)
             logger.debug(f"Valid bootstrap address: {addr_str}")
 
-        except (InvalidAddrError, ValueError, Exception) as e:
+        except (InvalidAddrError, ValueError, TypeError) as e:
             logger.warning(f"Invalid bootstrap address '{addr_str}': {e}")
             continue
 
