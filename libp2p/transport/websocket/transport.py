@@ -705,7 +705,7 @@ class WebsocketTransport(ITransport):
                 # Try to get SSL context from AutoTLS or advanced TLS config
                 ssl_context = await self._get_ssl_context(
                     peer_id=None,  # No peer ID for client connections
-                    sni_name=host,
+                    sni_name=proto_info.sni or host,
                     is_server=False,
                 )
 
@@ -767,6 +767,12 @@ class WebsocketTransport(ITransport):
         protocol = "wss" if proto_info.is_wss else "ws"
         ws_url = f"{protocol}://{format_host_for_url(host)}:{port}/"
 
+        # A /tls/sni/<name>/ws address names the peer separately from the
+        # address to connect to: the socket goes to `host`, while the TLS
+        # server name and the Host header carry <name>, as in go-libp2p and
+        # js-libp2p. Without /sni/ both are `host`.
+        server_name = proto_info.sni or host
+
         logger.debug(f"WebsocketTransport.dial connecting to {ws_url}")
 
         # Apply timeout to the connection process
@@ -798,7 +804,7 @@ class WebsocketTransport(ITransport):
                     stream = trio.SSLStream(
                         stream,
                         ssl_context,
-                        server_hostname=host,
+                        server_hostname=server_name,
                         https_compatible=True,
                     )
                     try:
@@ -817,7 +823,9 @@ class WebsocketTransport(ITransport):
 
                 # trio_websocket omits the port from the Host header on the
                 # default ports, so keep that behaviour.
-                host_header = host if port in (80, 443) else f"{host}:{port}"
+                host_header = (
+                    server_name if port in (80, 443) else f"{server_name}:{port}"
+                )
                 ws = await wrap_client_stream(
                     self._background_nursery,
                     stream,
@@ -878,6 +886,9 @@ class WebsocketTransport(ITransport):
             # Extract host and port from multiaddr
             host = extract_host_from_multiaddr(proto_info.rest_multiaddr) or "localhost"
             port = int(proto_info.rest_multiaddr.value_for_protocol("tcp") or "80")
+            # The tunnel goes to `host`; a /sni/ name is the TLS server name
+            # and the Host header, as on a direct dial.
+            server_name = proto_info.sni or host
 
             logger.debug(f"Connecting through SOCKS proxy to {host}:{port}")
 
@@ -890,6 +901,7 @@ class WebsocketTransport(ITransport):
                     host=host,
                     port=port,
                     ssl_context=ssl_context,
+                    server_hostname=server_name,
                 )
 
                 # Create our connection wrapper
