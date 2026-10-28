@@ -22,6 +22,11 @@ dependencies = [
     "anyio>=4.0",
     "base58>=1.0.3",
     "cbor2>=5.4.0",
+    # certifi bundles the CA store used by httpx/aioquic; 2026.10.19 is the first
+    # release that removes the compromised eMudhra/emSign CA certificates while
+    # keeping the unaffected emSign roots for compatibility
+    # (https://discuss.python.org/t/109576).
+    "certifi>=2026.10.19",
     "coincurve==21.0.0",
     "exceptiongroup>=1.2.0; python_version < '3.11'",
     "fastecdsa==2.3.2; sys_platform != 'win32'",
@@ -150,6 +155,12 @@ exclude = ["scripts*", "tests*"]
 [tool.setuptools.package-data]
 libp2p = ["py.typed"]
 
+
+[tool.uv]
+# uv < 0.13.4 trusts the compromised eMudhra/emSign CA certificates
+# (GHSA-hq85-5cpj-mr62). This is a floor, not a pin: newer versions are fine.
+# setup-uv reads this in CI; uv itself enforces it for local commands.
+required-version = ">=0.13.4"
 
 [tool.mypy]
 check_untyped_defs = true
