@@ -51,7 +51,8 @@ def parse_websocket_multiaddr(maddr: Multiaddr) -> ParsedWebSocketMultiaddr:
             tls_index = i
         elif protocol.name == "sni":
             sni_index = i
-            sni = protocol.value
+            # A Protocol carries no value; the multiaddr holds it.
+            sni = maddr.value_for_protocol(P_SNI)
 
     if ws_index == -1:
         raise ValueError("Not a WebSocket multiaddr")
