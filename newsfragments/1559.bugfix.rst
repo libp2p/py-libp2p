@@ -1,0 +1,10 @@
+A yamux stream the peer reset now reports ``MuxedStreamReset`` to a bounded
+``read(n)``, not ``MuxedStreamEOF``. A remote RST drops the stream's
+bookkeeping as soon as its receive buffer is drained, after which
+``read_stream()`` could no longer tell a reset stream from a closed one, while
+the unbounded ``read()`` path still reported the reset correctly. A caller
+reading a body with no declared length -- HTTP/1.1 without ``Content-Length``,
+server-sent events -- has nothing but that exception to tell a message that was
+cut off from one that finished, and was told the message finished. Which bytes
+are delivered is unchanged: a remote reset still takes precedence over data
+already buffered.

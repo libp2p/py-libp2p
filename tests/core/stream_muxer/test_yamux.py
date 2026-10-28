@@ -1399,3 +1399,39 @@ async def test_yamux_withheld_data_body_times_out(yamux_pair, monkeypatch):
         await client_yamux.event_shutting_down.wait()
     assert not scope.cancelled_caught, "receiver hung on withheld DATA body"
     assert client_yamux.event_shutting_down.is_set()
+
+
+@pytest.mark.trio
+async def test_yamux_remote_reset_after_drained_buffer_raises_reset(yamux_pair):
+    """
+    A bounded read on a stream the peer RESET raises MuxedStreamReset, not
+    MuxedStreamEOF.
+
+    A remote RST drops the stream's bookkeeping once its receive buffer is
+    drained, after which ``read_stream`` cannot tell a reset stream from a
+    closed one and reports EOF. The unbounded (``n == -1``) path consults the
+    stream object and reports the reset, so the same stream would answer the
+    two reads differently. A caller reading a body with no declared length
+    (HTTP/1.1 with no Content-Length, server-sent events) has nothing but
+    this exception to tell a truncated body from a complete one.
+    """
+    logging.debug("Starting test_yamux_remote_reset_after_drained_buffer_raises_reset")
+    client_yamux, server_yamux = yamux_pair
+    client_stream = await client_yamux.open_stream()
+    server_stream = await server_yamux.accept_stream()
+
+    await server_stream.write(b"chunk-one")
+    await trio.sleep(0.1)
+    assert await client_stream.read(64) == b"chunk-one"
+
+    # The buffer is drained, and only now does the peer reset.
+    await server_stream.reset()
+    await trio.sleep(0.2)
+    assert client_stream.stream_id not in client_yamux.streams
+
+    with pytest.raises(MuxedStreamReset):
+        await client_stream.read(64)
+    # The unbounded path already reported the reset; the two must agree.
+    with pytest.raises(MuxedStreamReset):
+        await client_stream.read()
+    logging.debug("test_yamux_remote_reset_after_drained_buffer_raises_reset complete")
