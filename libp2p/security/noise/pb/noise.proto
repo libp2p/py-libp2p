@@ -9,6 +9,13 @@ message NoiseExtensions {
 	repeated string stream_muxers = 2;
 	// Early data payload for 0-RTT support (Python extension)
 	optional bytes early_data = 3;
+	// The security protocols this peer has configured, in its own preference
+	// order, together with a signature by the identity key that binds the list
+	// to the Noise transcript. See libp2p/security/noise/transcript_binding.py.
+	//
+	// Numbered 4 and 5 because field 3 was already taken by early_data here.
+	repeated string security_protocols = 4;
+	bytes transcript_sig = 5;
 }
 
 // NoiseHandshakePayload is the payload sent during Noise handshake
