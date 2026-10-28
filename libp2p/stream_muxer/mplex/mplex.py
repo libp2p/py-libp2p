@@ -26,6 +26,7 @@ from libp2p.exceptions import (
 from libp2p.io.exceptions import (
     ConnectionClosedError,
     IncompleteReadError,
+    MessageTooLarge,
 )
 from libp2p.network.connection.exceptions import (
     RawConnError,
@@ -37,10 +38,14 @@ from libp2p.utils import (
     decode_uvarint_from_stream,
     encode_uvarint,
     encode_varint_prefixed,
-    read_varint_prefixed_bytes,
+    read_varint_prefixed_bytes_limited,
 )
 
 from .constants import (
+    BUFFER_SIZE,
+    MAX_MESSAGE_SIZE,
+    MPLEX_MESSAGE_CHANNEL_SIZE,
+    RECEIVE_TIMEOUT_SECS,
     HeaderTags,
 )
 from .datastructures import (
@@ -54,8 +59,13 @@ from .mplex_stream import (
 )
 
 MPLEX_PROTOCOL_ID = TProtocol("/mplex/6.7.0")
-# Ref: https://github.com/libp2p/go-mplex/blob/414db61813d9ad3e6f4a7db5c1b1612de343ace9/multiplex.go#L115  # noqa: E501
-MPLEX_MESSAGE_CHANNEL_SIZE = 8
+
+# Re-export for existing test imports.
+__all__ = (
+    "MPLEX_MESSAGE_CHANNEL_SIZE",
+    "MPLEX_PROTOCOL_ID",
+    "Mplex",
+)
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +158,11 @@ class Mplex(IMuxedConn):
             # Set the `event_shutting_down`, to allow graceful shutdown.
             self.event_shutting_down.set()
         await self.secured_conn.close()
+        # If the read loop never observed EOF (or exited without cleanup),
+        # finish teardown ourselves. Mirrors Yamux: do not hang forever on
+        # event_closed after we already closed the secured connection.
+        if not self.event_closed.is_set():
+            await self._cleanup()
         # Blocked until `close` is finally set.
         await self.event_closed.wait()
 
@@ -244,15 +259,17 @@ class Mplex(IMuxedConn):
         """
         self._established = True
         self.event_started.set()
-        while True:
-            try:
-                await self._handle_incoming_message()
-            except MplexUnavailable as e:
-                logger.debug("mplex unavailable while waiting for incoming: %s", e)
-                break
-        # If we enter here, it means this connection is shutting down.
-        # We should clean things up.
-        await self._cleanup()
+        try:
+            while True:
+                try:
+                    await self._handle_incoming_message()
+                except MplexUnavailable as e:
+                    logger.debug("mplex unavailable while waiting for incoming: %s", e)
+                    break
+        finally:
+            # Always clean up so close() waiters are not left hanging, even if
+            # an unexpected exception escapes the read loop.
+            await self._cleanup()
 
     async def read_message(self) -> tuple[int, int, bytes]:
         """
@@ -273,12 +290,15 @@ class Mplex(IMuxedConn):
                 f"{error}"
             )
         try:
-            message = await read_varint_prefixed_bytes(self.secured_conn)
+            message = await read_varint_prefixed_bytes_limited(
+                self.secured_conn, MAX_MESSAGE_SIZE
+            )
         except (
             ParseError,
             RawConnError,
             ConnectionClosedError,
             IncompleteReadError,
+            MessageTooLarge,
         ) as error:
             raise MplexUnavailable(
                 "failed to read the message body correctly from the underlying "
@@ -350,16 +370,29 @@ class Mplex(IMuxedConn):
                     len(message),
                 )
                 return
-        try:
-            send_channel.send_nowait(message)
-        except (trio.BrokenResourceError, trio.ClosedResourceError):
-            raise MplexUnavailable
-        except trio.WouldBlock:
-            # `send_channel` is full, reset this stream.
-            logger.warning(
-                "message channel of stream %s is full: stream is reset", stream_id
-            )
-            await stream.reset()
+        # Deliver body in BUFFER_SIZE slices with blocking backpressure and a
+        # receive timeout, matching go-mplex (channel depth 1 + ReceiveTimeout).
+        if message:
+            chunks = [
+                message[i : i + BUFFER_SIZE]
+                for i in range(0, len(message), BUFFER_SIZE)
+            ]
+        else:
+            chunks = [b""]
+        for chunk in chunks:
+            try:
+                with trio.fail_after(RECEIVE_TIMEOUT_SECS):
+                    await send_channel.send(chunk)
+            except trio.TooSlowError:
+                logger.warning(
+                    "message channel of stream %s timed out waiting for reader: "
+                    "stream is reset",
+                    stream_id,
+                )
+                await stream.reset()
+                return
+            except (trio.BrokenResourceError, trio.ClosedResourceError):
+                raise MplexUnavailable
 
     async def _handle_close(self, stream_id: StreamID) -> None:
         async with self.streams_lock:
@@ -406,18 +439,24 @@ class Mplex(IMuxedConn):
             self.streams_msg_channels.pop(stream_id, None)
 
     async def _cleanup(self) -> None:
-        if not self.event_shutting_down.is_set():
-            self.event_shutting_down.set()
+        # Idempotent: close() and handle_incoming may both invoke cleanup.
+        # Guard under streams_lock so concurrent callers cannot double-close.
         async with self.streams_lock:
-            for stream_id, stream in self.streams.items():
+            if self.event_closed.is_set():
+                return
+            if not self.event_shutting_down.is_set():
+                self.event_shutting_down.set()
+            for stream_id, stream in list(self.streams.items()):
                 async with stream.close_lock:
                     if not stream.event_remote_closed.is_set():
                         stream.event_remote_closed.set()
                         stream.event_reset.set()
                         stream.event_local_closed.set()
-                send_channel = self.streams_msg_channels[stream_id]
-                await send_channel.aclose()
-        self.event_closed.set()
+                send_channel = self.streams_msg_channels.pop(stream_id, None)
+                if send_channel is not None:
+                    await send_channel.aclose()
+            self.streams.clear()
+            self.event_closed.set()
         await self.new_stream_send_channel.aclose()
         # Call on_close callback if provided
         if self.on_close:

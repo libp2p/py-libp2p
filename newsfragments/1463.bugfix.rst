@@ -1,3 +1,0 @@
-GossipSub ``ControlIHave`` / ``ControlIWant`` ``messageIDs`` are now opaque
-bytes (matching the GossipSub RPC schema and ``ControlIDontWant``), so binary
-message IDs no longer raise ``UnicodeDecodeError`` on the control path.
