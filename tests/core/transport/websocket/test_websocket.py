@@ -837,6 +837,13 @@ def test_wss_multiaddr_parsing():
     assert parsed.rest_multiaddr.value_for_protocol("ip4") == "127.0.0.1"
     assert parsed.rest_multiaddr.value_for_protocol("tcp") == "8080"
 
+    # Test /tls/sni/<name>/ws format
+    sni_ma = Multiaddr("/ip4/127.0.0.1/tcp/8080/tls/sni/example.com/ws")
+    parsed = parse_websocket_multiaddr(sni_ma)
+    assert parsed.is_wss
+    assert parsed.sni == "example.com"
+    assert str(parsed.rest_multiaddr) == "/ip4/127.0.0.1/tcp/8080"
+
     # Test regular /ws format
     ws_ma = Multiaddr("/ip4/127.0.0.1/tcp/8080/ws")
     parsed = parse_websocket_multiaddr(ws_ma)
@@ -1351,15 +1358,14 @@ async def test_sni_resolution_limitation():
 @pytest.mark.trio
 async def test_websocket_transport_can_dial():
     """Test WebSocket transport CanDial functionality similar to Go implementation."""
-    # upgrader = create_upgrader()  # Not used in this test
-    # transport = WebsocketTransport(upgrader)  # Not used in this test
+    transport = WebsocketTransport(create_upgrader())
 
     # Test valid WebSocket addresses that should be dialable
     valid_addresses = [
         "/ip4/127.0.0.1/tcp/5555/ws",
         "/ip4/127.0.0.1/tcp/5555/wss",
         "/ip4/127.0.0.1/tcp/5555/tls/ws",
-        # Note: SNI addresses not supported by Python multiaddr library
+        "/ip4/127.0.0.1/tcp/5555/tls/sni/example.com/ws",
     ]
 
     for addr_str in valid_addresses:
@@ -1368,6 +1374,7 @@ async def test_websocket_transport_can_dial():
         assert is_valid_websocket_multiaddr(maddr), (
             f"Address {addr_str} should be valid"
         )
+        assert transport.can_dial(maddr), f"Address {addr_str} should be dialable"
 
     # Test invalid addresses that should not be dialable
     invalid_addresses = [
@@ -1551,6 +1558,105 @@ async def test_dnsaddr_address_is_resolved_before_dialing(nursery, monkeypatch):
     with pytest.raises(OpenConnectionError):
         await transport.dial(Multiaddr("/dnsaddr/bootstrap.example/tcp/443/wss"))
     assert [str(m) for m in dialed] == ["/dns4/edge.example/tcp/443/wss"]
+
+
+async def _record_wss_dial(
+    nursery: Any, tmp_path: Any, address: str
+) -> tuple[list[str | None], str, int]:
+    """
+    Dial ``address`` against a local TLS server and return what the server saw.
+
+    ``address`` takes the server's port as ``{port}``. Returns the server name
+    of each TLS handshake as the server's ``sni_callback`` received it (None
+    when the client sent none), the WebSocket upgrade request, and the port.
+    The server never answers the upgrade, so the dial itself fails.
+    """
+    server_names: list[str | None] = []
+    requests: list[bytes] = []
+    server_context = _self_signed_tls_server_context(tmp_path)
+
+    def record_server_name(
+        ssl_object: ssl.SSLObject, server_name: str | None, context: ssl.SSLContext
+    ) -> None:
+        server_names.append(server_name)
+
+    server_context.sni_callback = record_server_name
+
+    async def record_request(stream: trio.SocketStream) -> None:
+        tls_stream = trio.SSLStream(stream, server_context, server_side=True)
+        try:
+            requests.append(await tls_stream.receive_some(4096))
+        except trio.BrokenResourceError:
+            pass
+        finally:
+            with trio.CancelScope(shield=True):  # type: ignore[call-arg]
+                await trio.aclose_forcefully(tls_stream)
+
+    listeners = await trio.open_tcp_listeners(0, host="127.0.0.1")
+    port = int(listeners[0].socket.getsockname()[1])
+    nursery.start_soon(trio.serve_listeners, record_request, listeners)
+
+    # The certificate is self-signed: these tests check the name the client
+    # asks for, not whether it accepts the certificate it gets back.
+    transport = WebsocketTransport(
+        create_upgrader(),
+        config=WebsocketConfig(handshake_timeout=2.0, insecure_skip_verify=True),
+    )
+    transport.set_background_nursery(nursery)
+    with pytest.raises(OpenConnectionError):
+        await transport.dial(Multiaddr(address.format(port=port)))
+
+    assert len(requests) == 1, "the server never received the upgrade request"
+    return server_names, requests[0].decode(errors="replace").lower(), port
+
+
+@pytest.mark.trio
+@pytest.mark.parametrize(
+    "address",
+    [
+        "/ip4/127.0.0.1/tcp/{port}/tls/sni/edge.example/ws",
+        "/dns4/localhost/tcp/{port}/tls/sni/edge.example/ws",
+    ],
+)
+async def test_sni_address_is_dialed_with_the_sni_name(nursery, tmp_path, address):
+    """
+    A /tls/sni/<name>/ws address connects to its host and asks for <name>.
+
+    The /sni/ form names the peer next to an address that is already known, so
+    a peer behind a TLS-terminating proxy (a CDN edge, a tunnel) is reachable
+    without DNS. The socket goes to the host before /tls (``edge.example`` does
+    not resolve, so reaching the server at all shows that), while the TLS
+    server name and the Host header carry <name>, as in go-libp2p and
+    js-libp2p.
+    """
+    server_names, request, port = await _record_wss_dial(nursery, tmp_path, address)
+
+    assert server_names == ["edge.example"], (
+        f"the TLS handshake should ask for edge.example, got {server_names}"
+    )
+    assert f"\r\nhost: edge.example:{port}\r\n" in request, request
+    nursery.cancel_scope.cancel()
+
+
+@pytest.mark.trio
+@pytest.mark.parametrize(
+    "address, server_name, host",
+    [
+        # An IP address is never sent as a TLS server name.
+        ("/ip4/127.0.0.1/tcp/{port}/tls/ws", None, "127.0.0.1"),
+        ("/ip4/127.0.0.1/tcp/{port}/wss", None, "127.0.0.1"),
+        ("/dns4/localhost/tcp/{port}/wss", "localhost", "localhost"),
+    ],
+)
+async def test_tls_address_without_sni_is_dialed_by_its_host(
+    nursery, tmp_path, address, server_name, host
+):
+    """Without /sni/ the TLS server name and the Host header stay the host."""
+    server_names, request, port = await _record_wss_dial(nursery, tmp_path, address)
+
+    assert server_names == [server_name]
+    assert f"\r\nhost: {host}:{port}\r\n" in request, request
+    nursery.cancel_scope.cancel()
 
 
 def test_default_client_tls_config_verifies_the_certificate():
