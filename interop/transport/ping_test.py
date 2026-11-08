@@ -71,7 +71,23 @@ def _mk_identify_protobuf_nim_interop(host, observed_multiaddr):
     return msg
 
 
-_identify_mod._mk_identify_protobuf = _mk_identify_protobuf_nim_interop
+def apply_nim_interop_identify_patch() -> None:
+    """
+    Swap in the nim-libp2p-friendly Identify response builder.
+
+    nim-libp2p identify ``decodeMsg`` is strict and aborts on protobuf fields it
+    cannot decode, so strip the problematic fields from Identify responses this
+    process sends. Apply only when the interop ping harness runs — importing this
+    module must not globally replace ``_mk_identify_protobuf`` for other tests in
+    the same process (e.g. pytest-xdist workers that collect helper unit tests).
+    """
+    _identify_mod._mk_identify_protobuf = _mk_identify_protobuf_nim_interop
+
+
+def restore_identify_protobuf_builder() -> None:
+    """Undo :func:`apply_nim_interop_identify_patch`."""
+    _identify_mod._mk_identify_protobuf = _orig_mk_identify_protobuf
+
 
 PING_PROTOCOL_ID = TProtocol("/ipfs/ping/1.0.0")
 PING_LENGTH = 32
@@ -1345,6 +1361,7 @@ class PingTest:
 
     async def run(self) -> None:
         """Main run method."""
+        apply_nim_interop_identify_patch()
         try:
             print("Setting up Redis connection...", file=sys.stderr)
             await self._connect_redis_with_retry()
@@ -1362,6 +1379,7 @@ class PingTest:
             sys.exit(1)
 
         finally:
+            restore_identify_protobuf_builder()
             if self.redis_client:
                 self.redis_client.close()
 
