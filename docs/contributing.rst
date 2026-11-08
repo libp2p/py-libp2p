@@ -101,6 +101,11 @@ Then set up the development environment:
     uv sync --group dev
     uv run pre-commit install
 
+The ``dev`` dependency group also installs the WebRTC (``aiortc`` / ``aioice``)
+and health-demo (``rich``) packages so local tests and demos that need them work
+after a normal contributor setup. The ``[webrtc]`` and ``[health-demo]`` extras
+remain available for non-dev installs that only want those optional features.
+
 **Option 3: Manual setup with pip:**
 
 .. code:: sh
