@@ -1,0 +1,3 @@
+Include WebRTC (``aiortc`` / ``aioice``) and health-demo (``rich``) packages in
+the ``dev`` dependency group so ``uv sync --group dev`` / ``setup_dev`` can run
+those tests and demos, and ignore local go-libp2p harness lock/binary artifacts.
