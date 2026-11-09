@@ -1,0 +1,3 @@
+Apply the nim-libp2p Identify response shim only while the interop ping harness
+runs, instead of at ``ping_test`` import time, so collecting helper unit tests
+no longer clears Identify fields for unrelated DHT tests under pytest-xdist.
