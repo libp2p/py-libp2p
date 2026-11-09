@@ -210,6 +210,7 @@ async def run(port: int, destination: str, use_varint_format: bool = True) -> No
                     print(
                         "\n💡 Make sure the peer is running and the address is correct."
                     )
+                    nursery.cancel_scope.cancel()
                     return
                 else:
                     # Re-raise other exceptions
@@ -268,6 +269,7 @@ async def run(port: int, destination: str, use_varint_format: bool = True) -> No
 
                     traceback.print_exc()
 
+            nursery.cancel_scope.cancel()
             return
 
 
