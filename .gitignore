@@ -185,6 +185,13 @@ env.bak/
 #lockfiles
 uv.lock
 poetry.lock
+
+# go-libp2p interop harness build artifacts (fcntl flock markers + binaries)
+tests/interop/go_libp2p/.setup_lock
+tests/interop/go_libp2p/.setup_wt_lock
+tests/interop/go_libp2p/webrtc_direct/go_webrtc_harness
+tests/interop/go_libp2p/webtransport/go_webtransport_harness
+
 tests/interop/js_libp2p/js_node/node_modules/
 tests/interop/js_libp2p/js_node/package-lock.json
 tests/interop/js_libp2p/js_node/src/node_modules/

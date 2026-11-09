@@ -1061,6 +1061,34 @@ class Swarm(Service, INetworkService):
         jitter = delay * self.retry_config.jitter_factor
         return delay + random.uniform(-jitter, jitter)
 
+    async def _dial_transport(
+        self,
+        transport: ITransport,
+        addr: Multiaddr,
+        source: tuple[str, int] | None,
+    ) -> Any:
+        """
+        Open the transport-level connection to ``addr``, bounded by
+        :attr:`ConnectionConfig.dial_timeout`.
+
+        Without the bound an address that never answers (a SYN that is
+        dropped) waits on the operating system's connect timeout, which is
+        minutes.
+
+        :raises OpenConnectionError: when the dial does not complete in time
+        """
+        timeout = self.connection_config.dial_timeout
+        dial_with_source = getattr(transport, "dial_with_source", None)
+        try:
+            with trio.fail_after(timeout):
+                if source is not None and callable(dial_with_source):
+                    return await cast(Any, dial_with_source)(addr, source)
+                return await transport.dial(addr)
+        except trio.TooSlowError:
+            raise OpenConnectionError(
+                f"dial to {addr} timed out after {timeout}s"
+            ) from None
+
     async def _dial_addr_single_attempt(
         self,
         addr: Multiaddr,
@@ -1128,11 +1156,7 @@ class Swarm(Service, INetworkService):
             if not existing_p2p:
                 addr = Multiaddr(f"{addr}/p2p/{peer_id}")
 
-            dial_with_source = getattr(transport, "dial_with_source", None)
-            if source is not None and callable(dial_with_source):
-                raw_conn = await cast(Any, dial_with_source)(addr, source)
-            else:
-                raw_conn = await transport.dial(addr)
+            raw_conn = await self._dial_transport(transport, addr, source)
 
             # Enable PNET if psk is provided
             if self.psk is not None:
@@ -1449,12 +1473,8 @@ class Swarm(Service, INetworkService):
         if not existing_p2p:
             addr = Multiaddr(f"{addr}/p2p/{peer_id}")
 
-        dial_with_source = getattr(transport, "dial_with_source", None)
         try:
-            if source is not None and callable(dial_with_source):
-                raw_conn = await cast(Any, dial_with_source)(addr, source)
-            else:
-                raw_conn = await transport.dial(addr)
+            raw_conn = await self._dial_transport(transport, addr, source)
             if self.psk is not None:
                 raw_conn = new_protected_conn(raw_conn, self.psk)
         except OpenConnectionError as error:

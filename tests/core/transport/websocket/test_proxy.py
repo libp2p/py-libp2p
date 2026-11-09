@@ -10,16 +10,23 @@ These tests validate:
 """
 
 import os
+import ssl
+from typing import Any
 
 import pytest
+from multiaddr import Multiaddr
 
+from libp2p.transport.exceptions import OpenConnectionError
+from libp2p.transport.upgrader import TransportUpgrader
 from libp2p.transport.websocket import (
     WebsocketConfig,
+    WebsocketTransport,
     WithHandshakeTimeout,
     WithProxy,
     WithProxyFromEnvironment,
     combine_configs,
 )
+from libp2p.transport.websocket.proxy import SOCKSConnectionManager
 from libp2p.transport.websocket.proxy_env import (
     _should_bypass_proxy,
     get_proxy_from_environment,
@@ -400,6 +407,61 @@ async def test_proxy_precedence_config_over_environment():
             os.environ["HTTPS_PROXY"] = original
         else:
             os.environ.pop("HTTPS_PROXY", None)
+
+
+@pytest.mark.trio
+@pytest.mark.parametrize(
+    "address, server_hostname",
+    [
+        ("/ip4/203.0.113.1/tcp/443/tls/sni/edge.example/ws", "edge.example"),
+        ("/ip4/203.0.113.1/tcp/443/wss", "203.0.113.1"),
+    ],
+)
+async def test_proxy_dial_uses_the_sni_name(
+    nursery, monkeypatch, address, server_hostname
+):
+    """
+    A dial through the proxy names the peer the way a direct dial does.
+
+    The tunnel goes to the host before /tls; a /sni/ name is handed on as the
+    TLS server name and the Host header, and without /sni/ that is the host.
+    """
+    calls: list[dict[str, Any]] = []
+
+    async def create_connection(
+        self: SOCKSConnectionManager,
+        nursery: Any,
+        host: str,
+        port: int,
+        ssl_context: ssl.SSLContext | None = None,
+        server_hostname: str | None = None,
+    ) -> Any:
+        calls.append(
+            {
+                "host": host,
+                "port": port,
+                "tls": ssl_context is not None,
+                "server_hostname": server_hostname,
+            }
+        )
+        raise ConnectionError("not dialing in this test")
+
+    monkeypatch.setattr(SOCKSConnectionManager, "create_connection", create_connection)
+    transport = WebsocketTransport(
+        TransportUpgrader({}, {}), config=WithProxy("socks5://127.0.0.1:1080")
+    )
+    transport.set_background_nursery(nursery)
+    with pytest.raises(OpenConnectionError):
+        await transport.dial(Multiaddr(address))
+
+    assert calls == [
+        {
+            "host": "203.0.113.1",
+            "port": 443,
+            "tls": True,
+            "server_hostname": server_hostname,
+        }
+    ]
 
 
 @pytest.mark.integration

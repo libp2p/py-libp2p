@@ -1,0 +1,1 @@
+Fixed nim-libp2p interop CI by migrating the Nim echo server to the v2 ``Rng`` API and pinning nim-libp2p so the echo binary builds again.

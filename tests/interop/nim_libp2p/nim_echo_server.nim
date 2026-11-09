@@ -50,7 +50,7 @@ proc new(T: typedesc[EchoProto]): T =
 ##
 # Create QUIC-enabled switch
 ##
-proc createSwitch(ma: MultiAddress, rng: ref HmacDrbgContext): Switch =
+proc createSwitch(ma: MultiAddress, rng: Rng): Switch =
   var switch = SwitchBuilder
     .new()
     .withRng(rng)

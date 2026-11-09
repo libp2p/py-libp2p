@@ -327,3 +327,45 @@ async def test_swarm_backward_compatibility():
 
 if __name__ == "__main__":
     pytest.main([__file__])
+
+
+class _UnansweredTransport:
+    """A transport whose dial never completes, like a SYN nobody answers."""
+
+    async def dial(self, maddr):
+        await trio.sleep_forever()
+
+
+def _swarm_with_unanswered_transport() -> tuple[Swarm, ID]:
+    from libp2p.crypto.ed25519 import create_new_key_pair
+
+    swarm = Swarm(ID(b"QmTest"), Mock(), Mock(), [Mock()])
+    transport_manager = Mock()
+    transport_manager.transport_for_dialing.return_value = _UnansweredTransport()
+    swarm.transport_manager = transport_manager
+    return swarm, ID.from_pubkey(create_new_key_pair().public_key)
+
+
+@pytest.mark.trio
+@pytest.mark.parametrize("responder", [False, True])
+async def test_dial_bounded_by_dial_timeout(autojump_clock, responder):
+    """
+    An unanswered dial fails at ConnectionConfig.dial_timeout instead of
+    waiting on the operating system's connect timeout.
+    """
+    swarm, peer = _swarm_with_unanswered_transport()
+    addr = Multiaddr("/ip4/127.0.0.1/tcp/4001")
+    if responder:
+        dial = swarm.dial_addr_as_responder
+    else:
+        dial = swarm._dial_addr_single_attempt
+
+    start = trio.current_time()
+    with pytest.raises(SwarmException) as excinfo:
+        with trio.fail_after(60):
+            await dial(addr, peer)
+
+    assert trio.current_time() - start == pytest.approx(
+        swarm.connection_config.dial_timeout
+    )
+    assert "timed out" in str(excinfo.value.__cause__)

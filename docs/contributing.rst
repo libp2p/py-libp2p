@@ -23,6 +23,16 @@ Python's built-in ``venv`` module. Instructions vary by platform:
 
     py-libp2p contributor setup is currently supported on Python versions ``<= 3.13``.
 
+.. warning::
+
+    **CA certificate security incident (October 2026).** ``pip < 26.2.2`` and
+    ``uv < 0.13.4`` trust the compromised eMudhra / emSign CA certificates, so
+    upgrade them before installing dependencies, and rebuild container images
+    with layer caching disabled. See the warning in :doc:`install` for the full
+    list of required versions and the upstream advisory, and
+    `Discussion #1570 <https://github.com/libp2p/py-libp2p/discussions/1570>`_
+    for project-specific local-dev notes.
+
 Linux Setup
 ^^^^^^^^^^^
 
@@ -70,7 +80,7 @@ Or using pip:
 
 .. code:: sh
 
-    pip install uv
+    pip install "uv>=0.13.4"
 
 Then set up the development environment:
 
@@ -80,6 +90,11 @@ Then set up the development environment:
     uv sync --group dev
     uv run pre-commit install
 
+The ``dev`` dependency group also installs the WebRTC (``aiortc`` / ``aioice``)
+and health-demo (``rich``) packages so local tests and demos that need them work
+after a normal contributor setup. The ``[webrtc]`` and ``[health-demo]`` extras
+remain available for non-dev installs that only want those optional features.
+
 **Option 3: Manual setup with pip:**
 
 .. code:: sh
@@ -87,12 +102,13 @@ Then set up the development environment:
     cd py-libp2p
     python3 -m venv .venv
     . .venv/bin/activate
-    pip install --upgrade pip  # Ensure pip >= 25.1 for PEP 735 support
+    pip install --upgrade "pip>=26.2.2"  # PEP 735 needs >= 25.1; eMudhra/emSign CA fix needs >= 26.2.2
     pip install --group dev -e .
     pre-commit install
 
-**Note:** This project uses PEP 735 ``[dependency-groups]`` which requires pip >= 25.1.
-If you have an older pip version, upgrade it first.
+**Note:** This project uses PEP 735 ``[dependency-groups]`` which requires pip >= 25.1;
+after the eMudhra/emSign CA incident, use pip >= 26.2.2. If you have an older pip
+version, upgrade it first.
 
 An alternative using ``virtualenv``:
 
@@ -101,7 +117,7 @@ An alternative using ``virtualenv``:
     cd py-libp2p
     virtualenv -p python .venv
     . .venv/bin/activate
-    pip install --upgrade pip  # Ensure pip >= 25.1 for PEP 735 support
+    pip install --upgrade "pip>=26.2.2"  # PEP 735 needs >= 25.1; eMudhra/emSign CA fix needs >= 26.2.2
     pip install --group dev -e .
     pre-commit install
 
@@ -153,7 +169,7 @@ Or using pip:
 
 .. code:: sh
 
-    pip install uv
+    pip install "uv>=0.13.4"
 
 Then set up the development environment:
 
@@ -170,12 +186,13 @@ Then set up the development environment:
     cd py-libp2p
     python3 -m venv .venv
     . .venv/bin/activate
-    pip install --upgrade pip  # Ensure pip >= 25.1 for PEP 735 support
+    pip install --upgrade "pip>=26.2.2"  # PEP 735 needs >= 25.1; eMudhra/emSign CA fix needs >= 26.2.2
     CFLAGS="$(pkg-config --cflags gmp)" LDFLAGS="$(pkg-config --libs gmp)" pip install --group dev -e .
     pre-commit install
 
-**Note:** This project uses PEP 735 ``[dependency-groups]`` which requires pip >= 25.1.
-If you have an older pip version, upgrade it first.
+**Note:** This project uses PEP 735 ``[dependency-groups]`` which requires pip >= 25.1;
+after the eMudhra/emSign CA incident, use pip >= 26.2.2. If you have an older pip
+version, upgrade it first.
 
 An alternative using ``virtualenv``:
 
@@ -184,7 +201,7 @@ An alternative using ``virtualenv``:
     cd py-libp2p
     virtualenv -p python .venv
     . .venv/bin/activate
-    pip install --upgrade pip  # Ensure pip >= 25.1 for PEP 735 support
+    pip install --upgrade "pip>=26.2.2"  # PEP 735 needs >= 25.1; eMudhra/emSign CA fix needs >= 26.2.2
     pip install --group dev -e .
     pre-commit install
 
@@ -259,7 +276,7 @@ Setup Steps
    .. code:: powershell
 
         # Using pip
-        pip install uv
+        pip install "uv>=0.13.4"
 
         # Or using winget
         winget install --id=astral-sh.uv
@@ -275,12 +292,13 @@ Setup Steps
 
    .. code:: powershell
 
-        pip install --upgrade pip  # Ensure pip >= 25.1 for PEP 735 support
+        pip install --upgrade "pip>=26.2.2"  # PEP 735 needs >= 25.1; eMudhra/emSign CA fix needs >= 26.2.2
         pip install --group dev -e .
         pre-commit install
 
-   **Note:** This project uses PEP 735 ``[dependency-groups]`` which requires pip >= 25.1.
-   If you have an older pip version, upgrade it first.
+   **Note:** This project uses PEP 735 ``[dependency-groups]`` which requires pip >= 25.1;
+   after the eMudhra/emSign CA incident, use pip >= 26.2.2. If you have an older pip
+   version, upgrade it first.
 
 4. **Verify Setup**
    - Run the tests to ensure everything works:

@@ -577,7 +577,19 @@ class YamuxStream(IMuxedStream):
             # This path should no longer be hit for FIN, as it's raised in the loop
             return b""
         else:
-            data = await self.conn.read_stream(self.stream_id, n)
+            try:
+                data = await self.conn.read_stream(self.stream_id, n)
+            except MuxedStreamEOF:
+                # A remote RST drops the stream's bookkeeping as soon as its
+                # receive buffer is drained, so read_stream() can no longer
+                # tell a reset stream from a closed one and reports EOF. This
+                # stream object still knows, which is what the n == -1 path
+                # above relies on; without this a caller reading a body with
+                # no declared length cannot tell a truncated one from a
+                # complete one.
+                if self.reset_received:
+                    raise MuxedStreamReset("Stream was reset") from None
+                raise
             await self._auto_tune_and_send_window_update(bytes_read=len(data))
             return data
 
