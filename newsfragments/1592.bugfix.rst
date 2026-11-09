@@ -1,0 +1,1 @@
+Prevent eviction of the local peer identity from the peerstore when exceeding max_peers, and register host transport listen addresses into the peerstore with permanent TTL on host startup.
