@@ -811,11 +811,7 @@ class Swarm(Service, INetworkService):
             # Filter out private / loopback / link-local addresses if public
             # addresses are available. This prevents dialing unroutable private
             # LAN/Docker IPs advertised by DHT peers over the internet.
-            public_addrs = [
-                a
-                for a in allowed_addrs
-                if is_public_or_dns_address(a)
-            ]
+            public_addrs = [a for a in allowed_addrs if is_public_or_dns_address(a)]
             if public_addrs:
                 allowed_addrs = public_addrs
             else:
@@ -901,9 +897,7 @@ class Swarm(Service, INetworkService):
             if unbacked_addrs:
                 allowed_addrs = unbacked_addrs
             else:
-                logger.debug(
-                    "All addresses for peer %s are in dial backoff", peer_id
-                )
+                logger.debug("All addresses for peer %s are in dial backoff", peer_id)
                 raise SwarmDialBackoffError(
                     f"All addresses for peer {peer_id} are currently in dial backoff",
                     peer_id=peer_id,
@@ -1269,7 +1263,8 @@ class Swarm(Service, INetworkService):
                 return swarm_conn
             except BaseException:
                 # Clean up on failure or cancellation
-                with trio.CancelScope(shield=True):
+                with trio.CancelScope() as cleanup_scope:
+                    cleanup_scope.shield = True
                     try:
                         await raw_conn.close()
                     except Exception:
@@ -1290,7 +1285,8 @@ class Swarm(Service, INetworkService):
             )
         except BaseException:
             # Ensure raw_conn is closed if upgrade fails or is cancelled
-            with trio.CancelScope(shield=True):
+            with trio.CancelScope() as cleanup_scope:
+                cleanup_scope.shield = True
                 try:
                     await raw_conn.close()
                 except Exception:
@@ -1376,7 +1372,8 @@ class Swarm(Service, INetworkService):
             raise SwarmException(f"failed to upgrade mux for peer {peer_id}") from error
         except BaseException:
             # Ensure cleanup on any unexpected exception or cancellation
-            with trio.CancelScope(shield=True):
+            with trio.CancelScope() as cleanup_scope:
+                cleanup_scope.shield = True
                 if secured_conn is not None:
                     try:
                         await secured_conn.close()
@@ -2110,6 +2107,7 @@ class Swarm(Service, INetworkService):
                 if conn_closed_event is not None and hasattr(conn_closed_event, "wait"):
                     with trio.CancelScope() as scope:
                         async with trio.open_nursery() as n:
+
                             async def _wait_closed() -> None:
                                 await conn_closed_event.wait()
                                 scope.cancel()
@@ -2138,12 +2136,12 @@ class Swarm(Service, INetworkService):
             muxed_conn = await self.upgrade_inbound_raw_conn(raw_conn, maddr)
             # Keep handler alive until the connection is closed or the swarm stops
             inbound_closed_event: Any = getattr(muxed_conn, "event_closed", None)
-            if (
-                inbound_closed_event is not None
-                and hasattr(inbound_closed_event, "wait")
+            if inbound_closed_event is not None and hasattr(
+                inbound_closed_event, "wait"
             ):
                 with trio.CancelScope() as scope:
                     async with trio.open_nursery() as n:
+
                         async def _wait_closed() -> None:
                             await inbound_closed_event.wait()
                             scope.cancel()

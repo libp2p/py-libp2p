@@ -503,7 +503,8 @@ class TCP(ITransport):
             read_write_closer = TrioTCPStream(stream)
             return RawConnection(read_write_closer, True)
         except BaseException:
-            with trio.CancelScope(shield=True):
+            with trio.CancelScope() as cancel_scope:
+                cancel_scope.shield = True
                 await stream.aclose()
             raise
 

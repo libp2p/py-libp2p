@@ -4,6 +4,7 @@ import pytest
 from multiaddr import Multiaddr
 
 from libp2p.crypto.rsa import create_new_key_pair
+from libp2p.custom_types import TProtocol
 from libp2p.network.backoff import DialBackoff
 from libp2p.network.exceptions import SwarmDialBackoffError
 from libp2p.network.swarm import Swarm
@@ -82,7 +83,9 @@ async def test_swarm_dial_backoff_skips_backed_off_peer():
     peerstore = PeerStore()
     tcp = TCP()
     upgrader = TransportUpgrader(
-        secure_transports_by_protocol={"/plaintext": InsecureTransport(key_pair)},
+        secure_transports_by_protocol={
+            TProtocol("/plaintext"): InsecureTransport(key_pair)
+        },
         muxer_transports_by_protocol={},
     )
     swarm = Swarm(peer_id, peerstore, upgrader, transports=[tcp])

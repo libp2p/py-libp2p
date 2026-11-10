@@ -1739,7 +1739,8 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         # Shield entire cleanup from caller cancellation so stream cleanup,
         # callbacks, and socket close are never aborted prematurely.
-        with trio.CancelScope(shield=True):
+        with trio.CancelScope() as cleanup_scope:
+            cleanup_scope.shield = True
             try:
                 # Close all streams gracefully, but limit concurrency to prevent
                 # excessive CPU usage when many streams fail simultaneously
