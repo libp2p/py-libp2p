@@ -483,6 +483,15 @@ class PeerRouting(IPeerRouting):
                                 except Exception:
                                     pass  # Skip invalid addresses
                             if addrs:
+                                from libp2p.utils.address_validation import (
+                                    is_public_or_dns_address,
+                                )
+
+                                public_addrs = [
+                                    a for a in addrs if is_public_or_dns_address(a)
+                                ]
+                                if public_addrs:
+                                    addrs = public_addrs
                                 self.host.get_peerstore().add_addrs(
                                     new_peer_id, addrs, 3600
                                 )

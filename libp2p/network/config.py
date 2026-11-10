@@ -22,11 +22,14 @@ MAX_PEER_ADDRS_TO_DIAL = 25
 
 # Default timeout values (in seconds)
 DIAL_TIMEOUT = 10.0  # 10_000ms
+# 5_000ms for local/private multiaddrs (matches go-libp2p dialTimeoutLocal)
+DIAL_TIMEOUT_LOCAL = 5.0
 CONNECTION_CLOSE_TIMEOUT = 1.0  # 1_000ms
 INBOUND_UPGRADE_TIMEOUT = 10.0  # 10_000ms
 OUTBOUND_UPGRADE_TIMEOUT = 10.0  # 10_000ms
 OUTBOUND_STREAM_PROTOCOL_NEGOTIATION_TIMEOUT = 10.0  # 10_000ms
 INBOUND_STREAM_PROTOCOL_NEGOTIATION_TIMEOUT = 10.0  # 10_000ms
+MAX_CONCURRENT_DIALS = 160  # Matches go-libp2p ConcurrentFdDials = 160
 
 # Auto-connection settings
 AUTO_CONNECT_INTERVAL = 30.0  # Interval in seconds between auto-connect attempts
@@ -148,6 +151,8 @@ class ConnectionConfig:
 
     # Timeout configuration
     dial_timeout: float = DIAL_TIMEOUT
+    dial_timeout_local: float | None = None
+    max_concurrent_dials: int = MAX_CONCURRENT_DIALS
     connection_close_timeout: float = CONNECTION_CLOSE_TIMEOUT
     inbound_upgrade_timeout: float = INBOUND_UPGRADE_TIMEOUT
     outbound_upgrade_timeout: float = OUTBOUND_UPGRADE_TIMEOUT

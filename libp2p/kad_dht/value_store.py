@@ -486,6 +486,15 @@ class ValueStore:
                                 # Per spec: store addresses in peerbook
                                 if peer_proto.addrs:
                                     addrs = [Multiaddr(a) for a in peer_proto.addrs]
+                                    from libp2p.utils.address_validation import (
+                                        is_public_or_dns_address,
+                                    )
+
+                                    public_addrs = [
+                                        a for a in addrs if is_public_or_dns_address(a)
+                                    ]
+                                    if public_addrs:
+                                        addrs = public_addrs
                                     self.host.get_peerstore().add_addrs(
                                         closer_id, addrs, 600
                                     )
