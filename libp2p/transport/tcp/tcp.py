@@ -84,39 +84,43 @@ async def _open_reuseport_listeners(
 
     listeners: list[trio.SocketListener] = []
     last_error: Exception | None = None
-    for family, ip in targets:
-        try:
-            sock = trio.socket.socket(family, stdlib_socket.SOCK_STREAM)
-        except OSError as e:
-            last_error = e
-            logger.debug("reuseport socket create for %s:%d failed: %s", ip, port, e)
-            continue
-        _set_reuse_flags(sock)
-        try:
-            await sock.bind((ip, port))
-            sock.listen(128)
-        except OSError as e:
-            last_error = e
-            logger.debug("reuseport listen on %s:%d failed: %s", ip, port, e)
+    try:
+        for family, ip in targets:
             try:
-                sock.close()
+                sock = trio.socket.socket(family, stdlib_socket.SOCK_STREAM)
+            except OSError as e:
+                last_error = e
+                logger.debug(
+                    "reuseport socket create for %s:%d failed: %s", ip, port, e
+                )
+                continue
+            try:
+                _set_reuse_flags(sock)
+                await sock.bind((ip, port))
+                sock.listen(128)
+                listeners.append(trio.SocketListener(sock))
+            except BaseException as e:
+                last_error = e if isinstance(e, Exception) else None
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+                if not isinstance(e, OSError):
+                    raise
+                logger.debug("reuseport listen on %s:%d failed: %s", ip, port, e)
+                continue
+        if not listeners:
+            raise OpenConnectionError(
+                f"Failed to listen on {host}:{port}: {last_error}"
+            )
+        return listeners
+    except BaseException:
+        for listener in listeners:
+            try:
+                listener.socket.close()
             except Exception:
                 pass
-            continue
-        # SocketListener requires an already-listening socket: wrap last.
-        try:
-            listeners.append(trio.SocketListener(sock))
-        except Exception as e:
-            last_error = e
-            logger.debug("SocketListener wrap for %s:%d failed: %s", ip, port, e)
-            try:
-                sock.close()
-            except Exception:
-                pass
-            continue
-    if not listeners:
-        raise OpenConnectionError(f"Failed to listen on {host}:{port}: {last_error}")
-    return listeners
+        raise
 
 
 async def _open_tcp_stream_from(
@@ -138,35 +142,40 @@ async def _open_tcp_stream_from(
         sock = trio.socket.socket(family, stdlib_socket.SOCK_STREAM)
     except OSError as e:
         raise OpenConnectionError(f"Failed to create TCP socket: {e}") from e
-    _set_reuse_flags(sock)
+
     try:
-        await sock.bind((src_ip, src_port))
-    except OSError as e:
-        # Platform cannot share the listen port for outbound dials (e.g.
-        # macOS refuses connect() from a bound listening port). Fall back
-        # to an ephemeral source: direct connections still work, only NAT
-        # hole punching (which needs the bound source) is unavailable there.
-        logger.debug(
-            "Hole-punch source bind %s:%d failed (%s); using ephemeral source",
-            src_ip,
-            src_port,
-            e,
-        )
-        sock.close()
+        _set_reuse_flags(sock)
         try:
-            return await trio.open_tcp_stream(host, port)
-        except OSError as conn_e:
+            await sock.bind((src_ip, src_port))
+        except OSError as e:
+            logger.debug(
+                "Hole-punch source bind %s:%d failed (%s); using ephemeral source",
+                src_ip,
+                src_port,
+                e,
+            )
+            sock.close()
+            try:
+                return await trio.open_tcp_stream(host, port)
+            except OSError as conn_e:
+                raise OpenConnectionError(
+                    f"Failed to connect {host}:{port}: {conn_e}"
+                ) from conn_e
+
+        try:
+            await sock.connect((host, port))
+        except OSError as e:
+            sock.close()
             raise OpenConnectionError(
-                f"Failed to connect {host}:{port}: {conn_e}"
-            ) from conn_e
-    try:
-        await sock.connect((host, port))
-    except OSError as e:
-        sock.close()
-        raise OpenConnectionError(
-            f"Failed to connect {host}:{port} from {src_ip}:{src_port}: {e}"
-        ) from e
-    return trio.SocketStream(sock)
+                f"Failed to connect {host}:{port} from {src_ip}:{src_port}: {e}"
+            ) from e
+        return trio.SocketStream(sock)
+    except BaseException:
+        try:
+            sock.close()
+        except Exception:
+            pass
+        raise
 
 
 class TCPListener(IListener):
@@ -490,8 +499,13 @@ class TCP(ITransport):
                 f"An unexpected error occurred when dialing {maddr}: {error}"
             ) from error
 
-        read_write_closer = TrioTCPStream(stream)
-        return RawConnection(read_write_closer, True)
+        try:
+            read_write_closer = TrioTCPStream(stream)
+            return RawConnection(read_write_closer, True)
+        except BaseException:
+            with trio.CancelScope(shield=True):
+                await stream.aclose()
+            raise
 
     def create_listener(self, handler_function: THandler) -> TCPListener:
         """

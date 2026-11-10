@@ -68,6 +68,7 @@ from libp2p.transport.upgrader import (
 from libp2p.utils.address_validation import (
     has_public_ipv6,
     is_public_ipv6_address,
+    is_public_or_dns_address,
     is_relay_address,
 )
 from libp2p.utils.multiaddr_utils import (
@@ -804,16 +805,26 @@ class Swarm(Service, INetworkService):
                     f"All addresses for peer {peer_id} blocked by connection gate"
                 )
 
-            # Filter out loopback addresses if public addresses are available
-            # This prevents the node from dialing itself when DHT peers
-            # advertise localhost
+            # Filter out private / loopback / link-local addresses if public
+            # addresses are available. This prevents dialing unroutable private
+            # LAN/Docker IPs advertised by DHT peers over the internet.
             public_addrs = [
                 a
                 for a in allowed_addrs
-                if "/ip4/127." not in str(a) and "/ip6/::1" not in str(a)
+                if is_public_or_dns_address(a)
             ]
             if public_addrs:
                 allowed_addrs = public_addrs
+            else:
+                # If only local/private addresses exist (e.g. local dev / testing),
+                # filter loopback if non-loopback exists
+                non_loopback = [
+                    a
+                    for a in allowed_addrs
+                    if "/ip4/127." not in str(a) and "/ip6/::1" not in str(a)
+                ]
+                if non_loopback:
+                    allowed_addrs = non_loopback
 
             # Skip relay (p2p-circuit) addresses: this node has no relay
             # transport, so these can never be dialed (mirrors go-libp2p,
@@ -1226,15 +1237,16 @@ class Swarm(Service, INetworkService):
                 return swarm_conn
             except BaseException:
                 # Clean up on failure or cancellation
-                try:
-                    await raw_conn.close()
-                except Exception:
-                    pass
-                try:
-                    if pre_scope is not None and hasattr(pre_scope, "close"):
-                        pre_scope.close()
-                except Exception:
-                    pass
+                with trio.CancelScope(shield=True):
+                    try:
+                        await raw_conn.close()
+                    except Exception:
+                        pass
+                    try:
+                        if pre_scope is not None and hasattr(pre_scope, "close"):
+                            pre_scope.close()
+                    except Exception:
+                        pass
                 raise
 
         logger.debug("dialed peer %s over base transport", peer_id)
@@ -1246,15 +1258,16 @@ class Swarm(Service, INetworkService):
             )
         except BaseException:
             # Ensure raw_conn is closed if upgrade fails or is cancelled
-            try:
-                await raw_conn.close()
-            except Exception:
-                pass
-            try:
-                if pre_scope is not None and hasattr(pre_scope, "close"):
-                    pre_scope.close()
-            except Exception:
-                pass
+            with trio.CancelScope(shield=True):
+                try:
+                    await raw_conn.close()
+                except Exception:
+                    pass
+                try:
+                    if pre_scope is not None and hasattr(pre_scope, "close"):
+                        pre_scope.close()
+                except Exception:
+                    pass
             raise
 
         logger.debug("successfully dialed peer %s", peer_id)
@@ -1331,20 +1344,21 @@ class Swarm(Service, INetworkService):
             raise SwarmException(f"failed to upgrade mux for peer {peer_id}") from error
         except BaseException:
             # Ensure cleanup on any unexpected exception or cancellation
-            if secured_conn is not None:
+            with trio.CancelScope(shield=True):
+                if secured_conn is not None:
+                    try:
+                        await secured_conn.close()
+                    except Exception:
+                        pass
                 try:
-                    await secured_conn.close()
+                    await raw_conn.close()
                 except Exception:
                     pass
-            try:
-                await raw_conn.close()
-            except Exception:
-                pass
-            try:
-                if pre_scope is not None and hasattr(pre_scope, "close"):
-                    pre_scope.close()
-            except Exception:
-                pass
+                try:
+                    if pre_scope is not None and hasattr(pre_scope, "close"):
+                        pre_scope.close()
+                except Exception:
+                    pass
             raise
 
         logger.debug("Swarm: muxer upgrade completed for peer %s", peer_id)
@@ -2059,9 +2073,23 @@ class Swarm(Service, INetworkService):
                     "successfully opened pre-multiplexed inbound connection (peer=%s)",
                     peer_id,
                 )
-                # Intentional barrier: keep handler alive so the connection
-                # stays open for the duration of the swarm's lifetime.
-                await self.manager.wait_finished()
+                # Keep handler alive until the connection is closed or the swarm stops
+                conn_closed_event: Any = getattr(muxed_conn, "event_closed", None)
+                if conn_closed_event is not None and hasattr(conn_closed_event, "wait"):
+                    with trio.CancelScope() as scope:
+                        async with trio.open_nursery() as n:
+                            async def _wait_closed() -> None:
+                                await conn_closed_event.wait()
+                                scope.cancel()
+
+                            async def _wait_mgr() -> None:
+                                await self.manager.wait_finished()
+                                scope.cancel()
+
+                            n.start_soon(_wait_closed)
+                            n.start_soon(_wait_mgr)
+                else:
+                    await self.manager.wait_finished()
             except Exception:
                 await read_write_closer.close()
                 # Emit event for incoming conn failure
@@ -2075,9 +2103,27 @@ class Swarm(Service, INetworkService):
         raw_conn = None
         try:
             raw_conn = RawConnection(read_write_closer, False)
-            await self.upgrade_inbound_raw_conn(raw_conn, maddr)
-            # Intentional barrier: keep handler alive.
-            await self.manager.wait_finished()
+            muxed_conn = await self.upgrade_inbound_raw_conn(raw_conn, maddr)
+            # Keep handler alive until the connection is closed or the swarm stops
+            inbound_closed_event: Any = getattr(muxed_conn, "event_closed", None)
+            if (
+                inbound_closed_event is not None
+                and hasattr(inbound_closed_event, "wait")
+            ):
+                with trio.CancelScope() as scope:
+                    async with trio.open_nursery() as n:
+                        async def _wait_closed() -> None:
+                            await inbound_closed_event.wait()
+                            scope.cancel()
+
+                        async def _wait_mgr() -> None:
+                            await self.manager.wait_finished()
+                            scope.cancel()
+
+                        n.start_soon(_wait_closed)
+                        n.start_soon(_wait_mgr)
+            else:
+                await self.manager.wait_finished()
         except Exception as e:
             logger.debug("Error handling incoming connection: %s", e)
             try:

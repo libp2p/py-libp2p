@@ -408,9 +408,17 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
                 logger.debug(f"Initiated QUIC connection to {self._remote_addr}")
 
-        except Exception as e:
-            logger.error(f"Failed to initiate connection: {e}")
-            raise QUICConnectionError(f"Connection initiation failed: {e}") from e
+        except BaseException as e:
+            if self._socket and self._owns_socket:
+                try:
+                    self._socket.close()
+                except Exception:
+                    pass
+                self._socket = None
+            if isinstance(e, Exception) and not isinstance(e, trio.Cancelled):
+                logger.error(f"Failed to initiate connection: {e}")
+                raise QUICConnectionError(f"Connection initiation failed: {e}") from e
+            raise
 
     async def connect(self, nursery: trio.Nursery) -> None:
         """
@@ -1434,53 +1442,56 @@ class QUICConnection(IRawConnection, IMuxedConn):
         logger.debug(f"QUIC connection terminated: {event.reason_phrase}")
 
         # Close all streams
-        for stream in list(self._streams.values()):
-            if event.error_code:
-                await stream.handle_reset(event.error_code)
-            else:
-                await stream.close()
-
-        self._streams.clear()
-        self._stream_cache.clear()  # Clear cache too
-        self._closed = True
-        self._closed_event.set()
-
-        # Release resource scope if present (mirrors close())
         try:
-            scope = getattr(self, "_resource_scope", None)
-            if scope is not None:
-                if hasattr(scope, "close"):
-                    scope.close()
-                elif hasattr(scope, "release"):
-                    scope.release()
-                elif hasattr(scope, "done"):
-                    scope.done()
+            for stream in list(self._streams.values()):
+                if event.error_code:
+                    await stream.handle_reset(event.error_code)
+                else:
+                    await stream.close()
         except Exception as e:
-            logger.debug(f"Error releasing resource scope: {e}")
+            logger.debug(f"Error resetting streams on termination: {e}")
+        finally:
+            self._streams.clear()
+            self._stream_cache.clear()  # Clear cache too
+            self._closed = True
+            self._closed_event.set()
 
-        self._stream_accept_event.set()
-        logger.debug(f"Woke up pending accept_stream() calls, {id(self)}")
-
-        # Ensure socket is closed immediately on connection termination
-        if self._socket and self._owns_socket:
+            # Release resource scope if present (mirrors close())
             try:
-                self._socket.close()
-            except Exception:
-                pass
-            self._socket = None
+                scope = getattr(self, "_resource_scope", None)
+                if scope is not None:
+                    if hasattr(scope, "close"):
+                        scope.close()
+                    elif hasattr(scope, "release"):
+                        scope.release()
+                    elif hasattr(scope, "done"):
+                        scope.done()
+            except Exception as e:
+                logger.debug(f"Error releasing resource scope: {e}")
 
-        # Cancel background tasks
-        if hasattr(self, "_task_cancel_scopes"):
-            for s in list(self._task_cancel_scopes):
+            self._stream_accept_event.set()
+            logger.debug(f"Woke up pending accept_stream() calls, {id(self)}")
+
+            # Ensure socket is closed immediately on connection termination
+            if self._socket and self._owns_socket:
                 try:
-                    s.cancel()
+                    self._socket.close()
                 except Exception:
                     pass
-        if hasattr(self, "_cancel_scope") and self._cancel_scope is not None:
-            try:
-                self._cancel_scope.cancel()
-            except Exception:
-                pass
+                self._socket = None
+
+            # Cancel background tasks
+            if hasattr(self, "_task_cancel_scopes"):
+                for s in list(self._task_cancel_scopes):
+                    try:
+                        s.cancel()
+                    except Exception:
+                        pass
+            if hasattr(self, "_cancel_scope") and self._cancel_scope is not None:
+                try:
+                    self._cancel_scope.cancel()
+                except Exception:
+                    pass
 
         await self._notify_parent_of_termination()
 
@@ -1726,118 +1737,126 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     pass
         logger.debug(f"Closing QUIC connection to {self._remote_peer_id}")
 
-        try:
-            # Close all streams gracefully, but limit concurrency to prevent
-            # excessive CPU usage when many streams fail simultaneously
-            stream_close_tasks = []
-            for stream in list(self._streams.values()):
-                if stream.can_write() or stream.can_read():
-                    stream_close_tasks.append(stream.close)
+        # Shield entire cleanup from caller cancellation so stream cleanup,
+        # callbacks, and socket close are never aborted prematurely.
+        with trio.CancelScope(shield=True):
+            try:
+                # Close all streams gracefully, but limit concurrency to prevent
+                # excessive CPU usage when many streams fail simultaneously
+                stream_close_tasks = []
+                for stream in list(self._streams.values()):
+                    if stream.can_write() or stream.can_read():
+                        stream_close_tasks.append(stream.close)
 
-            if stream_close_tasks and self._nursery:
+                if stream_close_tasks and self._nursery:
+                    try:
+                        # Close streams in batches to prevent overwhelming the system
+                        # when many streams fail simultaneously (e.g., 100 streams)
+                        batch_size = 20  # Close streams in batches of 20
+                        with trio.move_on_after(self.CONNECTION_CLOSE_TIMEOUT):
+                            for i in range(0, len(stream_close_tasks), batch_size):
+                                batch = stream_close_tasks[i : i + batch_size]
+                                async with trio.open_nursery() as close_nursery:
+                                    for task in batch:
+                                        close_nursery.start_soon(task)
+                    except Exception as e:
+                        logger.warning(f"Error during graceful stream close: {e}")
+                        # Force reset remaining streams quickly without batching
+                        # to prevent resource leaks
+                        for stream in list(self._streams.values()):
+                            try:
+                                # Use move_on_after to prevent hanging on stuck streams
+                                with trio.move_on_after(0.1):  # 100ms per stream max
+                                    await stream.reset(error_code=0)
+                            except Exception:
+                                pass
+
+                if self.on_close:
+                    try:
+                        await self.on_close()
+                    except Exception as e:
+                        logger.debug(f"Error in on_close callback: {e}")
+
+                # Close QUIC connection
                 try:
-                    # Close streams in batches to prevent overwhelming the system
-                    # when many streams fail simultaneously (e.g., 100 streams)
-                    batch_size = 20  # Close streams in batches of 20
-                    with trio.move_on_after(self.CONNECTION_CLOSE_TIMEOUT):
-                        for i in range(0, len(stream_close_tasks), batch_size):
-                            batch = stream_close_tasks[i : i + batch_size]
-                            async with trio.open_nursery() as close_nursery:
-                                for task in batch:
-                                    close_nursery.start_soon(task)
-                except Exception as e:
-                    logger.warning(f"Error during graceful stream close: {e}")
-                    # Force reset remaining streams quickly without batching
-                    # to prevent resource leaks
-                    for stream in list(self._streams.values()):
+                    self._quic.close()
+                except Exception:
+                    pass
+
+                # Best-effort transmit close frame (bounded with 0.1s timeout)
+                if self._socket:
+                    try:
+                        with trio.move_on_after(0.1):
+                            await self._transmit()
+                    except Exception:
+                        pass
+
+            except Exception as e:
+                logger.error(f"Error during connection close: {e}")
+            finally:
+                # Guaranteed socket close regardless of any errors/exceptions
+                if self._socket and self._owns_socket:
+                    try:
+                        self._socket.close()
+                    except Exception:
+                        pass
+                    self._socket = None
+
+                self._streams.clear()
+                self._stream_cache.clear()  # Clear cache
+                self._closed_event.set()
+
+                # Cancel background tasks (receiver, event loop, maintenance)
+                if hasattr(self, "_task_cancel_scopes"):
+                    for s in list(self._task_cancel_scopes):
                         try:
-                            # Use move_on_after to prevent hanging on stuck streams
-                            with trio.move_on_after(0.1):  # 100ms per stream max
-                                await stream.reset(error_code=0)
+                            s.cancel()
+                        except Exception:
+                            pass
+                if hasattr(self, "_cancel_scope") and self._cancel_scope is not None:
+                    try:
+                        self._cancel_scope.cancel()
+                    except Exception:
+                        pass
+
+                # Always notify parent transport and listener to remove this connection
+                # from their connection tracking dictionaries to prevent memory leaks.
+                try:
+                    await self._notify_parent_of_termination()
+                except Exception as e:
+                    logger.debug(
+                        f"Error notifying parent of connection termination: {e}"
+                    )
+
+                # Clear internal aioquic event queues and stream maps to free memory
+                # immediately.
+                if self._quic is not None:
+                    if hasattr(self._quic, "_events"):
+                        try:
+                            self._quic._events.clear()
+                        except Exception:
+                            pass
+                    if hasattr(self._quic, "_streams"):
+                        try:
+                            self._quic._streams.clear()
                         except Exception:
                             pass
 
-            if self.on_close:
-                await self.on_close()
+                logger.debug(f"QUIC connection to {self._remote_peer_id} closed")
 
-            # Close QUIC connection
-            try:
-                self._quic.close()
-            except Exception:
-                pass
-
-            # Best-effort transmit close frame (bounded with 0.1s timeout)
-            if self._socket:
+                # Release resource scope if present
                 try:
-                    with trio.move_on_after(0.1):
-                        await self._transmit()
-                except Exception:
-                    pass
-
-            # Guaranteed socket close
-            if self._socket and self._owns_socket:
-                try:
-                    self._socket.close()
-                except Exception:
-                    pass
-                self._socket = None
-
-            self._streams.clear()
-            self._stream_cache.clear()  # Clear cache
-            self._closed_event.set()
-
-            # Immediately cancel background tasks (receiver, event loop, maintenance)
-            if hasattr(self, "_task_cancel_scopes"):
-                for s in list(self._task_cancel_scopes):
-                    try:
-                        s.cancel()
-                    except Exception:
-                        pass
-            if hasattr(self, "_cancel_scope") and self._cancel_scope is not None:
-                try:
-                    self._cancel_scope.cancel()
-                except Exception:
-                    pass
-
-            # Always notify parent transport and listener to remove this connection
-            # from their connection tracking dictionaries to prevent memory leaks.
-            try:
-                await self._notify_parent_of_termination()
-            except Exception as e:
-                logger.debug(f"Error notifying parent of connection termination: {e}")
-
-            # Clear internal aioquic event queues and stream maps to free memory
-            # immediately.
-            if self._quic is not None:
-                if hasattr(self._quic, "_events"):
-                    try:
-                        self._quic._events.clear()
-                    except Exception:
-                        pass
-                if hasattr(self._quic, "_streams"):
-                    try:
-                        self._quic._streams.clear()
-                    except Exception:
-                        pass
-
-            logger.debug(f"QUIC connection to {self._remote_peer_id} closed")
-
-            # Release resource scope if present
-            try:
-                scope = getattr(self, "_resource_scope", None)
-                if scope is not None:
-                    if hasattr(scope, "close"):
-                        scope.close()
-                    elif hasattr(scope, "release"):
-                        scope.release()
-                    elif hasattr(scope, "done"):
-                        scope.done()
-                    self._resource_scope = None
-            except Exception as e:
-                logger.debug(f"Error releasing resource scope: {e}")
-
-        except Exception as e:
-            logger.error(f"Error during connection close: {e}")
+                    scope = getattr(self, "_resource_scope", None)
+                    if scope is not None:
+                        if hasattr(scope, "close"):
+                            scope.close()
+                        elif hasattr(scope, "release"):
+                            scope.release()
+                        elif hasattr(scope, "done"):
+                            scope.done()
+                        self._resource_scope = None
+                except Exception as e:
+                    logger.debug(f"Error releasing resource scope: {e}")
 
     async def _notify_parent_of_termination(self) -> None:
         """
