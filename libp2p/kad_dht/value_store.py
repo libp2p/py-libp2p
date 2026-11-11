@@ -25,6 +25,7 @@ from libp2p.peer.id import (
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
 from libp2p.records.record import make_signed_put_record
+from libp2p.utils.address_validation import is_public_or_dns_address
 from libp2p.utils.varint import read_varint_prefixed_bytes_limited
 
 from .common import (
@@ -486,10 +487,6 @@ class ValueStore:
                                 # Per spec: store addresses in peerbook
                                 if peer_proto.addrs:
                                     addrs = [Multiaddr(a) for a in peer_proto.addrs]
-                                    from libp2p.utils.address_validation import (
-                                        is_public_or_dns_address,
-                                    )
-
                                     public_addrs = [
                                         a for a in addrs if is_public_or_dns_address(a)
                                     ]

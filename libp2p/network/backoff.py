@@ -34,17 +34,34 @@ class DialBackoff:
 
     def is_backed_off(self, peer_id: ID | str, addr: Multiaddr | str) -> bool:
         """Return True if this address for the peer is currently in backoff."""
+        return self.backoff_delay(peer_id, addr) > 0.0
+
+    def backoff_delay(self, peer_id: ID | str, addr: Multiaddr | str) -> float:
+        """Return remaining seconds in backoff, or 0.0 if not backed off."""
         key = (str(peer_id), str(addr))
         entry = self._entries.get(key)
         if entry is None:
-            return False
+            return 0.0
         _tries, until = entry
-        now = time.monotonic()
-        if now < until:
-            return True
-        # Expired: remove and return False
+        remaining = until - time.monotonic()
+        if remaining > 0:
+            return remaining
+        # Expired: remove and return 0.0
         del self._entries[key]
-        return False
+        return 0.0
+
+    def tries(self, peer_id: ID | str, addr: Multiaddr | str) -> int:
+        """Return dial attempt count for this address in active backoff."""
+        key = (str(peer_id), str(addr))
+        entry = self._entries.get(key)
+        if entry is None:
+            return 0
+        tries_count, until = entry
+        if time.monotonic() < until:
+            return tries_count
+        # Expired: remove and return 0
+        del self._entries[key]
+        return 0
 
     def add_backoff(self, peer_id: ID | str, addr: Multiaddr | str) -> None:
         """

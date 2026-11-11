@@ -1441,67 +1441,75 @@ class QUICConnection(IRawConnection, IMuxedConn):
         """Handle connection termination."""
         logger.debug(f"QUIC connection terminated: {event.reason_phrase}")
 
-        # Close all streams
-        try:
-            for stream in list(self._streams.values()):
-                if event.error_code:
-                    await stream.handle_reset(event.error_code)
-                else:
-                    await stream.close()
-        except Exception as e:
-            logger.debug(f"Error resetting streams on termination: {e}")
-        finally:
-            self._streams.clear()
-            self._stream_cache.clear()  # Clear cache too
-            self._closed = True
-            self._closed_event.set()
-
-            # Release resource scope if present (mirrors close())
+        # Shield termination cleanup from caller cancellation so stream cleanup,
+        # callbacks, parent notification, and socket close are never aborted.
+        with trio.CancelScope() as cleanup_scope:
+            cleanup_scope.shield = True
             try:
-                scope = getattr(self, "_resource_scope", None)
-                if scope is not None:
-                    if hasattr(scope, "close"):
-                        scope.close()
-                    elif hasattr(scope, "release"):
-                        scope.release()
-                    elif hasattr(scope, "done"):
-                        scope.done()
-            except Exception as e:
-                logger.debug(f"Error releasing resource scope: {e}")
-
-            self._stream_accept_event.set()
-            logger.debug(f"Woke up pending accept_stream() calls, {id(self)}")
-
-            # Ensure socket is closed immediately on connection termination
-            if self._socket and self._owns_socket:
-                try:
-                    self._socket.close()
-                except Exception:
-                    pass
-                self._socket = None
-
-            # Cancel background tasks
-            if hasattr(self, "_task_cancel_scopes"):
-                for s in list(self._task_cancel_scopes):
+                # Close all streams
+                for stream in list(self._streams.values()):
                     try:
-                        s.cancel()
+                        if event.error_code:
+                            await stream.handle_reset(event.error_code)
+                        else:
+                            await stream.close()
+                    except Exception as e:
+                        logger.debug(f"Error resetting stream on termination: {e}")
+            finally:
+                self._streams.clear()
+                self._stream_cache.clear()  # Clear cache too
+                self._closed = True
+                self._closed_event.set()
+
+                # Release resource scope if present (mirrors close())
+                try:
+                    scope = getattr(self, "_resource_scope", None)
+                    if scope is not None:
+                        if hasattr(scope, "close"):
+                            scope.close()
+                        elif hasattr(scope, "release"):
+                            scope.release()
+                        elif hasattr(scope, "done"):
+                            scope.done()
+                except Exception as e:
+                    logger.debug(f"Error releasing resource scope: {e}")
+
+                self._stream_accept_event.set()
+                logger.debug(f"Woke up pending accept_stream() calls, {id(self)}")
+
+                # Ensure socket is closed immediately on connection termination
+                if self._socket and self._owns_socket:
+                    try:
+                        self._socket.close()
                     except Exception:
                         pass
-            if hasattr(self, "_cancel_scope") and self._cancel_scope is not None:
+                    self._socket = None
+
+                # Cancel background tasks
+                if hasattr(self, "_task_cancel_scopes"):
+                    for s in list(self._task_cancel_scopes):
+                        try:
+                            s.cancel()
+                        except Exception:
+                            pass
+                if hasattr(self, "_cancel_scope") and self._cancel_scope is not None:
+                    try:
+                        self._cancel_scope.cancel()
+                    except Exception:
+                        pass
+
                 try:
-                    self._cancel_scope.cancel()
-                except Exception:
-                    pass
+                    await self._notify_parent_of_termination()
+                except Exception as e:
+                    logger.debug(f"Error in _notify_parent_of_termination: {e}")
 
-        await self._notify_parent_of_termination()
-
-        # Notify swarm/on_close listeners so peer bookkeeping is cleaned up too —
-        # close() does this but this termination path bypassed it entirely.
-        if self.on_close:
-            try:
-                await self.on_close()
-            except Exception as e:
-                logger.debug(f"Error in on_close during termination: {e}")
+                # Notify swarm/on_close listeners so peer bookkeeping is cleaned
+                # up too — close() does this but this termination path bypassed it.
+                if self.on_close:
+                    try:
+                        await self.on_close()
+                    except Exception as e:
+                        logger.debug(f"Error in on_close during termination: {e}")
 
     async def _handle_stream_data(self, event: events.StreamDataReceived) -> None:
         """Handle stream data events - create streams and add to accept queue."""

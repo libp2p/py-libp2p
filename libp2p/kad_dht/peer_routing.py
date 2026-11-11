@@ -22,6 +22,7 @@ from libp2p.peer.peerinfo import (
     PeerInfo,
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
+from libp2p.utils.address_validation import is_public_or_dns_address
 from libp2p.utils.varint import read_varint_prefixed_bytes_limited
 
 from .common import (
@@ -483,10 +484,6 @@ class PeerRouting(IPeerRouting):
                                 except Exception:
                                     pass  # Skip invalid addresses
                             if addrs:
-                                from libp2p.utils.address_validation import (
-                                    is_public_or_dns_address,
-                                )
-
                                 public_addrs = [
                                     a for a in addrs if is_public_or_dns_address(a)
                                 ]

@@ -1,5 +1,3 @@
-import time
-
 import pytest
 from multiaddr import Multiaddr
 
@@ -21,28 +19,29 @@ def test_dial_backoff_quadratic_progression():
     addr = Multiaddr("/ip4/198.51.100.1/tcp/4001")
 
     assert not db.is_backed_off(peer_id, addr)
+    assert db.backoff_delay(peer_id, addr) == 0.0
+    assert db.tries(peer_id, addr) == 0
 
     # First failure: base + coef * 1^2 = 5 + 1 = 6s
-    t0 = time.monotonic()
     db.add_backoff(peer_id, addr)
     assert db.is_backed_off(peer_id, addr)
-    tries, until = db._entries[(str(peer_id), str(addr))]
-    assert tries == 1
-    assert 5.5 <= (until - t0) <= 6.5
+    assert db.tries(peer_id, addr) == 1
+    delay1 = db.backoff_delay(peer_id, addr)
+    assert 5.5 <= delay1 <= 6.5
 
     # Second failure: base + coef * 2^2 = 5 + 4 = 9s
-    t1 = time.monotonic()
     db.add_backoff(peer_id, addr)
-    tries, until = db._entries[(str(peer_id), str(addr))]
-    assert tries == 2
-    assert 8.5 <= (until - t1) <= 9.5
+    assert db.is_backed_off(peer_id, addr)
+    assert db.tries(peer_id, addr) == 2
+    delay2 = db.backoff_delay(peer_id, addr)
+    assert 8.5 <= delay2 <= 9.5
 
     # Third failure: base + coef * 3^2 = 5 + 9 = 14s
-    t2 = time.monotonic()
     db.add_backoff(peer_id, addr)
-    tries, until = db._entries[(str(peer_id), str(addr))]
-    assert tries == 3
-    assert 13.5 <= (until - t2) <= 14.5
+    assert db.is_backed_off(peer_id, addr)
+    assert db.tries(peer_id, addr) == 3
+    delay3 = db.backoff_delay(peer_id, addr)
+    assert 13.5 <= delay3 <= 14.5
 
 
 def test_dial_backoff_clear_on_peer_success():
@@ -70,10 +69,10 @@ def test_dial_backoff_cap_at_max():
     for _ in range(10):
         db.add_backoff(peer_id, addr)
 
-    t0 = time.monotonic()
-    _tries, until = db._entries[(str(peer_id), str(addr))]
+    assert db.is_backed_off(peer_id, addr)
+    assert db.tries(peer_id, addr) == 10
     # Should be capped at max_backoff = 20.0
-    assert (until - t0) <= 20.1
+    assert db.backoff_delay(peer_id, addr) <= 20.1
 
 
 @pytest.mark.trio

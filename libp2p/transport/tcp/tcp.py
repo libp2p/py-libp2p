@@ -481,32 +481,40 @@ class TCP(ITransport):
                 f"Failed to dial {maddr}: Invalid TCP port '{port_str}'."
             )
 
+        stream: trio.SocketStream | None = None
+        raw_conn: IRawConnection | None = None
         try:
             logger.debug("dial tcp %s:%d", host_str, port_int)
-            if source is None:
-                stream = await trio.open_tcp_stream(host_str, port_int)
-            else:
-                stream = await _open_tcp_stream_from(host_str, port_int, source)
-            logger.debug("tcp stream opened to %s:%d", host_str, port_int)
-        except OSError as error:
-            logger.error("Failed to open TCP stream: %s", error)
-            raise OpenConnectionError(
-                f"Failed to open TCP stream to {maddr}: {error}"
-            ) from error
-        except Exception as error:
-            logger.error("Unexpected error opening TCP stream: %s", error)
-            raise OpenConnectionError(
-                f"An unexpected error occurred when dialing {maddr}: {error}"
-            ) from error
+            try:
+                if source is None:
+                    stream = await trio.open_tcp_stream(host_str, port_int)
+                else:
+                    stream = await _open_tcp_stream_from(host_str, port_int, source)
+                logger.debug("tcp stream opened to %s:%d", host_str, port_int)
+            except OSError as error:
+                logger.error("Failed to open TCP stream: %s", error)
+                raise OpenConnectionError(
+                    f"Failed to open TCP stream to {maddr}: {error}"
+                ) from error
+            except Exception as error:
+                logger.error("Unexpected error opening TCP stream: %s", error)
+                raise OpenConnectionError(
+                    f"An unexpected error occurred when dialing {maddr}: {error}"
+                ) from error
 
-        try:
             read_write_closer = TrioTCPStream(stream)
-            return RawConnection(read_write_closer, True)
-        except BaseException:
-            with trio.CancelScope() as cancel_scope:
-                cancel_scope.shield = True
-                await stream.aclose()
-            raise
+            raw_conn = RawConnection(read_write_closer, True)
+            # Ownership transferred to RawConnection
+            stream = None
+        finally:
+            if stream is not None:
+                with trio.CancelScope() as cancel_scope:
+                    cancel_scope.shield = True
+                    await stream.aclose()
+
+        if raw_conn is None:
+            raise OpenConnectionError(f"Failed to initialize TCP connection to {maddr}")
+        return raw_conn
 
     def create_listener(self, handler_function: THandler) -> TCPListener:
         """

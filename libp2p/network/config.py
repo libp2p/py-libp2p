@@ -151,7 +151,7 @@ class ConnectionConfig:
 
     # Timeout configuration
     dial_timeout: float = DIAL_TIMEOUT
-    dial_timeout_local: float | None = None
+    dial_timeout_local: float | None = DIAL_TIMEOUT_LOCAL
     max_concurrent_dials: int = MAX_CONCURRENT_DIALS
     connection_close_timeout: float = CONNECTION_CLOSE_TIMEOUT
     inbound_upgrade_timeout: float = INBOUND_UPGRADE_TIMEOUT
@@ -243,6 +243,9 @@ class ConnectionConfig:
 
         if self.dial_timeout < 0:
             raise ValueError("Dial timeout should be positive")
+
+        if self.dial_timeout_local is not None and self.dial_timeout_local < 0:
+            raise ValueError("Dial timeout local should be positive")
 
         if self.inbound_upgrade_timeout < 0:
             raise ValueError("Inbound upgrade timeout should be positive")
