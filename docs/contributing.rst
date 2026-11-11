@@ -252,22 +252,29 @@ Prerequisites
         winget install --id Kitware.CMake -e
         cmake --version
 
-4. **Make**
-    - Option 1: Use Git Bash (included with Git) as a shell.
-    - Option 2: Install ``make`` via Chocolatey (install Chocolatey first if needed: `choco.io <https://chocolatey.org/install>`_).
-    - Verify installation:
+4. **Make** (only needed for Makefile targets such as ``make test``)
+
+   Prefer **Git Bash** (ships with Git). The Makefile uses Unix tools
+   (``rm``, ``find``, ...) that are available in Git Bash, **not** in
+   Command Prompt.
+
+   Install ``make`` with Chocolatey (not GnuWin32 for CMD):
 
    .. code:: powershell
 
+        # Install Chocolatey first if needed: https://chocolatey.org/install
         choco install make
         make --version
+
+   Do **not** pair GnuWin32 ``make`` with Command Prompt: ``make`` will
+   fail looking for ``rm`` / ``find``.
 
 
 Setup Steps
 """""""""""
 
 1. **Clone the Repository**
-   - Open PowerShell or Git Bash and run:
+   - Open PowerShell (recommended for setup) and run:
 
    .. code:: powershell
 
@@ -333,24 +340,50 @@ Setup Steps
    version, upgrade it first.
 
 4. **Verify Setup**
-   - Run the tests to ensure everything works:
+
+   From PowerShell (or Git Bash) with ``.venv`` activated, run the same
+   suites Windows CI runs (``core`` / ``demos`` / ``utils``). Do **not**
+   use bare ``make test`` / ``make lint`` / ``make pr`` on Windows yet:
+   those targets also pull in Unix-only interop fixtures (``fcntl``) and
+   hooks that fail on this platform (``SO_REUSEPORT`` typing, path-audit
+   console encoding, Store ``python3`` stubs).
 
    .. code:: powershell
 
-        pytest -v
+        python -m pytest tests/core tests/examples tests/utils -n auto -m "not serial_only"
 
-   - If using ``make test`` with Git Bash:
+   Or ignore interop collection entirely:
+
+   .. code:: powershell
+
+        python -m pytest tests --ignore=tests/interop -n auto -m "not serial_only"
+
+   To open **Git Bash** when you still want a Unix-like shell for Make
+   experiments (Start menu -> "Git Bash", or from CMD/PowerShell):
+
+   .. code:: bat
+
+        "C:\Program Files\Git\bin\bash.exe" -l
 
    .. code:: bash
 
-        make test
+        cd /c/Users/<you>/py-libp2p   # or your clone path
+        source .venv/Scripts/activate
 
 Notes
 """""
 
-- Prefer native PowerShell with ``scripts/setup_dev.ps1``. WSL users can run
-  ``scripts/setup_dev.sh`` inside Linux instead.
-- Ensure all tools (Python, Git, CMake) are in your system PATH.
+- Prefer native PowerShell with ``scripts/setup_dev.ps1`` for install and
+  day-to-day Python work.
+- Avoid Command Prompt for Makefile targets (missing Unix tools). Git Bash
+  helps for ``rm`` / ``find``, but full ``make pr`` parity on Windows is
+  still a follow-up (typecheck, path-audit UTF-8, interop ``fcntl``).
+- WSL users can run ``scripts/setup_dev.sh`` inside Linux and use ``make``
+  as on Linux.
+- Ensure all tools (Python, Git, CMake) are on ``PATH``.
+- If tools resolve to the Microsoft Store ``python`` / ``python3`` stubs,
+  disable those App execution aliases or rely on the ``.venv`` interpreter
+  after ``setup_dev.ps1``.
 
 Requirements
 ^^^^^^^^^^^^
