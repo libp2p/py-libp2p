@@ -8,7 +8,21 @@
 #   # or: . ./scripts/setup_dev.sh
 
 # Avoid depending on external `dirname` so PATH-restricted prereq checks still work.
-_SETUP_SRC="${BASH_SOURCE[0]}"
+# Resolve script path and sourced-vs-executed for bash *and* zsh (macOS default).
+if [ -n "${ZSH_VERSION:-}" ]; then
+    # shellcheck disable=SC2296  # zsh-only expansion when ZSH_VERSION is set
+    _SETUP_SRC="${(%):-%x}"
+    _IS_SOURCED=0
+    [[ "${ZSH_EVAL_CONTEXT}" =~ :file ]] && _IS_SOURCED=1
+elif [ -n "${BASH_SOURCE:-}" ]; then
+    _SETUP_SRC="${BASH_SOURCE[0]}"
+    _IS_SOURCED=0
+    [[ "${BASH_SOURCE[0]}" != "${0}" ]] && _IS_SOURCED=1
+else
+    _SETUP_SRC="${0}"
+    _IS_SOURCED=0
+fi
+
 SCRIPT_DIR="${_SETUP_SRC%/*}"
 if [[ "${SCRIPT_DIR}" == "${_SETUP_SRC}" ]]; then
     SCRIPT_DIR="."
@@ -17,7 +31,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # If sourced, re-run as a normal process (so `exit` cannot kill the login shell),
 # then activate .venv in *this* shell.
-if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+if [[ "${_IS_SOURCED}" -eq 1 ]]; then
     SETUP_DEV_SOURCED=1 bash "${_SETUP_SRC}" "$@" || return $?
     # shellcheck disable=SC1091
     source "${REPO_ROOT}/.venv/bin/activate"
@@ -381,8 +395,13 @@ ensure_python_version() {
 }
 
 resolve_python() {
-    local supported candidates=()
-    mapfile -t supported < <(supported_python_minors)
+    # Portable read loop (Bash 3.2+): macOS ships Bash 3.2 without mapfile.
+    local supported=()
+    local line
+    local candidates=()
+    while IFS= read -r line; do
+        [[ -n "${line}" ]] && supported+=("${line}")
+    done < <(supported_python_minors)
 
     if [[ -n "${PYTHON_OVERRIDE}" ]]; then
         local ov_mm

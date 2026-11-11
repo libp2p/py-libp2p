@@ -99,9 +99,15 @@ FORCE:
 
 # docs commands
 
-# Prefer xdg-open (Linux), then open (macOS). Fall back to no-op when neither
-# exists (headless CI / containers) so `make docs` still succeeds after the build.
+# Prefer native open on Darwin; elsewhere prefer xdg-open then open. Fall back
+# to no-op when neither exists (headless CI / containers) so `make docs` still
+# succeeds after the build.
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+OPEN_CMD := $(shell command -v open 2>/dev/null || echo :)
+else
 OPEN_CMD := $(shell command -v xdg-open 2>/dev/null || command -v open 2>/dev/null || echo :)
+endif
 
 docs: check-docs
 	@$(OPEN_CMD) docs/_build/html/index.html >/dev/null 2>&1 || true
