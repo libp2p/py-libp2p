@@ -309,11 +309,26 @@ def get_optimal_binding_address(port: int, protocol: str = "tcp") -> Multiaddr:
         s = str(ma)
         return not ("/ip4/127." in s or "/ip6/::1" in s)
 
+    def is_global_ip6(ma: Multiaddr) -> bool:
+        for proto, val in ma.items():
+            if proto.name == "ip6" and val:
+                try:
+                    return ipaddress.ip_address(val).is_global
+                except ValueError:
+                    pass
+        return False
+
+    # 1. Prefer globally routable IPv6
     for c in candidates:
-        if "/ip6/" in str(c) and is_non_loopback(c):
+        if is_global_ip6(c):
             return c
+    # 2. Prefer routable non-loopback IPv4
     for c in candidates:
         if "/ip4/" in str(c) and is_non_loopback(c):
+            return c
+    # 3. Other non-loopback IPv6 (ULA / link-local)
+    for c in candidates:
+        if "/ip6/" in str(c) and is_non_loopback(c):
             return c
     for c in candidates:
         if "/ip6/::1" in str(c):

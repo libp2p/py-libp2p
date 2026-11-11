@@ -4,7 +4,7 @@ from multiaddr import Multiaddr
 from libp2p.crypto.rsa import create_new_key_pair
 from libp2p.custom_types import TProtocol
 from libp2p.network.backoff import DialBackoff
-from libp2p.network.exceptions import SwarmDialBackoffError
+from libp2p.network.exceptions import SwarmDialBackoffError, SwarmException
 from libp2p.network.swarm import Swarm
 from libp2p.peer.id import ID
 from libp2p.peer.peerstore import PeerStore
@@ -99,3 +99,40 @@ async def test_swarm_dial_backoff_skips_backed_off_peer():
     # Dialing should immediately fail with SwarmDialBackoffError without dialing
     with pytest.raises(SwarmDialBackoffError):
         await swarm.dial_peer(target_id)
+
+
+@pytest.mark.trio
+async def test_swarm_dials_multiple_addresses_of_same_transport():
+    """Verify Happy Eyeballs does not discard multiple addresses of same transport."""
+    key_pair = create_new_key_pair()
+    peer_id = ID.from_pubkey(key_pair.public_key)
+    peerstore = PeerStore()
+    tcp = TCP()
+    upgrader = TransportUpgrader(
+        secure_transports_by_protocol={
+            TProtocol("/plaintext"): InsecureTransport(key_pair)
+        },
+        muxer_transports_by_protocol={},
+    )
+    swarm = Swarm(peer_id, peerstore, upgrader, transports=[tcp])
+
+    target_id = ID.from_base58("12D3KooWFXc3Tht1FgrFVNg7SigUJvWrk15ELYtXvs3hLrDFdtEA")
+    addr1 = Multiaddr("/ip4/127.0.0.1/tcp/59998")
+    addr2 = Multiaddr("/ip4/127.0.0.1/tcp/59999")
+    peerstore.add_addrs(target_id, [addr1, addr2], 3600)
+
+    dialed_addrs = []
+    orig_dial_with_retry = swarm._dial_with_retry
+
+    async def mock_dial_with_retry(addr, pid, source=None):
+        dialed_addrs.append(addr)
+        return await orig_dial_with_retry(addr, pid, source)
+
+    swarm._dial_with_retry = mock_dial_with_retry  # type: ignore[method-assign]
+
+    with pytest.raises(SwarmException):
+        await swarm.dial_peer(target_id)
+
+    # Both addresses of the same transport class should be dialed via fallback
+    assert addr1 in dialed_addrs
+    assert addr2 in dialed_addrs

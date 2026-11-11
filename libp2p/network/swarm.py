@@ -98,8 +98,8 @@ _HAPPY_EYEBALLS_DELAY = (
 # Global max concurrent in-flight dials
 # (matches go-libp2p ConcurrentFdDials: 160)
 MAX_CONCURRENT_DIALS = 160
-MAX_ADDRS_PER_PEER = 2  # Top 1-2 addresses per peer (at most 1 per transport class)
-_MAX_PARALLEL_DIALS = 2
+MAX_ADDRS_PER_PEER = 8  # Top addresses per peer for Happy Eyeballs (matches go-libp2p)
+_MAX_PARALLEL_DIALS = 8
 
 
 def create_default_stream_handler(network: INetworkService) -> StreamHandlerFn:
@@ -814,16 +814,6 @@ class Swarm(Service, INetworkService):
             public_addrs = [a for a in allowed_addrs if is_public_or_dns_address(a)]
             if public_addrs:
                 allowed_addrs = public_addrs
-            else:
-                # If only local/private addresses exist (e.g. local dev / testing),
-                # filter loopback if non-loopback exists
-                non_loopback = [
-                    a
-                    for a in allowed_addrs
-                    if "/ip4/127." not in str(a) and "/ip6/::1" not in str(a)
-                ]
-                if non_loopback:
-                    allowed_addrs = non_loopback
 
             # Skip relay (p2p-circuit) addresses: this node has no relay
             # transport, so these can never be dialed (mirrors go-libp2p,
@@ -903,18 +893,8 @@ class Swarm(Service, INetworkService):
                     peer_id=peer_id,
                 )
 
-            # Smart Address Selection: pick top 1-2 addrs (at most 1 per class)
-            selected_addrs: list[Multiaddr] = []
-            seen_ranks: set[int] = set()
-            for addr in allowed_addrs:
-                rank = _transport_priority(addr)
-                if rank not in seen_ranks:
-                    seen_ranks.add(rank)
-                    selected_addrs.append(addr)
-                    if len(selected_addrs) >= MAX_ADDRS_PER_PEER:
-                        break
-            if not selected_addrs:
-                selected_addrs = allowed_addrs[:MAX_ADDRS_PER_PEER]
+            # Select top addresses for Happy Eyeballs (matches go-libp2p)
+            selected_addrs = allowed_addrs[:MAX_ADDRS_PER_PEER]
 
             connections: list[INetConn] = []
             exceptions: list[SwarmException] = []
