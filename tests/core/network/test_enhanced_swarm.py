@@ -348,24 +348,33 @@ def _swarm_with_unanswered_transport() -> tuple[Swarm, ID]:
 
 @pytest.mark.trio
 @pytest.mark.parametrize("responder", [False, True])
-async def test_dial_bounded_by_dial_timeout(autojump_clock, responder):
+@pytest.mark.parametrize(
+    "addr,expected_timeout_attr",
+    [
+        (Multiaddr("/ip4/1.2.3.4/tcp/4001"), "dial_timeout"),
+        (Multiaddr("/ip4/127.0.0.1/tcp/4001"), "dial_timeout_local"),
+    ],
+)
+async def test_dial_bounded_by_dial_timeout(
+    autojump_clock, responder, addr, expected_timeout_attr
+):
     """
-    An unanswered dial fails at ConnectionConfig.dial_timeout instead of
-    waiting on the operating system's connect timeout.
+    An unanswered dial fails at ConnectionConfig.dial_timeout (or
+    dial_timeout_local for private/loopback addresses) instead of waiting on
+    the operating system's connect timeout.
     """
     swarm, peer = _swarm_with_unanswered_transport()
-    addr = Multiaddr("/ip4/127.0.0.1/tcp/4001")
     if responder:
         dial = swarm.dial_addr_as_responder
     else:
         dial = swarm._dial_addr_single_attempt
+
+    expected_timeout = getattr(swarm.connection_config, expected_timeout_attr)
 
     start = trio.current_time()
     with pytest.raises(SwarmException) as excinfo:
         with trio.fail_after(60):
             await dial(addr, peer)
 
-    assert trio.current_time() - start == pytest.approx(
-        swarm.connection_config.dial_timeout
-    )
+    assert trio.current_time() - start == pytest.approx(expected_timeout)
     assert "timed out" in str(excinfo.value.__cause__)
