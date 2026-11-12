@@ -183,6 +183,33 @@ def is_public_ipv6_address(addr: Multiaddr) -> bool:
     return False
 
 
+def is_public_or_dns_address(addr: Multiaddr) -> bool:
+    """
+    Return True if the multiaddr contains a publicly routable IP (IPv4 or IPv6)
+    or a DNS name (dns, dns4, dns6, dnsaddr).
+
+    Excludes loopback (127.0.0.0/8, ::1), private ranges (10.0.0.0/8,
+    172.16.0.0/12, 192.168.0.0/16, fc00::/7), link-local (169.254.0.0/16,
+    fe80::/10), and carrier-grade NAT (100.64.0.0/10).
+    """
+    try:
+        for proto, val in addr.items():
+            if proto.name in ("dns", "dns4", "dns6", "dnsaddr"):
+                return True
+            if proto.name in ("ip4", "ip6"):
+                if not val:
+                    continue
+                try:
+                    ip = ipaddress.ip_address(val)
+                    if ip.is_global:
+                        return True
+                except ValueError:
+                    return False
+    except Exception:
+        return False
+    return False
+
+
 def get_available_interfaces(port: int, protocol: str = "tcp") -> list[Multiaddr]:
     """
     Discover available network interfaces (IPv4 + IPv6 if supported) for binding.
@@ -282,11 +309,26 @@ def get_optimal_binding_address(port: int, protocol: str = "tcp") -> Multiaddr:
         s = str(ma)
         return not ("/ip4/127." in s or "/ip6/::1" in s)
 
+    def is_global_ip6(ma: Multiaddr) -> bool:
+        for proto, val in ma.items():
+            if proto.name == "ip6" and val:
+                try:
+                    return ipaddress.ip_address(val).is_global
+                except ValueError:
+                    pass
+        return False
+
+    # 1. Prefer globally routable IPv6
     for c in candidates:
-        if "/ip6/" in str(c) and is_non_loopback(c):
+        if is_global_ip6(c):
             return c
+    # 2. Prefer routable non-loopback IPv4
     for c in candidates:
         if "/ip4/" in str(c) and is_non_loopback(c):
+            return c
+    # 3. Other non-loopback IPv6 (ULA / link-local)
+    for c in candidates:
+        if "/ip6/" in str(c) and is_non_loopback(c):
             return c
     for c in candidates:
         if "/ip6/::1" in str(c):
@@ -307,5 +349,6 @@ __all__ = [
     "find_free_port",
     "has_public_ipv6",
     "is_public_ipv6_address",
+    "is_public_or_dns_address",
     "is_relay_address",
 ]

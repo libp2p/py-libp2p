@@ -213,8 +213,18 @@ class PeerStore(IPeerStore):
             is_expired = pd.is_expired()
             return (not has_addrs, is_expired)  # True sorts before False
 
+        # Never evict the local identity. It is the only entry that holds a
+        # private key (added by ``new_swarm``), and losing it makes
+        # ``host.get_public_key()`` raise ``PeerStoreError`` inside the
+        # Identify handler, which tears down the whole swarm.
         candidates = sorted(
-            self.peer_data_map.items(), key=evict_priority, reverse=True
+            (
+                (peer_id, peer_data)
+                for peer_id, peer_data in self.peer_data_map.items()
+                if peer_data.privkey is None
+            ),
+            key=evict_priority,
+            reverse=True,
         )
         for peer_id, _ in candidates[:to_evict]:
             self.peer_record_map.pop(peer_id, None)
