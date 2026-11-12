@@ -814,6 +814,17 @@ class Swarm(Service, INetworkService):
             public_addrs = [a for a in allowed_addrs if is_public_or_dns_address(a)]
             if public_addrs:
                 allowed_addrs = public_addrs
+            else:
+                # If only local/private addresses exist (e.g. LAN / local dev),
+                # filter loopback if non-loopback exists so remote LAN peers are
+                # not dialed via our own local loopback interface.
+                non_loopback = [
+                    a
+                    for a in allowed_addrs
+                    if "/ip4/127." not in str(a) and "/ip6/::1" not in str(a)
+                ]
+                if non_loopback:
+                    allowed_addrs = non_loopback
 
             # Skip relay (p2p-circuit) addresses: this node has no relay
             # transport, so these can never be dialed (mirrors go-libp2p,

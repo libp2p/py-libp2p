@@ -136,3 +136,40 @@ async def test_swarm_dials_multiple_addresses_of_same_transport():
     # Both addresses of the same transport class should be dialed via fallback
     assert addr1 in dialed_addrs
     assert addr2 in dialed_addrs
+
+
+@pytest.mark.trio
+async def test_swarm_prefers_non_loopback_private_addrs():
+    """Verify swarm filters loopback addrs when non-loopback private addrs exist."""
+    key_pair = create_new_key_pair()
+    peer_id = ID.from_pubkey(key_pair.public_key)
+    peerstore = PeerStore()
+    tcp = TCP()
+    upgrader = TransportUpgrader(
+        secure_transports_by_protocol={
+            TProtocol("/plaintext"): InsecureTransport(key_pair)
+        },
+        muxer_transports_by_protocol={},
+    )
+    swarm = Swarm(peer_id, peerstore, upgrader, transports=[tcp])
+
+    target_id = ID.from_base58("12D3KooWFXc3Tht1FgrFVNg7SigUJvWrk15ELYtXvs3hLrDFdtEA")
+    loopback_addr = Multiaddr("/ip4/127.0.0.1/tcp/59998")
+    private_addr = Multiaddr("/ip4/192.168.1.100/tcp/59999")
+    peerstore.add_addrs(target_id, [loopback_addr, private_addr], 3600)
+
+    dialed_addrs = []
+    orig_dial_with_retry = swarm._dial_with_retry
+
+    async def mock_dial_with_retry(addr, pid, source=None):
+        dialed_addrs.append(addr)
+        return await orig_dial_with_retry(addr, pid, source)
+
+    swarm._dial_with_retry = mock_dial_with_retry  # type: ignore[method-assign]
+
+    with pytest.raises(SwarmException):
+        await swarm.dial_peer(target_id)
+
+    # Loopback address should have been filtered out in favor of the LAN private address
+    assert private_addr in dialed_addrs
+    assert loopback_addr not in dialed_addrs
