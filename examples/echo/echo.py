@@ -113,6 +113,7 @@ async def run(port: int, destination: str, seed: int | None = None) -> None:
 
             print(f"Sent: {msg.decode('utf-8')}")
             print(f"Got: {response.decode('utf-8')}")
+            nursery.cancel_scope.cancel()
 
 
 def main() -> None:
