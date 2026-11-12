@@ -1,0 +1,1 @@
+Add exit for hanged up ``examples/echo/echo``, ``examples/identify/identify``, ``examples/request_response/request_response_demo`` and ``examples/ping/ping`` by introducing ``nursery.cancel_scope.cancel()`` at the end of client branch.
