@@ -21,6 +21,18 @@ class SwarmDialAllFailedError(SwarmException):
         self.num_addrs_tried = num_addrs_tried
 
 
+class SwarmDialBackoffError(SwarmException):
+    """Raised when all addresses for a peer are currently in dial backoff."""
+
+    def __init__(
+        self,
+        message: str,
+        peer_id: object = None,
+    ) -> None:
+        super().__init__(message)
+        self.peer_id = peer_id
+
+
 class RateLimitError(Exception):
     """Raised when rate limit is exceeded."""
 
