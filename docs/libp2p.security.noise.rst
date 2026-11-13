@@ -8,6 +8,7 @@ Subpackages
    :maxdepth: 4
 
    libp2p.security.noise.pb
+   libp2p.security.noise.pq
 
 Submodules
 ----------
@@ -40,6 +41,14 @@ libp2p.security.noise.patterns module
 -------------------------------------
 
 .. automodule:: libp2p.security.noise.patterns
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+libp2p.security.noise.transcript\_binding module
+------------------------------------------------
+
+.. automodule:: libp2p.security.noise.transcript_binding
    :members:
    :undoc-members:
    :show-inheritance:

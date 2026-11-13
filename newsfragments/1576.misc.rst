@@ -1,0 +1,7 @@
+Moved the ``cryptography>=48.0.0`` requirement of the native ML-KEM-768
+backend out of the core dependencies and into the ``pq`` extra, and declared
+the core floor as ``cryptography>=42.0.0``, which is what the 17 modules that
+already import it need (``x509.Certificate.not_valid_before_utc``) and the
+same floor aioquic declares. A 48.0.0 core floor made every environment
+pinned by pyOpenSSL <= 25.3.0 unresolvable, including for users who never
+touch the post-quantum transport.
