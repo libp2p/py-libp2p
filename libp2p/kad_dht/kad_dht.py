@@ -66,11 +66,11 @@ from .common import (
     MAX_PROVIDERS_PER_MSG,
     MAX_RECORD_AGE,
     MAX_RECORD_SIZE,
-    PROTOCOL_ID,
     PROTOCOL_PREFIX,
     QUERY_TIMEOUT,
     format_time_rfc3339,
     parse_time_received,
+    protocol_id_for,
 )
 from .pb.kademlia_pb2 import (
     Message,
@@ -258,15 +258,20 @@ class KadDHT(Service):
         self.mode = mode
         self.enable_random_walk = enable_random_walk
 
+        # The prefix decides the protocol this DHT speaks and answers on, so
+        # derive it before anything that dials or registers a handler is built.
+        self.protocol_prefix = protocol_prefix
+        self.protocol_id = protocol_id_for(protocol_prefix)
+
         # Initialize the routing table
         self.routing_table = RoutingTable(
             self.local_peer_id,
             host,
             max_peers_per_subnet=max_peers_per_subnet,
             max_peers_per_subnet_table=max_peers_per_subnet_table,
+            protocol_id=self.protocol_id,
         )
 
-        self.protocol_prefix = protocol_prefix
         self.enable_providers = enable_providers
         self.enable_values = enable_values
         self._strict_validation = strict_validation
@@ -291,13 +296,14 @@ class KadDHT(Service):
         self.apply_fallbacks()
 
         # Initialize peer routing
-        self.peer_routing = PeerRouting(host, self.routing_table)
+        self.peer_routing = PeerRouting(host, self.routing_table, self.protocol_id)
 
         # Initialize value store
         self.value_store = ValueStore(
             host=host,
             local_peer_id=self.local_peer_id,
             persist_path=f"{persist_dir}/values.json" if persist_dir else None,
+            protocol_id=self.protocol_id,
         )
 
         # Initialize provider store with host and peer_routing references
@@ -305,6 +311,7 @@ class KadDHT(Service):
             host=host,
             peer_routing=self.peer_routing,
             persist_path=f"{persist_dir}/providers.json" if persist_dir else None,
+            protocol_id=self.protocol_id,
         )
 
         # Rate limiter for ADD_PROVIDER: maps peer_id -> (timestamp, count)
@@ -337,7 +344,7 @@ class KadDHT(Service):
         # "Server mode nodes accept incoming streams using the KAD protocol.
         #  Client mode nodes do not offer the KAD protocol for incoming streams."
         if self.mode == DHTMode.SERVER:
-            host.set_stream_handler(PROTOCOL_ID, self.handle_stream)
+            host.set_stream_handler(self.protocol_id, self.handle_stream)
 
     @property
     def strict_validation(self) -> bool:
@@ -563,10 +570,10 @@ class KadDHT(Service):
 
         # Register/unregister KAD stream handler based on mode
         if new_mode == DHTMode.SERVER and old_mode == DHTMode.CLIENT:
-            self.host.set_stream_handler(PROTOCOL_ID, self.handle_stream)
+            self.host.set_stream_handler(self.protocol_id, self.handle_stream)
             logger.debug("Registered KAD stream handler (switched to server mode)")
         elif new_mode == DHTMode.CLIENT and old_mode == DHTMode.SERVER:
-            self.host.remove_stream_handler(PROTOCOL_ID)
+            self.host.remove_stream_handler(self.protocol_id)
             logger.debug("Removed KAD stream handler (switched to client mode)")
             self.routing_table.cleanup_routing_table()
 
