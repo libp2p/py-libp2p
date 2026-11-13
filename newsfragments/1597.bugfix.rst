@@ -1,0 +1,1 @@
+Skip the WebTransport stream-type workaround on aioquic 1.8, which records WebTransport streams itself and removed the private ``_get_or_create_stream`` it relied on.
