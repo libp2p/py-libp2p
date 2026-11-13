@@ -82,11 +82,16 @@ def _mark_local_webtransport_stream(
     """
     Tell aioquic's H3 layer that *stream_id* carries WT payloads.
 
-    ``create_webtransport_stream`` only sends the WT frame header; it does not
-    set ``frame_type`` on the local ``H3Stream``. Without that, inbound bytes on
-    the same bidi stream are mis-parsed as HTTP/3 frames.
+    Before aioquic 1.8, ``create_webtransport_stream`` only sends the WT frame
+    header; it does not set ``frame_type`` on the local ``H3Stream``. Without
+    that, inbound bytes on the same bidi stream are mis-parsed as HTTP/3 frames.
+    aioquic 1.8 records the stream itself and dropped ``_get_or_create_stream``,
+    so there is nothing left to do there.
     """
-    with h3._get_or_create_stream(stream_id) as stream:  # noqa: SLF001
+    get_or_create = getattr(h3, "_get_or_create_stream", None)
+    if get_or_create is None:
+        return
+    with get_or_create(stream_id) as stream:
         stream.frame_type = FrameType.WEBTRANSPORT_STREAM
         stream.session_id = session_id
 
