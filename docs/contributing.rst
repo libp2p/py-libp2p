@@ -23,6 +23,16 @@ Python's built-in ``venv`` module. Instructions vary by platform:
 
     py-libp2p contributor setup is currently supported on Python versions ``<= 3.13``.
 
+.. warning::
+
+    **CA certificate security incident (October 2026).** ``pip < 26.2.2`` and
+    ``uv < 0.13.4`` trust the compromised eMudhra / emSign CA certificates, so
+    upgrade them before installing dependencies, and rebuild container images
+    with layer caching disabled. See the warning in :doc:`install` for the full
+    list of required versions and the upstream advisory, and
+    `Discussion #1570 <https://github.com/libp2p/py-libp2p/discussions/1570>`_
+    for project-specific local-dev notes.
+
 Linux Setup
 ^^^^^^^^^^^
 
@@ -51,12 +61,23 @@ Install the development dependencies using a virtual environment:
 .. code:: sh
 
     cd py-libp2p
-    ./scripts/setup_dev.sh
+    # Recommended: source so .venv is activated in this shell afterwards
+    source ./scripts/setup_dev.sh
+    # optional: source ./scripts/setup_dev.sh --python 3.12
+    # or run without activating: ./scripts/setup_dev.sh
+
+The script checks for ``cmake``, ``pkg-config``, GMP, and ``uv`` (``>= 0.13.4``,
+required unless ``--pip``) before installing, keeps ``pip`` at the
+eMudhra/emSign CA floor on the ``--pip`` path, and selects the newest
+**installed** Python that appears in ``pyproject.toml`` classifiers and
+satisfies ``requires-python`` (currently ``3.10``–``3.13``). If none is on
+``PATH``, it runs ``uv python install`` for the newest supported version.
 
 .. note::
 
-    On Linux, if you are not already in a virtual environment, the script will create one
-    automatically and instruct you to activate it.
+    A subprocess cannot change your current shell. Prefer
+    ``source ./scripts/setup_dev.sh`` so ``.venv`` is activated automatically.
+    If you ran ``./scripts/setup_dev.sh``, activate with ``. .venv/bin/activate``.
 
 **Option 2: Using uv (recommended, same as CI):**
 
@@ -70,7 +91,7 @@ Or using pip:
 
 .. code:: sh
 
-    pip install uv
+    pip install "uv>=0.13.4"
 
 Then set up the development environment:
 
@@ -80,6 +101,11 @@ Then set up the development environment:
     uv sync --group dev
     uv run pre-commit install
 
+The ``dev`` dependency group also installs the WebRTC (``aiortc`` / ``aioice``)
+and health-demo (``rich``) packages so local tests and demos that need them work
+after a normal contributor setup. The ``[webrtc]`` and ``[health-demo]`` extras
+remain available for non-dev installs that only want those optional features.
+
 **Option 3: Manual setup with pip:**
 
 .. code:: sh
@@ -87,12 +113,13 @@ Then set up the development environment:
     cd py-libp2p
     python3 -m venv .venv
     . .venv/bin/activate
-    pip install --upgrade pip  # Ensure pip >= 25.1 for PEP 735 support
+    pip install --upgrade "pip>=26.2.2"  # PEP 735 needs >= 25.1; eMudhra/emSign CA fix needs >= 26.2.2
     pip install --group dev -e .
     pre-commit install
 
-**Note:** This project uses PEP 735 ``[dependency-groups]`` which requires pip >= 25.1.
-If you have an older pip version, upgrade it first.
+**Note:** This project uses PEP 735 ``[dependency-groups]`` which requires pip >= 25.1;
+after the eMudhra/emSign CA incident, use pip >= 26.2.2. If you have an older pip
+version, upgrade it first.
 
 An alternative using ``virtualenv``:
 
@@ -101,7 +128,7 @@ An alternative using ``virtualenv``:
     cd py-libp2p
     virtualenv -p python .venv
     . .venv/bin/activate
-    pip install --upgrade pip  # Ensure pip >= 25.1 for PEP 735 support
+    pip install --upgrade "pip>=26.2.2"  # PEP 735 needs >= 25.1; eMudhra/emSign CA fix needs >= 26.2.2
     pip install --group dev -e .
     pre-commit install
 
@@ -133,7 +160,11 @@ Install the development dependencies using a virtual environment:
 .. code:: sh
 
     cd py-libp2p
-    ./scripts/setup_dev.sh
+    source ./scripts/setup_dev.sh
+    # optional: source ./scripts/setup_dev.sh --python 3.12
+
+Same behaviour as on Linux: prerequisite checks, supported-Python selection,
+patched ``uv`` / ``pip`` floors, and auto-activation when the script is sourced.
 
 **Option 2: Using uv (recommended, same as CI):**
 
@@ -153,7 +184,7 @@ Or using pip:
 
 .. code:: sh
 
-    pip install uv
+    pip install "uv>=0.13.4"
 
 Then set up the development environment:
 
@@ -170,12 +201,13 @@ Then set up the development environment:
     cd py-libp2p
     python3 -m venv .venv
     . .venv/bin/activate
-    pip install --upgrade pip  # Ensure pip >= 25.1 for PEP 735 support
+    pip install --upgrade "pip>=26.2.2"  # PEP 735 needs >= 25.1; eMudhra/emSign CA fix needs >= 26.2.2
     CFLAGS="$(pkg-config --cflags gmp)" LDFLAGS="$(pkg-config --libs gmp)" pip install --group dev -e .
     pre-commit install
 
-**Note:** This project uses PEP 735 ``[dependency-groups]`` which requires pip >= 25.1.
-If you have an older pip version, upgrade it first.
+**Note:** This project uses PEP 735 ``[dependency-groups]`` which requires pip >= 25.1;
+after the eMudhra/emSign CA incident, use pip >= 26.2.2. If you have an older pip
+version, upgrade it first.
 
 An alternative using ``virtualenv``:
 
@@ -184,7 +216,7 @@ An alternative using ``virtualenv``:
     cd py-libp2p
     virtualenv -p python .venv
     . .venv/bin/activate
-    pip install --upgrade pip  # Ensure pip >= 25.1 for PEP 735 support
+    pip install --upgrade "pip>=26.2.2"  # PEP 735 needs >= 25.1; eMudhra/emSign CA fix needs >= 26.2.2
     pip install --group dev -e .
     pre-commit install
 
@@ -220,54 +252,76 @@ Prerequisites
         winget install --id Kitware.CMake -e
         cmake --version
 
-4. **Make**
-    - Option 1: Use Git Bash (included with Git) as a shell.
-    - Option 2: Install ``make`` via Chocolatey (install Chocolatey first if needed: `choco.io <https://chocolatey.org/install>`_).
-    - Verify installation:
+4. **Make** (only needed for Makefile targets such as ``make test``)
+
+   Prefer **Git Bash** (ships with Git). The Makefile uses Unix tools
+   (``rm``, ``find``, ...) that are available in Git Bash, **not** in
+   Command Prompt.
+
+   Install ``make`` with Chocolatey (not GnuWin32 for CMD):
 
    .. code:: powershell
 
+        # Install Chocolatey first if needed: https://chocolatey.org/install
         choco install make
         make --version
+
+   Do **not** pair GnuWin32 ``make`` with Command Prompt: ``make`` will
+   fail looking for ``rm`` / ``find``.
 
 
 Setup Steps
 """""""""""
 
 1. **Clone the Repository**
-   - Open PowerShell or Git Bash and run:
+   - Open PowerShell (recommended for setup) and run:
 
    .. code:: powershell
 
         git clone git@github.com:your-github-username/py-libp2p.git
         cd py-libp2p
 
-2. **Create a Virtual Environment**
-   - In PowerShell:
+2. **Install dependencies with the setup script (recommended)**
+
+   From PowerShell in the repo root:
 
    .. code:: powershell
 
-        python -m venv venv
-        .\venv\Scripts\activate
+        # If scripts are blocked (Windows 11 Restricted policy), either:
+        #   Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+        # or one-shot without changing policy:
+        #   .\scripts\setup_dev.cmd
+        # Recommended: dot-source so .venv is activated in this session
+        . .\scripts\setup_dev.ps1
+        # optional: . .\scripts\setup_dev.ps1 -Python 3.12
+        # or: pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup_dev.ps1
 
-3. **Install Dependencies**
+   ``setup_dev.ps1`` checks for ``cmake`` and ``uv`` (``>= 0.13.4``, required
+   unless ``-Pip``), selects the newest supported Python from
+   ``pyproject.toml`` classifiers (``3.10``–``3.13``; installs via
+   ``uv python install`` when missing), or floors ``pip`` (``>= 26.2.2``) on the
+   ``-Pip`` path, and installs the ``dev`` dependency group.
+   GMP is not required on Windows (``fastecdsa`` is skipped on ``win32``).
 
-   **Option A: Using uv (recommended, same as CI):**
-
-   First, install ``uv`` if you haven't already:
+   If you ran the script without dot-sourcing, activate afterwards. Under the
+   default Windows 11 Restricted policy, either unlock scripts for this session
+   or use ``activate.bat``:
 
    .. code:: powershell
 
-        # Using pip
-        pip install uv
+        Set-ExecutionPolicy -Scope Process Bypass
+        . .\.venv\Scripts\Activate.ps1
+        # or (cmd / Restricted-safe): .\.venv\Scripts\activate.bat
+        # permanent: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
-        # Or using winget
+3. **Manual alternative (uv or pip)**
+
+   **Option A: Using uv:**
+
+   .. code:: powershell
+
         winget install --id=astral-sh.uv
-
-   Then set up the development environment:
-
-   .. code:: powershell
-
+        # or: pip install "uv>=0.13.4"
         uv sync --group dev
         uv run pre-commit install
 
@@ -275,31 +329,61 @@ Setup Steps
 
    .. code:: powershell
 
-        pip install --upgrade pip  # Ensure pip >= 25.1 for PEP 735 support
+        python -m venv .venv
+        .\.venv\Scripts\Activate.ps1
+        python -m pip install --upgrade "pip>=26.2.2"  # PEP 735 needs >= 25.1; eMudhra/emSign CA fix needs >= 26.2.2
         pip install --group dev -e .
         pre-commit install
 
-   **Note:** This project uses PEP 735 ``[dependency-groups]`` which requires pip >= 25.1.
-   If you have an older pip version, upgrade it first.
+   **Note:** This project uses PEP 735 ``[dependency-groups]`` which requires pip >= 25.1;
+   after the eMudhra/emSign CA incident, use pip >= 26.2.2. If you have an older pip
+   version, upgrade it first.
 
 4. **Verify Setup**
-   - Run the tests to ensure everything works:
+
+   From PowerShell (or Git Bash) with ``.venv`` activated, run the same
+   suites Windows CI runs (``core`` / ``demos`` / ``utils``). Do **not**
+   use bare ``make test`` / ``make lint`` / ``make pr`` on Windows yet:
+   those targets also pull in Unix-only interop fixtures (``fcntl``) and
+   hooks that fail on this platform (``SO_REUSEPORT`` typing, path-audit
+   console encoding, Store ``python3`` stubs).
 
    .. code:: powershell
 
-        pytest -v
+        python -m pytest tests/core tests/examples tests/utils -n auto -m "not serial_only"
 
-   - If using ``make test`` with Git Bash:
+   Or ignore interop collection entirely:
+
+   .. code:: powershell
+
+        python -m pytest tests --ignore=tests/interop -n auto -m "not serial_only"
+
+   To open **Git Bash** when you still want a Unix-like shell for Make
+   experiments (Start menu -> "Git Bash", or from CMD/PowerShell):
+
+   .. code:: bat
+
+        "C:\Program Files\Git\bin\bash.exe" -l
 
    .. code:: bash
 
-        make test
+        cd /c/Users/<you>/py-libp2p   # or your clone path
+        source .venv/Scripts/activate
 
 Notes
 """""
 
-- Use PowerShell, Command Prompt, or Git Bash as your shell.
-- Ensure all tools (Python, Git, CMake) are in your system PATH.
+- Prefer native PowerShell with ``scripts/setup_dev.ps1`` for install and
+  day-to-day Python work.
+- Avoid Command Prompt for Makefile targets (missing Unix tools). Git Bash
+  helps for ``rm`` / ``find``, but full ``make pr`` parity on Windows is
+  still a follow-up (typecheck, path-audit UTF-8, interop ``fcntl``).
+- WSL users can run ``scripts/setup_dev.sh`` inside Linux and use ``make``
+  as on Linux.
+- Ensure all tools (Python, Git, CMake) are on ``PATH``.
+- If tools resolve to the Microsoft Store ``python`` / ``python3`` stubs,
+  disable those App execution aliases or rely on the ``.venv`` interpreter
+  after ``setup_dev.ps1``.
 
 Requirements
 ^^^^^^^^^^^^
@@ -369,7 +453,10 @@ To add a new example (e.g., identify):
 5. Add example tests in ``tests/core/examples/test_examples.py``
 6. Add the example documentation in ``docs/examples.identify.rst``
 7. Add a news fragment for the new release in file ``newsfragments/536.feature.rst`` (fix-id.type.rst)
-8. Generate doc files with ``make docs`` or ``make linux-docs`` in linux (generates files ``libp2p.identity.identify.rst libp2p.identity.rst libp2p.identity.identify.pb.rst``)
+8. Generate doc files with ``make docs`` (opens the browser via ``xdg-open`` on
+   Linux or ``open`` on macOS; generates files such as
+   ``libp2p.identity.identify.rst``, ``libp2p.identity.rst``,
+   ``libp2p.identity.identify.pb.rst``)
 9. Add the example to ``setup.py``:
 
    .. code:: python

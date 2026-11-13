@@ -1,0 +1,1 @@
+Dials now honour ``ConnectionConfig.dial_timeout`` (default 10s). Before, only the AutoConnector used it, so ``host.connect`` to an address that never answers waited for the OS connect timeout, which is minutes.

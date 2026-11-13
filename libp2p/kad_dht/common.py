@@ -13,6 +13,7 @@ ALPHA = 10  # Concurrency parameter (per libp2p Kademlia spec)
 BETA = 3  # Resiliency parameter: min closest peers to query before termination
 PROTOCOL_ID = TProtocol("/ipfs/kad/1.0.0")
 PROTOCOL_PREFIX = TProtocol("/ipfs")
+
 QUERY_TIMEOUT = 10
 MAX_RECORD_AGE = 48 * 60 * 60  # 48 hours in seconds (go-libp2p default)
 MAX_RECORD_SIZE = 1024 * 1024  # 1MB max record size
@@ -46,6 +47,17 @@ MAX_PEERS_PER_SUBNET = 2
 SUBNET_PREFIX_LEN_V4 = 24
 SUBNET_PREFIX_LEN_V6 = 48
 STALE_PEER_THRESHOLD = 3600  # Time in seconds after which a peer is considered stale
+
+
+def protocol_id_for(prefix: TProtocol) -> TProtocol:
+    """
+    The Kademlia protocol id under ``prefix``.
+
+    go-libp2p and js-libp2p both build the id this way, so a network that runs
+    its own DHT (prefix ``/mesh`` -> ``/mesh/kad/1.0.0``) is reachable without
+    anything else changing.
+    """
+    return TProtocol(f"{prefix}/kad/1.0.0")
 
 
 def format_time_rfc3339(dt: datetime | None = None) -> str:

@@ -6,6 +6,7 @@ to efficiently locate peers in a distributed network.
 """
 
 import logging
+import random
 
 import trio
 import varint
@@ -14,6 +15,7 @@ from libp2p.abc import (
     IHost,
     IPeerRouting,
 )
+from libp2p.custom_types import TProtocol
 from libp2p.peer.id import (
     ID,
 )
@@ -21,6 +23,7 @@ from libp2p.peer.peerinfo import (
     PeerInfo,
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
+from libp2p.utils.address_validation import is_public_or_dns_address
 from libp2p.utils.varint import read_varint_prefixed_bytes_limited
 
 from .common import (
@@ -48,6 +51,10 @@ logger = logging.getLogger(__name__)
 MAX_PEER_LOOKUP_ROUNDS = 20  # Maximum number of rounds in peer lookup
 MIN_PEERS_THRESHOLD = 5  # Minimum peers threshold for fallback to connected peers
 
+# Non-deterministic source for per-round candidate selection. SystemRandom so a
+# peer observing our queries cannot predict which candidates we pick next.
+_rng = random.SystemRandom()
+
 
 class PeerRouting(IPeerRouting):
     """
@@ -57,7 +64,12 @@ class PeerRouting(IPeerRouting):
     and helps maintain the routing table.
     """
 
-    def __init__(self, host: IHost, routing_table: RoutingTable):
+    def __init__(
+        self,
+        host: IHost,
+        routing_table: RoutingTable,
+        protocol_id: TProtocol = PROTOCOL_ID,
+    ):
         """
         Initialize the peer routing service.
 
@@ -67,6 +79,7 @@ class PeerRouting(IPeerRouting):
         """
         self.host = host
         self.routing_table = routing_table
+        self.protocol_id = protocol_id
 
     async def find_peer(self, peer_id: ID) -> PeerInfo | None:
         """
@@ -276,9 +289,18 @@ class PeerRouting(IPeerRouting):
             # newly discovered peers before admitting the next batch.
             # Exclude self - we can't query ourselves (Kubo does the same)
             local_id = self.host.get_id()
-            peers_to_query = [
+            candidates = [
                 p for p in closest_peers if p not in queried_peers and p != local_id
-            ][:ALPHA]
+            ]
+            # Draw the batch at random from the candidate window instead of always
+            # taking the strictly closest ALPHA. Every candidate is already within
+            # the `count` closest peers we know of, so convergence is preserved,
+            # but a Sybil peer sitting at the closest XOR position is no longer
+            # guaranteed a slot in the *first* round and so cannot shape the
+            # lookup path from hop one. It may still be queried later: the BETA
+            # gate below deliberately contacts the closest peers before the
+            # lookup returns. See issue #1384.
+            peers_to_query = _rng.sample(candidates, min(ALPHA, len(candidates)))
             if not peers_to_query:
                 logger.debug("No more unqueried peers available, ending lookup")
                 break
@@ -319,6 +341,22 @@ class PeerRouting(IPeerRouting):
 
             # Check if we made any progress (found closer peers)
             if closest_peers == old_closest_peers:
+                # Kademlia terminates once the closest known peers have been
+                # contacted. Because admission is randomised, a round can fail
+                # to improve while the closest peers are still unqueried, so
+                # keep going until the BETA closest have been queried. Bounded
+                # by MAX_PEER_LOOKUP_ROUNDS and the 30s deadline above.
+                unqueried_beta = [
+                    p
+                    for p in closest_peers[:BETA]
+                    if p not in queried_peers and p != local_id
+                ]
+                if unqueried_beta:
+                    logger.debug(
+                        f"No improvement but {len(unqueried_beta)} of the BETA "
+                        "closest peers are unqueried, continuing"
+                    )
+                    continue
                 logger.debug("No improvement in closest peers, ending lookup")
                 break
 
@@ -374,7 +412,7 @@ class PeerRouting(IPeerRouting):
                 # Open a stream to the peer using the Kademlia protocol
                 logger.debug(f"Opening stream to {peer} for closest peers query")
                 try:
-                    stream = await self.host.new_stream(peer, [PROTOCOL_ID])
+                    stream = await self.host.new_stream(peer, [self.protocol_id])
                     logger.debug(f"Stream opened to {peer}")
                 except Exception as e:
                     logger.warning(f"Failed to open stream to {peer}: {e}")
@@ -453,6 +491,11 @@ class PeerRouting(IPeerRouting):
                                 except Exception:
                                     pass  # Skip invalid addresses
                             if addrs:
+                                public_addrs = [
+                                    a for a in addrs if is_public_or_dns_address(a)
+                                ]
+                                if public_addrs:
+                                    addrs = public_addrs
                                 self.host.get_peerstore().add_addrs(
                                     new_peer_id, addrs, 3600
                                 )
