@@ -99,8 +99,9 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
             await host.connect(info)
             stream = await host.new_stream(info.peer_id, [PING_PROTOCOL_ID])
 
-            nursery.start_soon(send_ping, stream)
+            await send_ping(stream)
 
+            nursery.cancel_scope.cancel()
             return
 
         await trio.sleep_forever()
