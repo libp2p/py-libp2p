@@ -1777,7 +1777,18 @@ class Pubsub(Service, IPubsub):
         try:
             scorer = getattr(self.router, "scorer", None)
             if scorer is not None:
-                if not scorer.allow_publish(msg_forwarder, list(msg.topicIDs)):
+                # Score only topics we actually subscribe to.  The message
+                # passed the subscription gate because at least one topic
+                # matched, but a peer may attach arbitrary extra topic IDs;
+                # scoring them burns CPU and used to retain scorer state.
+                scoring_topics = [
+                    topic
+                    for topic in msg.topicIDs
+                    if topic in self.subscribed_topics_receive
+                ]
+                if scoring_topics and not scorer.allow_publish(
+                    msg_forwarder, scoring_topics
+                ):
                     logger.debug(
                         "Rejecting message from %s by publish score gate", msg_forwarder
                     )
@@ -1803,7 +1814,8 @@ class Pubsub(Service, IPubsub):
                 scorer = getattr(self.router, "scorer", None)
                 if scorer is not None:
                     for topic in msg.topicIDs:
-                        scorer.on_invalid_message(msg_forwarder, topic)
+                        if topic in self.subscribed_topics_receive:
+                            scorer.on_invalid_message(msg_forwarder, topic)
             except Exception:
                 pass
             logger.debug(
@@ -1823,7 +1835,8 @@ class Pubsub(Service, IPubsub):
             scorer = getattr(self.router, "scorer", None)
             if scorer is not None:
                 for topic in msg.topicIDs:
-                    scorer.on_first_delivery(msg_forwarder, topic)
+                    if topic in self.subscribed_topics_receive:
+                        scorer.on_first_delivery(msg_forwarder, topic)
         except Exception:
             pass
 

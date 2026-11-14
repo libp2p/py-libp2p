@@ -84,6 +84,12 @@ logger = logging.getLogger(__name__)
 
 _MAX_PENDING_GRAFT_PRUNE_PER_PEER = 64
 
+# A remote peer controls the PRUNE backoff duration and topic IDs. Clamp the
+# duration and bound the topic map so a peer cannot pin arbitrary topics for
+# years or grow back_off without limit on a long-lived connection.
+_MAX_BACKOFF_SECONDS = 24 * 60 * 60
+_MAX_BACKOFF_TOPICS = 10_000
+
 
 class GossipSub(IPubsubRouter, Service):
     protocols: list[TProtocol]
@@ -1658,7 +1664,23 @@ class GossipSub(IPubsubRouter, Service):
         :param backoff_duration: duration of back off in seconds, if 0, use default
         """
         if topic not in self.back_off:
+            if len(self.back_off) >= _MAX_BACKOFF_TOPICS:
+                logger.debug(
+                    "Ignoring backoff for new topic %s: %d topics already tracked",
+                    topic,
+                    len(self.back_off),
+                )
+                return
             self.back_off[topic] = dict()
+
+        if backoff_duration > _MAX_BACKOFF_SECONDS:
+            logger.debug(
+                "Clamping backoff for topic %s from %ds to %ds",
+                topic,
+                backoff_duration,
+                _MAX_BACKOFF_SECONDS,
+            )
+            backoff_duration = _MAX_BACKOFF_SECONDS
 
         backoff_till = int(time.time())
         if backoff_duration > 0:

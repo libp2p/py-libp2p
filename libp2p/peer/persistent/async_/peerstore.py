@@ -69,6 +69,7 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
         max_records: int = 10000,
         sync_interval: float = 1.0,
         auto_sync: bool = True,
+        max_cached_peers: int = 1000,
     ) -> None:
         """
         Initialize asynchronous persistent peerstore.
@@ -78,6 +79,7 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
             max_records: Maximum number of peer records to store
             sync_interval: Minimum interval between sync operations (seconds)
             auto_sync: Whether to automatically sync after writes
+            max_cached_peers: Maximum number of peer data objects cached in memory
 
         :raises ValueError: If datastore is None or max_records is invalid
 
@@ -86,9 +88,12 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
             raise ValueError("datastore cannot be None")
         if max_records <= 0:
             raise ValueError("max_records must be positive")
+        if max_cached_peers <= 0:
+            raise ValueError("max_cached_peers must be positive")
 
         self.datastore = datastore
         self.max_records = max_records
+        self.max_cached_peers = max_cached_peers
         self.sync_interval = sync_interval
         self.auto_sync = auto_sync
         self._last_sync = time.time()
@@ -207,8 +212,22 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
                     # Continue with empty peer data
 
                 self.peer_data_map[peer_id] = peer_data
+                self._enforce_peer_data_cache_limit()
 
             return self.peer_data_map[peer_id]
+
+    def _enforce_peer_data_cache_limit(self) -> None:
+        """
+        Evict least-recently-inserted cached peer data beyond the cap.
+
+        PeerData defaults to ttl=0 (always valid), so the periodic expiry
+        cleanup never removes entries for peers that were merely queried.
+        Without a cache cap, a long-running node accumulates one PeerData
+        object for every peer ID it has ever looked up.
+        """
+        while len(self.peer_data_map) > self.max_cached_peers:
+            oldest = next(iter(self.peer_data_map))
+            self.peer_data_map.pop(oldest, None)
 
     async def _save_peer_data(self, peer_id: ID, peer_data: PeerData) -> None:
         """
@@ -749,8 +768,17 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
         send, receive = trio.open_memory_channel(0)
         self.addr_update_channels[peer_id] = send
 
-        async for addr in receive:
-            yield addr
+        try:
+            async for addr in receive:
+                yield addr
+        finally:
+            # The subscriber is gone (finished, cancelled or errored). Drop
+            # the channel so it cannot retain the peer entry or pending
+            # addresses for the process lifetime.
+            if self.addr_update_channels.get(peer_id) is send:
+                self.addr_update_channels.pop(peer_id, None)
+            send.close()
+            receive.close()
 
     # -------KEY-BOOK---------
 
