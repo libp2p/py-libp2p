@@ -7,6 +7,7 @@ from libp2p.utils.address_validation import (
     expand_wildcard_address,
     get_available_interfaces,
     get_optimal_binding_address,
+    is_public_ipv6_address,
 )
 
 
@@ -54,3 +55,24 @@ def test_expand_wildcard_address_ipv6() -> None:
     assert len(expanded) > 0
     for e in expanded:
         assert "/ip6/" in str(e)
+
+
+@pytest.mark.parametrize(
+    ("addr", "expected"),
+    [
+        ("/ip6/::1/tcp/4001", False),
+        ("/ip6/fd00::1/tcp/4001", False),
+        ("/ip6/fe80::1/tcp/4001", False),
+        ("/ip6/2001:4860:4860::8888/tcp/4001", True),
+        # RFC 6761: localhost names resolve to loopback (#1585).
+        ("/dns6/localhost/tcp/4001", False),
+        ("/dns6/LOCALHOST/tcp/4001", False),
+        ("/dns6/node.localhost/tcp/4001", False),
+        ("/dns6/example.com/tcp/4001", True),
+        ("/dns6/localhost.example.com/tcp/4001", True),
+        ("/dns6/notlocalhost/tcp/4001", True),
+        ("/dns/localhost/tcp/4001", False),
+    ],
+)
+def test_is_public_ipv6_address(addr: str, expected: bool) -> None:
+    assert is_public_ipv6_address(Multiaddr(addr)) is expected
