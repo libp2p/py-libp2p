@@ -92,6 +92,9 @@ from .exceptions import (
 
 logger = logging.getLogger(__name__)
 
+# Upper bound on the connection/listener teardown when Swarm.run() exits (#1584).
+SHUTDOWN_CLEANUP_TIMEOUT = 10.0
+
 _HAPPY_EYEBALLS_DELAY = (
     0.250  # 250ms head start for primary transport (matches go-libp2p DialDelay)
 )
@@ -423,26 +426,35 @@ class Swarm(Service, INetworkService):
             try:
                 await self.manager.wait_finished()
             finally:
-                # Stop connection management components
-                try:
-                    await self.connection_pruner.stop()
-                    await self.auto_connector.stop()
-                except Exception as e:
-                    logger.warning(
-                        f"Error stopping connection management components: {e}"
-                    )
+                # The service manager has already cancelled this task when we
+                # get here, so without a shield the first await raises
+                # Cancelled and the rest of the teardown is skipped: leaving
+                # host.run() left connections and listeners open (#1584).
+                # Bounded so a peer that never finishes closing cannot hang
+                # shutdown.
+                with trio.move_on_after(SHUTDOWN_CLEANUP_TIMEOUT) as cleanup_scope:
+                    cleanup_scope.shield = True
+                    # Stop connection management components
+                    try:
+                        await self.connection_pruner.stop()
+                        await self.auto_connector.stop()
+                    except Exception as e:
+                        logger.warning(
+                            f"Error stopping connection management components: {e}"
+                        )
 
-                # Close live connections so their sockets are released on
-                # shutdown. self.connections maps peer id -> list[INetConn].
-                # This service-manager stop path previously closed only the
-                # listeners and never the connections, so every dialed or
-                # accepted socket leaked whenever a swarm was stopped through
-                # the manager instead of an explicit Swarm.close() (#1485).
-                # Swarm.close() clears self.connections before stopping the
-                # manager, so this is a no-op on that path; SwarmConn.close()
-                # is idempotent.
-                for peer_id, conns in list(self.connections.items()):
-                    for conn in list(conns):
+                    # Close live connections so their sockets are released on
+                    # shutdown. self.connections maps peer id -> list[INetConn].
+                    # This service-manager stop path previously closed only the
+                    # listeners and never the connections, so every dialed or
+                    # accepted socket leaked whenever a swarm was stopped through
+                    # the manager instead of an explicit Swarm.close() (#1485).
+                    # Swarm.close() clears self.connections before stopping the
+                    # manager, so this is a no-op on that path; SwarmConn.close()
+                    # is idempotent.
+                    # Connections close concurrently: each yamux close sleeps briefly,
+                    # so closing 50 one at a time would add seconds to shutdown.
+                    async def _close_conn(peer_id: ID, conn: INetConn) -> None:
                         try:
                             await conn.close()
                         except Exception as e:
@@ -451,23 +463,39 @@ class Swarm(Service, INetworkService):
                                 peer_id,
                                 e,
                             )
-                self.connections.clear()
 
-                # Close all listeners so their internal nurseries are
-                # cancelled and system tasks finish cleanly.
-                for listener in list(self.listeners.values()):
+                    async with trio.open_nursery() as close_nursery:
+                        for peer_id, conns in list(self.connections.items()):
+                            for conn in list(conns):
+                                close_nursery.start_soon(_close_conn, peer_id, conn)
+                    self.connections.clear()
+
+                    # Close all listeners so their internal nurseries are
+                    # cancelled and system tasks finish cleanly.
+                    for listener in list(self.listeners.values()):
+                        try:
+                            await listener.close()
+                        except Exception as e:
+                            logger.debug(
+                                "Error closing listener during shutdown: %s", e
+                            )
+
+                    # Close transports (QUIC/WebSocket/WebTransport) so UDP sockets
+                    # and session state are released on the manager-stop path too.
+                    # Swarm.close() already does this; keep parity here (#1498).
                     try:
-                        await listener.close()
+                        await self.transport_manager.close_all()
                     except Exception as e:
-                        logger.debug("Error closing listener during shutdown: %s", e)
+                        logger.warning(
+                            "Error closing transports during shutdown: %s", e
+                        )
 
-                # Close transports (QUIC/WebSocket/WebTransport) so UDP sockets
-                # and session state are released on the manager-stop path too.
-                # Swarm.close() already does this; keep parity here (#1498).
-                try:
-                    await self.transport_manager.close_all()
-                except Exception as e:
-                    logger.warning("Error closing transports during shutdown: %s", e)
+                if cleanup_scope.cancelled_caught:
+                    logger.warning(
+                        "Swarm shutdown cleanup exceeded %.1fs; some connections "
+                        "or listeners may not have closed",
+                        SHUTDOWN_CLEANUP_TIMEOUT,
+                    )
 
                 # Cancel the background nursery (transport / auto-connector).
                 nursery.cancel_scope.cancel()
