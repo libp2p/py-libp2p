@@ -1027,6 +1027,14 @@ class QUICConnection(IRawConnection, IMuxedConn):
             async with self._stream_lock:
                 if self._stream_accept_queue:
                     stream = self._stream_accept_queue.pop(0)
+                    if stream.is_reset() is True:
+                        # Defensive: a reset stream must never be handed to
+                        # the application as if it were a live stream.
+                        logger.debug(
+                            "Skipping reset inbound stream %s",
+                            stream.stream_id,
+                        )
+                        continue
                     logger.debug(f"Accepted inbound stream {stream.stream_id}")
                     return stream
 
@@ -1057,6 +1065,24 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self._stream_handler = handler_function
         logger.debug("Set stream handler for incoming streams")
 
+    def _discard_pending_stream(self, stream_id: int) -> bool:
+        """
+        Unlink a terminated stream from the pending accept queue.
+
+        A reset/aborted inbound stream can be removed from ``_streams`` and
+        ``_stream_cache`` while still waiting in ``_stream_accept_queue``.
+        The queue then retains the closed stream object (and its buffers)
+        until the consumer drains it. Terminal streams can never be accepted
+        usefully, so drop them eagerly. Gracefully FIN-closed streams are
+        deliberately kept: they may still hold unread reply data.
+        """
+        queue = self._stream_accept_queue
+        for index, queued in enumerate(queue):
+            if queued._stream_id == stream_id:
+                del queue[index]
+                return True
+        return False
+
     def _remove_stream(self, stream_id: int) -> None:
         """
         Remove stream from connection registry.
@@ -1066,6 +1092,12 @@ class QUICConnection(IRawConnection, IMuxedConn):
             stream = self._streams.pop(stream_id)
             self._stream_cache.pop(stream_id, None)
             self._recently_closed_streams.append(stream_id)
+
+            # A remotely reset stream may still be queued for acceptance.
+            # Leaving it there retains the closed object (and any receive
+            # buffer) for as long as acceptance is paused.
+            if stream.is_reset() is True:
+                self._discard_pending_stream(stream_id)
 
             # Capture only the direction (not the stream object) to avoid
             # keeping a reference to the QUICStream (and its receive buffer)

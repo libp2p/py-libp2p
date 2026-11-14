@@ -625,10 +625,14 @@ class YamuxStream(IMuxedStream):
 
             # Release the backlog slot now that the local side is done with
             # this stream. If the peer already closed its side as well, drop
-            # the stream bookkeeping entirely.
-            await self.conn._finalize_stream(
-                self, fully_closed=(self.send_closed and self.recv_closed)
-            )
+            # the stream bookkeeping entirely. Shield this final step: a
+            # cancellation here would otherwise leave the stream registered
+            # (and the backlog slot held) even though the FIN was sent.
+            with trio.CancelScope() as finalize_scope:
+                finalize_scope.shield = True
+                await self.conn._finalize_stream(
+                    self, fully_closed=(self.send_closed and self.recv_closed)
+                )
 
     async def close_read(self) -> None:
         """Abandon reads, allowing a grace period for the peer's FIN."""
@@ -657,8 +661,11 @@ class YamuxStream(IMuxedStream):
                     self.recv_closed = True
                     self.reset_received = True  # Mark as reset
             # A reset kills the stream in both directions immediately, so the
-            # backlog slot can be released and the bookkeeping dropped.
-            await self.conn._finalize_stream(self, fully_closed=True)
+            # backlog slot can be released and the bookkeeping dropped. Shield
+            # the final step so cancellation cannot strand the entry.
+            with trio.CancelScope() as finalize_scope:
+                finalize_scope.shield = True
+                await self.conn._finalize_stream(self, fully_closed=True)
 
     def set_deadline(self, ttl: int) -> None:
         """

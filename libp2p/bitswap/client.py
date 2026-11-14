@@ -35,6 +35,7 @@ from .config import (
     DEFAULT_PRIORITY,
     MAX_BLOCK_SIZE,
     MAX_MESSAGE_SIZE,
+    MAX_PEER_WANTLIST_ENTRIES,
 )
 from .errors import (
     BlockTooLargeError,
@@ -977,6 +978,12 @@ class BitswapClient(INotifee):
                             presences_to_send.append((entry_cid, False))
             except Exception:
                 continue
+
+        # Bound adversarial incremental wantlists: entries are only removed by
+        # a cancel, a full wantlist, or disconnect, so a peer that never
+        # cancels could otherwise grow this dict without limit.
+        while len(peer_wantlist) > MAX_PEER_WANTLIST_ENTRIES:
+            peer_wantlist.pop(next(iter(peer_wantlist)))
 
         # Send responses on a NEW stream to the requester (matches go-bitswap
         # server behavior: SendMessage opens a fresh stream, and the requester

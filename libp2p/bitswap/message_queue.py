@@ -20,7 +20,12 @@ import varint
 
 from libp2p.abc import IHost, INetStream
 from libp2p.bitswap.cid import CIDObject
-from libp2p.bitswap.config import MAX_MESSAGE_SIZE
+from libp2p.bitswap.config import (
+    MAX_MESSAGE_SIZE,
+    MAX_PENDING_BLOCK_BYTES_PER_PEER,
+    MAX_PENDING_BLOCKS_PER_PEER,
+    MAX_PENDING_WANTS_PER_PEER,
+)
 from libp2p.bitswap.events import BitswapEvent
 from libp2p.bitswap.messages import create_message, create_wantlist_entry
 from libp2p.custom_types import TProtocol
@@ -110,7 +115,43 @@ class BitswapMessageQueue:
                 "want_type": info.get("want_type", 0),
                 "send_dont_have": info.get("send_dont_have", False),
             }
+        self._trim_pending_wants(full_wantlist=full_wantlist)
         self._notify_event.set()
+
+    def _trim_pending_wants(self, *, full_wantlist: bool) -> None:
+        """Bound queued wants, dropping the oldest incremental entries."""
+        if full_wantlist:
+            # A full wantlist is a snapshot; trimming it would silently
+            # change its meaning. Callers construct bounded snapshots.
+            return
+        while len(self._pending_wants) > MAX_PENDING_WANTS_PER_PEER:
+            self._pending_wants.pop(next(iter(self._pending_wants)))
+
+    def _trim_pending_blocks(self) -> None:
+        """Bound queued blocks by both entry count and total payload bytes."""
+        total_entries = len(self._pending_blocks_v100) + len(self._pending_blocks_v110)
+        total_bytes = sum(map(len, self._pending_blocks_v100)) + sum(
+            len(prefix) + len(data) for prefix, data in self._pending_blocks_v110
+        )
+
+        while total_entries > MAX_PENDING_BLOCKS_PER_PEER:
+            if self._pending_blocks_v100:
+                total_bytes -= len(self._pending_blocks_v100.pop(0))
+            elif self._pending_blocks_v110:
+                prefix, data = self._pending_blocks_v110.pop(0)
+                total_bytes -= len(prefix) + len(data)
+            else:
+                break
+            total_entries -= 1
+
+        while total_bytes > MAX_PENDING_BLOCK_BYTES_PER_PEER:
+            if self._pending_blocks_v100:
+                total_bytes -= len(self._pending_blocks_v100.pop(0))
+            elif self._pending_blocks_v110:
+                prefix, data = self._pending_blocks_v110.pop(0)
+                total_bytes -= len(prefix) + len(data)
+            else:
+                break
 
     def add_cancels(self, cids: Sequence[CIDObject]) -> None:
         """Queue cancel entries for transmission."""
@@ -128,11 +169,13 @@ class BitswapMessageQueue:
     def add_blocks_v100(self, blocks: Sequence[bytes]) -> None:
         """Queue v1.0.0 raw data blocks for transmission."""
         self._pending_blocks_v100.extend(blocks)
+        self._trim_pending_blocks()
         self._notify_event.set()
 
     def add_blocks_v110(self, blocks: Sequence[tuple[bytes, bytes]]) -> None:
         """Queue v1.1.0+ (prefix, data) blocks for transmission."""
         self._pending_blocks_v110.extend(blocks)
+        self._trim_pending_blocks()
         self._notify_event.set()
 
     async def _get_or_open_stream(self) -> INetStream | None:
@@ -283,6 +326,7 @@ class BitswapMessageQueue:
                     self._pending_presences[cid] = has_block
                 self._pending_blocks_v100 = blocks_v100 + self._pending_blocks_v100
                 self._pending_blocks_v110 = blocks_v110 + self._pending_blocks_v110
+                self._trim_pending_blocks()
                 if full_wantlist and (wants or cancels or presences):
                     self._full_wantlist = True
         return ok

@@ -1318,10 +1318,8 @@ class KadDHT(Service):
         peers_discovered: int = 0
         peers_added: int = 0
         if getattr(self, "rt_refresh_manager", None) is not None:
-            peers_discovered, peers_added = (
-                await self.rt_refresh_manager._do_refresh(  # type: ignore[union-attr]
-                    force=True
-                )
+            peers_discovered, peers_added = await self.rt_refresh_manager._do_refresh(  # type: ignore[union-attr]
+                force=True
             )
         else:
             await self.peer_routing.refresh_routing_table()
@@ -1767,6 +1765,15 @@ class KadDHT(Service):
         Accepts either a CID string or a multihash hex string.
         """
         return await self.provider_store.provide(_encode_key(key))
+
+    def unprovide(self, key: str) -> bool:
+        """
+        Forget a local provider record for *key*.
+
+        Accepts either a CID string or a multihash hex string. Local
+        bookkeeping only; there is no DHT unprovide message.
+        """
+        return self.provider_store.unprovide(_encode_key(key))
 
     async def find_providers(self, key: str, count: int = 20) -> list[PeerInfo]:
         """

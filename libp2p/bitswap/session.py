@@ -269,8 +269,17 @@ class BitswapSession:
 
                     for target in targets:
                         # The provider may not be connected yet — dial before
-                        # sending so the WANT-BLOCK actually reaches it.
-                        await self._dial_provider(target)
+                        # sending so the WANT-BLOCK actually reaches it. If the
+                        # dial fails (no addresses / unreachable provider), do
+                        # not create per-peer queue state: a peer that never
+                        # connects never emits the disconnect that cleans it.
+                        if not await self._dial_provider(target):
+                            logger.debug(
+                                f"Session {self.id}: Skipping unreachable "
+                                f"provider {target} for WANT-BLOCK"
+                            )
+                            block_requested_from.add(target)
+                            continue
                         await self.client.want_block(
                             cid, want_type=0, send_dont_have=True
                         )
@@ -401,11 +410,15 @@ class BitswapSession:
         cid_objs = [parse_cid(c) for c in cids]
 
         remaining: list[CIDObject] = []
+        seen_cids: set[CIDObject] = set()
         for cid_obj in cid_objs:
             data = await self.client.block_store.get_block(cid_obj)
             if data is not None:
                 results[cid_obj.buffer] = data
-            else:
+            elif cid_obj not in seen_cids:
+                # Duplicate CIDs would register multiple events but only the
+                # last one is tracked for cleanup, orphaning the earlier ones.
+                seen_cids.add(cid_obj)
                 remaining.append(cid_obj)
 
         if not remaining:
@@ -503,6 +516,12 @@ class BitswapSession:
                                     requested_from[cid].add(peer_id)
 
                     for p, b_cids in to_peer.items():
+                        if not await self._dial_provider(p):
+                            logger.debug(
+                                f"Session {self.id}: Skipping unreachable "
+                                f"provider {p} for batch WANT-BLOCK"
+                            )
+                            continue
                         logger.debug(
                             f"Session {self.id}: Batch sending WANT-BLOCK "
                             f"to {p} for {len(b_cids)} CIDs"

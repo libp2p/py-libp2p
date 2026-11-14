@@ -793,3 +793,60 @@ class TestProviderStore:
             store.add_provider(b"key_5", provider)
             assert len(store.providers) == 5
             assert b"key_5" in store.providers
+
+
+class _FakeHost:
+    def __init__(self) -> None:
+        self.peer_id = ID(b"local-probe-peer")
+
+    def get_id(self):
+        return self.peer_id
+
+    def get_addrs(self):
+        return []
+
+    def get_event_bus(self):
+        return Mock(emit=Mock())
+
+
+class _FakePeerRouting:
+    async def find_closest_peers_network(self, key):
+        return []
+
+
+class TestProviderStoreLocalUnprovide:
+    """A local publication must be forgettable, and the cap must still apply."""
+
+    @pytest.mark.trio
+    async def test_unprovide_removes_all_metadata(self):
+        store = ProviderStore(host=_FakeHost(), peer_routing=_FakePeerRouting())
+        await store.provide(b"local-key")
+        assert b"local-key" in store.providing_keys
+        assert b"local-key" in store.providers
+
+        assert store.unprovide(b"local-key") is True
+
+        assert b"local-key" not in store.providing_keys
+        assert b"local-key" not in store.providers
+        assert b"local-key" not in store._last_republish
+        assert store.unprovide(b"local-key") is False
+
+    @pytest.mark.trio
+    async def test_cap_is_enforced_when_every_key_is_locally_provided(self):
+        store = ProviderStore(host=_FakeHost(), peer_routing=_FakePeerRouting())
+
+        with patch("libp2p.kad_dht.provider_store.MAX_PROVIDER_KEYS", 5):
+            for i in range(8):
+                await store.provide(b"local-%d" % i)
+
+            assert len(store.providers) == 5
+            assert len(store.providing_keys) == 5
+
+            # The newest key survived; unproviding it must remove it.
+            assert store.unprovide(b"local-7") is True
+            assert b"local-7" not in store.providers
+
+            # Republishing must not resurrect a key that was unprovided.
+            await store._republish_provider_records()
+            assert b"local-7" not in store.providers
+            assert b"local-7" not in store.providing_keys

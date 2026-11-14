@@ -420,6 +420,13 @@ class QUICTransport(ITransport):
         logger.debug("Created QUIC listener with security")
         return listener
 
+    def _remove_listener(self, listener: "QUICListener") -> None:
+        """Unregister a listener that has finished closing."""
+        try:
+            self._listeners.remove(listener)
+        except ValueError:
+            pass
+
     def can_dial(self, maddr: multiaddr.Multiaddr) -> bool:
         """
         Check if this transport can dial the given multiaddr.
@@ -485,8 +492,9 @@ class QUICTransport(ITransport):
             for connection in self._connections.values():
                 nursery.start_soon(connection.close)
 
-            # Close all listeners
-            for listener in self._listeners:
+            # Close all listeners. Iterate a snapshot: each listener removes
+            # itself from the registry as it closes.
+            for listener in list(self._listeners):
                 nursery.start_soon(listener.close)
 
         self._connections.clear()

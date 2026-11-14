@@ -45,6 +45,11 @@ if TYPE_CHECKING:
 # controls verbosity (e.g. via LIBP2P_DEBUG or py-ipfs-lite's --debug flag).
 logger = logging.getLogger(__name__)
 
+# Upper bound for teardown work in ``close()``. The teardown is shielded from
+# caller cancellation, so it must not be able to block a cancelled task
+# indefinitely.
+_LISTENER_CLOSE_TIMEOUT = 5.0
+
 
 class ServerQuicConnection(QuicConnection):
     """
@@ -119,6 +124,7 @@ class QUICListener(IListener):
         # Listener state
         self._closed = False
         self._listening = False
+        self._close_complete = trio.Event()
         self._nursery: trio.Nursery | None = None
 
         # State for the "owned nursery" fallback path in listen().  Populated
@@ -1500,14 +1506,19 @@ class QUICListener(IListener):
         except trio.Cancelled:
             pass
 
-    async def close(self) -> None:
-        """Close the listener and clean up resources."""
-        if self._closed:
-            return
+    def _close_socket(self) -> None:
+        """Idempotently release the UDP socket and bound addresses."""
+        socket_handle = self._socket
+        self._socket = None
+        if socket_handle is not None:
+            try:
+                socket_handle.close()
+            except Exception as e:  # pragma: no cover - OS-level close race
+                logger.debug(f"Error closing listener socket: {e}")
+        self._bound_addresses.clear()
 
-        self._closed = True
-        self._listening = False
-
+    async def _close_impl(self) -> None:
+        """Release all owned resources. Must be cancellation-safe via caller."""
         try:
             # Close all connections
             # Get all Connection IDs before removing (to avoid modifying dict
@@ -1530,13 +1541,6 @@ class QUICListener(IListener):
                 self._pending_cid_by_quic_id.clear()
                 self._handler_invoked_quic_ids.clear()
 
-            # Close socket
-            if self._socket:
-                self._socket.close()
-                self._socket = None
-
-            self._bound_addresses.clear()
-
             # If we spawned our own internal nursery (fallback path),
             # cancel it and wait for the background system task to finish.
             if self._owned_started is not None and self._owned_started.is_set():
@@ -1549,6 +1553,39 @@ class QUICListener(IListener):
 
         except Exception as e:
             logger.error(f"Error closing listener: {e}")
+
+    async def close(self) -> None:
+        """
+        Close the listener and clean up resources.
+
+        Teardown is shielded from caller cancellation and bounded by
+        ``_LISTENER_CLOSE_TIMEOUT``. Previously a cancelled close marked the
+        listener closed before reaching socket cleanup; the retry then returned
+        immediately, leaking the UDP socket and the owned background nursery.
+        Socket release now always runs, and an interrupted teardown can still
+        be retried because ``_close_complete`` is only set after full success.
+        """
+        if self._close_complete.is_set():
+            return
+
+        self._closed = True
+        self._listening = False
+
+        with trio.CancelScope() as close_scope:
+            close_scope.shield = True
+            try:
+                with trio.move_on_after(_LISTENER_CLOSE_TIMEOUT) as cleanup_scope:
+                    await self._close_impl()
+            finally:
+                # Always release the socket, even if registry teardown raised
+                # or was interrupted.
+                self._close_socket()
+            if not cleanup_scope.cancelled_caught:
+                self._close_complete.set()
+                self._transport._remove_listener(self)
+        # Deferred cancellation was suppressed by the shield; surface it now
+        # that teardown has completed.
+        await trio.lowlevel.checkpoint_if_cancelled()
 
     async def _remove_connection_by_object(
         self, connection_obj: "QUICConnection"

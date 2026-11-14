@@ -298,6 +298,29 @@ class ProviderStore:
         self.host.get_event_bus().emit(event)
         return success_count > 0
 
+    def unprovide(self, key: bytes) -> bool:
+        """
+        Stop tracking a local provider record for *key*.
+
+        Removes the key from ``providing_keys`` and ``_last_republish`` and
+        drops the locally stored provider record. Returns True if the key was
+        being provided. This is local bookkeeping only; it does not send a
+        network revocation (Bitswap/DHT have no unprovide message).
+
+        :param key: The content key (multihash) to forget
+
+        Returns
+        -------
+        bool
+            True if the key was previously tracked as locally provided
+
+        """
+        was_providing = key in self.providing_keys
+        self._drop_key(key)
+        if was_providing:
+            self._save()
+        return was_providing
+
     async def _send_add_provider(self, peer_id: ID, key: bytes) -> bool:
         """
         Send ADD_PROVIDER message to a specific peer.
@@ -603,6 +626,12 @@ class ProviderStore:
 
         return providers, closer_peers
 
+    def _drop_key(self, key: bytes) -> None:
+        """Forget everything tracked for *key* (provider record and metadata)."""
+        self.providers.pop(key, None)
+        self._last_republish.pop(key, None)
+        self.providing_keys.discard(key)
+
     def add_provider(self, key: bytes, provider: PeerInfo) -> None:
         """
         Add a provider for a given content key.
@@ -621,15 +650,17 @@ class ProviderStore:
 
         # Cap total keys in provider store to prevent unbounded memory growth
         if key not in self.providers and len(self.providers) >= MAX_PROVIDER_KEYS:
-            # Evict the oldest non-locally-provided key
-            evicted_key = None
-            for k in self.providers:
-                if k not in self.providing_keys:
-                    evicted_key = k
-                    break
+            # Prefer evicting a key that is not locally provided. If every
+            # entry is a local publication (e.g. a node that has added more
+            # than MAX_PROVIDER_KEYS blocks), fall back to the oldest entry so
+            # the cap remains effective instead of being silently disabled.
+            evicted_key = next(
+                (k for k in self.providers if k not in self.providing_keys), None
+            )
+            if evicted_key is None and self.providers:
+                evicted_key = next(iter(self.providers))
             if evicted_key is not None:
-                del self.providers[evicted_key]
-                self._last_republish.pop(evicted_key, None)
+                self._drop_key(evicted_key)
 
         # Initialize providers for this key if needed
         if key not in self.providers:
@@ -731,18 +762,18 @@ class ProviderStore:
             self._last_republish.pop(key, None)
             logger.debug(f"Removed key with no providers: {key.hex()}")
 
-        # Enforce max keys during periodic cleanup
+        # Enforce max keys during periodic cleanup. If every record is a local
+        # publication, evict the oldest one so the cap is still enforced.
         while len(self.providers) > MAX_PROVIDER_KEYS:
-            evicted = False
-            for k in list(self.providers.keys()):
-                if k not in self.providing_keys:
-                    del self.providers[k]
-                    self._last_republish.pop(k, None)
-                    evicted = True
-                    removed_any = True
-                    break
-            if not evicted:
+            evicted_key = next(
+                (k for k in self.providers if k not in self.providing_keys), None
+            )
+            if evicted_key is None:
+                evicted_key = next(iter(self.providers), None)
+            if evicted_key is None:
                 break
+            self._drop_key(evicted_key)
+            removed_any = True
 
         if expired_keys or removed_any:
             self._save()
