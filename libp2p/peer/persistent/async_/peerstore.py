@@ -266,22 +266,42 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
 
     DATASTORE_PRUNE_INTERVAL = 512
     DATASTORE_PRUNE_BATCH = 512
+    DATASTORE_DELETE_CHUNK = 512
+
+    def _peer_key_prefixes(self) -> tuple[bytes, ...]:
+        """All key prefixes that are scoped to a single peer ID."""
+        return (
+            self.ADDR_PREFIX,
+            self.KEY_PREFIX,
+            self.METADATA_PREFIX,
+            self.PROTOCOL_PREFIX,
+            self.PEER_RECORD_PREFIX,
+            b"additional:",
+            b"latency:",
+        )
 
     async def _iter_stored_peer_ids(self) -> list[ID]:
-        """Peer IDs that currently have a persisted address record."""
-        peer_ids: list[ID] = []
-        prefix_len = len(self.ADDR_PREFIX)
-        try:
-            for key, _ in self.datastore.query(self.ADDR_PREFIX):
-                if not key.startswith(self.ADDR_PREFIX):
-                    continue
-                try:
-                    peer_ids.append(ID(key[prefix_len:]))
-                except Exception:
-                    continue
-        except Exception as e:
-            logger.error(f"Failed to enumerate stored peers: {e}")
-        return peer_ids
+        """
+        Peer IDs that have any persisted record.
+
+        Addresses are not the only rows a peer can own: identifying a peer
+        writes protocol/key rows even when it advertises no address, and
+        those peers would otherwise never become pruning candidates.
+        """
+        peer_ids: set[ID] = set()
+        for prefix in self._peer_key_prefixes():
+            prefix_len = len(prefix)
+            try:
+                for key, _ in self.datastore.query(prefix):
+                    if not key.startswith(prefix):
+                        continue
+                    try:
+                        peer_ids.add(ID(key[prefix_len:]))
+                    except Exception:
+                        continue
+            except Exception as e:
+                logger.error(f"Failed to enumerate stored peers ({prefix!r}): {e}")
+        return list(peer_ids)
 
     async def _peer_recency(self, peer_id: ID) -> int:
         """Best-effort last-seen timestamp for a persisted peer."""
@@ -294,7 +314,7 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
         return 0
 
     async def _delete_peers_from_datastore(self, peer_ids: Sequence[ID]) -> None:
-        """Delete all persisted rows for the given peers in one batch."""
+        """Delete all persisted rows for the given peers, in bounded chunks."""
         if not peer_ids:
             return
         keys = [
@@ -308,16 +328,18 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
         ]
         try:
             batch_factory = getattr(self.datastore, "batch", None)
-            if batch_factory is not None:
-                batch = await batch_factory()
-                for peer_id in peer_ids:
-                    for key_fn in keys:
-                        await batch.delete(key_fn(peer_id))
-                await batch.commit()
-            else:
-                for peer_id in peer_ids:
-                    for key_fn in keys:
-                        await self.datastore.delete(key_fn(peer_id))
+            for start in range(0, len(peer_ids), self.DATASTORE_DELETE_CHUNK):
+                chunk = list(peer_ids[start : start + self.DATASTORE_DELETE_CHUNK])
+                if batch_factory is not None:
+                    batch = await batch_factory()
+                    for peer_id in chunk:
+                        for key_fn in keys:
+                            await batch.delete(key_fn(peer_id))
+                    await batch.commit()
+                else:
+                    for peer_id in chunk:
+                        for key_fn in keys:
+                            await self.datastore.delete(key_fn(peer_id))
             await self.datastore.sync(b"")
             for peer_id in peer_ids:
                 self.peer_data_map.pop(peer_id, None)

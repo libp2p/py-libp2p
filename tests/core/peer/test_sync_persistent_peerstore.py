@@ -563,3 +563,47 @@ def test_sync_peerstore_caps_addresses_loaded_from_datastore(tmp_path):
     assert loaded[-1] == addrs[-1]
     assert addrs[0] not in loaded
     store.close()
+
+
+def test_sync_peerstore_prunes_peers_without_addresses(tmp_path):
+    """Peers that only have protocol/key rows must also be pruned."""
+    from libp2p.peer.persistent.datastore.sqlite_sync import SQLiteDatastoreSync
+    from libp2p.peer.persistent.sync.peerstore import SyncPersistentPeerStore
+
+    datastore = SQLiteDatastoreSync(path=tmp_path / "addrless_peerstore.db")
+    legacy = SyncPersistentPeerStore(
+        datastore, max_cached_peers=500, max_stored_peers=500
+    )
+    # No addresses at all: only an identify-style protocol row per peer.
+    for i in range(500):
+        legacy.add_protocols(ID(b"addrless-%08d" % i), ["/ipfs/id/1.0.0"])
+    assert datastore.count(b"protocol:") == 500
+
+    store = SyncPersistentPeerStore(datastore, max_cached_peers=50, max_stored_peers=50)
+    removed = store.enforce_datastore_limit()
+    assert removed == 450
+    assert datastore.count(b"protocol:") == 50
+    store.close()
+
+
+def test_sqlite_compact_truncates_wal(tmp_path):
+    """A big delete + compact must not leave a huge WAL sidecar behind."""
+    from libp2p.peer.persistent.datastore.sqlite_sync import SQLiteDatastoreSync
+
+    db_path = tmp_path / "wal_peerstore.db"
+    datastore = SQLiteDatastoreSync(path=db_path)
+    payload = b"x" * 2048
+    for i in range(4000):
+        datastore.put(b"addr:" + (b"%08d" % i), payload)
+    datastore.sync(b"")
+
+    batch = datastore.batch()
+    for i in range(4000):
+        batch.delete(b"addr:" + (b"%08d" % i))
+    batch.commit()
+    datastore.sync(b"")
+
+    assert datastore.compact(min_free_bytes=0) is True
+    wal_size = db_path.with_suffix(".db-wal").stat().st_size
+    assert wal_size == 0
+    datastore.close()

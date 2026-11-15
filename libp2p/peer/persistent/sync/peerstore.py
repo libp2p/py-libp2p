@@ -192,37 +192,50 @@ class SyncPersistentPeerStore(IPeerStore):
     # Peers removed per periodic check.  Large legacy databases are drained
     # by the startup call with no per-call budget.
     DATASTORE_PRUNE_BATCH = 512
+    # Victims deleted per transaction.  A single transaction covering tens of
+    # thousands of peers writes every touched page to the WAL and can leave a
+    # sidecar far larger than the database; chunking lets SQLite checkpoint as
+    # it goes.
+    DATASTORE_DELETE_CHUNK = 512
 
-    def _count_stored_peers(self) -> int:
-        """Number of peers with a persisted address record."""
-        try:
-            counter = getattr(self.datastore, "count", None)
-            if counter is not None:
-                return int(counter(self.ADDR_PREFIX))
-            return sum(1 for _ in self.datastore.query(self.ADDR_PREFIX))
-        except Exception as e:
-            logger.error(f"Failed to count stored peers: {e}")
-            return 0
+    def _peer_key_prefixes(self) -> tuple[bytes, ...]:
+        """All key prefixes that are scoped to a single peer ID."""
+        return (
+            self.ADDR_PREFIX,
+            self.KEY_PREFIX,
+            self.METADATA_PREFIX,
+            self.PROTOCOL_PREFIX,
+            self.PEER_RECORD_PREFIX,
+            b"additional:",
+            b"latency:",
+        )
 
     def _iter_stored_peer_ids(self) -> list[ID]:
-        """Peer IDs that currently have a persisted address record."""
-        peer_ids: list[ID] = []
-        prefix_len = len(self.ADDR_PREFIX)
-        try:
-            if hasattr(self.datastore, "query_keys"):
-                key_iter = self.datastore.query_keys(self.ADDR_PREFIX)
-            else:
-                key_iter = (k for k, _ in self.datastore.query(self.ADDR_PREFIX))
-            for key in key_iter:
-                if not key.startswith(self.ADDR_PREFIX):
-                    continue
-                try:
-                    peer_ids.append(ID(key[prefix_len:]))
-                except Exception:
-                    continue
-        except Exception as e:
-            logger.error(f"Failed to enumerate stored peers: {e}")
-        return peer_ids
+        """
+        Peer IDs that have any persisted record.
+
+        Addresses are not the only rows a peer can own: identifying a peer
+        writes protocol/key rows even when it advertises no address, and
+        those peers would otherwise never become pruning candidates.
+        """
+        peer_ids: set[ID] = set()
+        for prefix in self._peer_key_prefixes():
+            prefix_len = len(prefix)
+            try:
+                if hasattr(self.datastore, "query_keys"):
+                    key_iter = self.datastore.query_keys(prefix)
+                else:
+                    key_iter = (k for k, _ in self.datastore.query(prefix))
+                for key in key_iter:
+                    if not key.startswith(prefix):
+                        continue
+                    try:
+                        peer_ids.add(ID(key[prefix_len:]))
+                    except Exception:
+                        continue
+            except Exception as e:
+                logger.error(f"Failed to enumerate stored peers ({prefix!r}): {e}")
+        return list(peer_ids)
 
     def _peer_recency(self, peer_id: ID) -> int:
         """Best-effort last-seen timestamp for a persisted peer."""
@@ -235,32 +248,31 @@ class SyncPersistentPeerStore(IPeerStore):
         return 0
 
     def _delete_peers_from_datastore(self, peer_ids: Sequence[ID]) -> None:
-        """Delete all persisted rows for the given peers in one transaction."""
+        """Delete all persisted rows for the given peers, in bounded chunks."""
         if not peer_ids:
             return
         try:
             batch_factory = getattr(self.datastore, "batch", None)
-            batch = batch_factory() if batch_factory is not None else None
-            for peer_id in peer_ids:
-                for key in (
-                    self._get_addr_key(peer_id),
-                    self._get_key_key(peer_id),
-                    self._get_metadata_key(peer_id),
-                    self._get_protocol_key(peer_id),
-                    self._get_peer_record_key(peer_id),
-                    self._get_additional_key(peer_id),
-                    self._get_latency_key(peer_id),
-                ):
-                    if batch is not None:
-                        batch.delete(key)
-                    else:
-                        self.datastore.delete(key)
-                if batch is None:
-                    self.peer_data_map.pop(peer_id, None)
-                    self.peer_record_map.pop(peer_id, None)
-            if batch is not None:
-                batch.commit()
-                for peer_id in peer_ids:
+            for start in range(0, len(peer_ids), self.DATASTORE_DELETE_CHUNK):
+                chunk = list(peer_ids[start : start + self.DATASTORE_DELETE_CHUNK])
+                batch = batch_factory() if batch_factory is not None else None
+                for peer_id in chunk:
+                    for key in (
+                        self._get_addr_key(peer_id),
+                        self._get_key_key(peer_id),
+                        self._get_metadata_key(peer_id),
+                        self._get_protocol_key(peer_id),
+                        self._get_peer_record_key(peer_id),
+                        self._get_additional_key(peer_id),
+                        self._get_latency_key(peer_id),
+                    ):
+                        if batch is not None:
+                            batch.delete(key)
+                        else:
+                            self.datastore.delete(key)
+                if batch is not None:
+                    batch.commit()
+                for peer_id in chunk:
                     self.peer_data_map.pop(peer_id, None)
                     self.peer_record_map.pop(peer_id, None)
             self.datastore.sync(b"")
@@ -294,7 +306,8 @@ class SyncPersistentPeerStore(IPeerStore):
         """
         cap = self.max_stored_peers if limit is None else limit
         with self._lock:
-            overflow = self._count_stored_peers() - cap
+            stored_ids = self._iter_stored_peer_ids()
+            overflow = len(stored_ids) - cap
             if overflow <= 0:
                 return 0
             if max_deletes is not None:
@@ -302,7 +315,7 @@ class SyncPersistentPeerStore(IPeerStore):
 
             cached = set(self.peer_data_map)
             candidates: list[tuple[int, ID]] = []
-            for peer_id in self._iter_stored_peer_ids():
+            for peer_id in stored_ids:
                 if peer_id == self.local_peer_id or peer_id in cached:
                     continue
                 candidates.append((self._peer_recency(peer_id), peer_id))

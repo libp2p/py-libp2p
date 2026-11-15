@@ -287,6 +287,13 @@ class SQLiteDatastoreSync(IBatchingDatastoreSync):
             self.connection.commit()
             cursor.execute("VACUUM")
             self.connection.commit()
+            # A large prune writes every touched page to the WAL, so the -wal
+            # file can be much bigger than the database itself.  Checkpointing
+            # with TRUNCATE moves those pages into the database and resets the
+            # WAL, otherwise the freed disk space just moves from the .db file
+            # to the sidecar.
+            cursor.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            self.connection.commit()
             logger.info(
                 "Compacted SQLite datastore %s (freed about %.1f MiB)",
                 self.path,
