@@ -303,6 +303,22 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
             logger.error(f"Failed to enumerate stored peers: {e}")
         return list(peer_ids)
 
+    def _peer_recency_map(self) -> dict[ID, int]:
+        """Last-seen timestamp for every peer that has one, in one scan."""
+        recency: dict[ID, int] = {}
+        try:
+            for key, value in self.datastore.query(b"additional:"):
+                try:
+                    peer_id = ID(key[len(b"additional:") :])
+                    recency[peer_id] = int(
+                        deserialize_metadata(value).get("last_identified", 0)
+                    )
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return recency
+
     async def _peer_recency(self, peer_id: ID) -> int:
         """Best-effort last-seen timestamp for a persisted peer."""
         try:
@@ -374,11 +390,12 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
                 overflow = min(overflow, max_deletes)
 
             cached = set(self.peer_data_map)
+            recency = self._peer_recency_map()
             candidates: list[tuple[int, ID]] = []
             for peer_id in stored_ids:
                 if peer_id == self.local_peer_id or peer_id in cached:
                     continue
-                candidates.append((await self._peer_recency(peer_id), peer_id))
+                candidates.append((recency.get(peer_id, 0), peer_id))
             if not candidates:
                 return 0
 
