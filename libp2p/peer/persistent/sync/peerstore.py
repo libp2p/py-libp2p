@@ -219,22 +219,22 @@ class SyncPersistentPeerStore(IPeerStore):
         those peers would otherwise never become pruning candidates.
         """
         peer_ids: set[ID] = set()
-        for prefix in self._peer_key_prefixes():
-            prefix_len = len(prefix)
-            try:
-                if hasattr(self.datastore, "query_keys"):
-                    key_iter = self.datastore.query_keys(prefix)
-                else:
-                    key_iter = (k for k, _ in self.datastore.query(prefix))
-                for key in key_iter:
-                    if not key.startswith(prefix):
-                        continue
-                    try:
-                        peer_ids.add(ID(key[prefix_len:]))
-                    except Exception:
-                        continue
-            except Exception as e:
-                logger.error(f"Failed to enumerate stored peers ({prefix!r}): {e}")
+        prefixes = [(prefix, len(prefix)) for prefix in self._peer_key_prefixes()]
+        try:
+            if hasattr(self.datastore, "query_keys"):
+                key_iter = self.datastore.query_keys()
+            else:
+                key_iter = (k for k, _ in self.datastore.query())
+            for key in key_iter:
+                for prefix, prefix_len in prefixes:
+                    if key.startswith(prefix):
+                        try:
+                            peer_ids.add(ID(key[prefix_len:]))
+                        except Exception:
+                            pass
+                        break
+        except Exception as e:
+            logger.error(f"Failed to enumerate stored peers: {e}")
         return list(peer_ids)
 
     def _peer_recency(self, peer_id: ID) -> int:
