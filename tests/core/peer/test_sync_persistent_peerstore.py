@@ -607,3 +607,22 @@ def test_sqlite_compact_truncates_wal(tmp_path):
     wal_size = db_path.with_suffix(".db-wal").stat().st_size
     assert wal_size == 0
     datastore.close()
+
+
+def test_sqlite_compact_truncates_wal_without_vacuum(tmp_path):
+    """compact() drains the WAL even when no VACUUM is needed."""
+    from libp2p.peer.persistent.datastore.sqlite_sync import SQLiteDatastoreSync
+
+    db_path = tmp_path / "wal_no_vacuum.db"
+    datastore = SQLiteDatastoreSync(path=db_path)
+    for i in range(500):
+        datastore.put(b"key:" + (b"%08d" % i), b"y" * 1024)
+    datastore.sync(b"")
+    wal_path = db_path.parent / (db_path.name + "-wal")
+    assert wal_path.stat().st_size > 0
+
+    # min_free_bytes well above what the freelist holds -> no VACUUM.
+    assert datastore.compact(min_free_bytes=1 << 40) is False
+    assert datastore.checkpoint() is True
+    assert wal_path.stat().st_size == 0
+    datastore.close()
