@@ -24,7 +24,7 @@ from libp2p.crypto.serialization import (
 from libp2p.custom_types import MetadataValue
 from libp2p.peer.envelope import Envelope
 from libp2p.peer.id import ID
-from libp2p.peer.peerdata import PeerData, PeerDataError
+from libp2p.peer.peerdata import MAX_ADDRS_PER_PEER, PeerData, PeerDataError
 from libp2p.peer.peerinfo import PeerInfo
 from libp2p.peer.peerstore import (
     PeerRecordState,
@@ -349,6 +349,10 @@ class SyncPersistentPeerStore(IPeerStore):
                 addr_data = self.datastore.get(addr_key)
                 if addr_data:
                     peer_data.addrs = deserialize_addresses(addr_data)
+                    # Rows written before the per-peer cap may hold hundreds
+                    # of stale addresses; never load more than the cap.
+                    if len(peer_data.addrs) > MAX_ADDRS_PER_PEER:
+                        peer_data.addrs = peer_data.addrs[-MAX_ADDRS_PER_PEER:]
 
                 # Load keys
                 key_key = self._get_key_key(peer_id)

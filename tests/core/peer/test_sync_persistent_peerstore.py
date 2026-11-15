@@ -543,3 +543,23 @@ def test_sync_peerstore_trim_legacy_backlog(tmp_path):
     assert removed == 400
     assert datastore.count(store.ADDR_PREFIX) == 100
     store.close()
+
+
+def test_sync_peerstore_caps_addresses_loaded_from_datastore(tmp_path):
+    """Rows written before the per-peer cap must be truncated on load."""
+    from libp2p.peer.peerdata import MAX_ADDRS_PER_PEER
+    from libp2p.peer.persistent.datastore.sqlite_sync import SQLiteDatastoreSync
+    from libp2p.peer.persistent.serialization import serialize_addresses
+    from libp2p.peer.persistent.sync.peerstore import SyncPersistentPeerStore
+
+    datastore = SQLiteDatastoreSync(path=tmp_path / "legacy_addrs.db")
+    pid = ID(b"legacy-addresses")
+    addrs = [Multiaddr(f"/ip4/10.0.0.1/tcp/{1000 + i}") for i in range(200)]
+    datastore.put(b"addr:" + pid.to_bytes(), serialize_addresses(addrs))
+
+    store = SyncPersistentPeerStore(datastore)
+    loaded = store.addrs(pid)
+    assert len(loaded) == MAX_ADDRS_PER_PEER
+    assert loaded[-1] == addrs[-1]
+    assert addrs[0] not in loaded
+    store.close()
