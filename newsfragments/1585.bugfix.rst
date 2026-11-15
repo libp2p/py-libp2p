@@ -1,0 +1,1 @@
+``/dns6/localhost`` and other ``*.localhost`` names are no longer treated as needing public IPv6, so they can be dialed on hosts with no global IPv6 address.
