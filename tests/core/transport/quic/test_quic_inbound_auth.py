@@ -184,3 +184,77 @@ def test_server_quic_connection_requests_client_certificate() -> None:
         conn._initialize(b"\x02" * 8)
 
     assert conn.tls._request_client_certificate is True
+
+
+def test_verify_rejects_forged_proof_of_possession() -> None:
+    """
+    A certificate that embeds a victim's libp2p public key but whose
+    proof-of-possession signature was NOT produced by the victim's private
+    key must be rejected.
+
+    Regression for the libp2p-TLS PoP check being a no-op on QUIC:
+    libp2p PublicKey.verify() returns a bool, so wrapping it in try/except
+    (expecting an exception on a bad signature) silently accepted any
+    signature and allowed peer-ID impersonation.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    from libp2p.transport.quic.exceptions import QUICPeerVerificationError
+    from libp2p.transport.quic.security import (
+        LIBP2P_TLS_EXTENSION_OID,
+        LibP2PExtensionHandler,
+    )
+
+    victim = create_new_key_pair()
+    victim_id = ID.from_pubkey(victim.public_key)
+
+    # Attacker owns the TLS cert key but NOT the victim's libp2p key.
+    cert_key = ec.generate_private_key(ec.SECP256R1())
+    cert_pub_der = cert_key.public_key().public_bytes(
+        serialization.Encoding.DER,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+
+    # Forge: embed the victim's public key, but sign the PoP payload with a
+    # throwaway key, so the signature is invalid for the victim's key.
+    bogus = create_new_key_pair()
+    bad_sig = bogus.private_key.sign(b"libp2p-tls-handshake:" + cert_pub_der)
+    ext_data = LibP2PExtensionHandler._create_asn1_der_extension(
+        victim.public_key.serialize(), bad_sig
+    )
+
+    now = datetime.now(timezone.utc)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(
+            x509.Name(
+                [x509.NameAttribute(NameOID.COMMON_NAME, victim_id.to_base58())]  # type: ignore
+            )
+        )
+        .issuer_name(
+            x509.Name(
+                [x509.NameAttribute(NameOID.COMMON_NAME, victim_id.to_base58())]  # type: ignore
+            )
+        )
+        .public_key(cert_key.public_key())
+        .serial_number(1)
+        .not_valid_before(now - timedelta(minutes=1))
+        .not_valid_after(now + timedelta(days=1))
+        .add_extension(
+            x509.UnrecognizedExtension(LIBP2P_TLS_EXTENSION_OID, ext_data),
+            critical=False,
+        )
+        .sign(cert_key, hashes.SHA256())
+    )
+
+    manager = QUICTLSConfigManager(
+        libp2p_private_key=victim.private_key, peer_id=victim_id
+    )
+
+    with pytest.raises(QUICPeerVerificationError):
+        manager.verify_peer_identity(cert, expected_peer_id=victim_id)
