@@ -168,6 +168,10 @@ def is_public_ipv6_address(addr: Multiaddr) -> bool:
     try:
         for proto, val in addr.items():
             if proto.name == "dns6":
+                # RFC 6761 reserves localhost names for loopback.
+                host = str(val).rstrip(".").lower()
+                if host == "localhost" or host.endswith(".localhost"):
+                    continue
                 return True
             if proto.name == "ip6":
                 if not val:
