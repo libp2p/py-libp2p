@@ -26,6 +26,17 @@ is changes). This must be a normalized (0-1) value.
 """
 LATENCY_EWMA_SMOOTHING = 0.1
 
+"""
+Hard cap on the number of addresses retained per peer.
+
+A peer can keep advertising new addresses (new listen ports on every
+restart, several transports, several hosts).  Without a cap the per-peer
+address list grows for the lifetime of the process, and the persisted
+address blob grows with it.  Keeping the most recently seen addresses is
+what dialing needs; older ones are stale by definition.
+"""
+MAX_ADDRS_PER_PEER = 32
+
 
 class PeerData(IPeerData):
     pubkey: PublicKey | None
@@ -101,10 +112,18 @@ class PeerData(IPeerData):
     def add_addrs(self, addrs: Sequence[Multiaddr]) -> None:
         """
         :param addrs: multiaddresses to add
+
+        Addresses are ordered by recency: re-adding an existing address moves
+        it to the end, and the oldest entries are dropped once
+        ``MAX_ADDRS_PER_PEER`` is exceeded so a peer cannot grow this list
+        without bound.
         """
         for addr in addrs:
-            if addr not in self.addrs:
-                self.addrs.append(addr)
+            if addr in self.addrs:
+                self.addrs.remove(addr)
+            self.addrs.append(addr)
+        if len(self.addrs) > MAX_ADDRS_PER_PEER:
+            del self.addrs[:-MAX_ADDRS_PER_PEER]
 
     def get_addrs(self) -> list[Multiaddr]:
         """

@@ -5,11 +5,14 @@ This provides a synchronous SQLite-based datastore for persistent storage.
 """
 
 from collections.abc import Iterator
+import logging
 from pathlib import Path
 import sqlite3
 import threading
 
 from .base_sync import IBatchingDatastoreSync, IBatchSync
+
+logger = logging.getLogger(__name__)
 
 
 class SQLiteBatchSync(IBatchSync):
@@ -108,6 +111,11 @@ class SQLiteDatastoreSync(IBatchingDatastoreSync):
                     cursor.execute(
                         "PRAGMA temp_store=MEMORY"
                     )  # Use memory for temp storage
+
+                    # Let SQLite return freed pages to the filesystem for
+                    # databases created from now on.  Existing databases keep
+                    # their layout until compact() runs (VACUUM).
+                    cursor.execute("PRAGMA auto_vacuum=INCREMENTAL")
 
                     # Create table if it doesn't exist
                     cursor.execute("""
@@ -248,6 +256,43 @@ class SQLiteDatastoreSync(IBatchingDatastoreSync):
 
         with self._lock:
             self.connection.commit()
+
+    def compact(self, min_free_bytes: int = 16 * 1024 * 1024) -> bool:
+        """
+        Reclaim free pages with VACUUM when enough space has been freed.
+
+        Deleting rows leaves the pages in SQLite's freelist so future writes
+        reuse them, but the file itself never shrinks.  Running this after a
+        large prune returns the space to the filesystem.  It is a no-op until
+        ``min_free_bytes`` worth of pages are free, so periodic callers stay
+        cheap.
+
+        Returns:
+            True if the database was vacuumed.
+
+        """
+        self._ensure_connection()
+        if self.connection is None:
+            raise ValueError("SQLite connection is not initialized")
+
+        with self._lock:
+            cursor = self.connection.cursor()
+            freelist = cursor.execute("PRAGMA freelist_count").fetchone()
+            page_size = cursor.execute("PRAGMA page_size").fetchone()
+            free_bytes = int(freelist[0]) * int(page_size[0]) if freelist else 0
+            if free_bytes < min_free_bytes:
+                return False
+
+            # VACUUM cannot run inside an open transaction.
+            self.connection.commit()
+            cursor.execute("VACUUM")
+            self.connection.commit()
+            logger.info(
+                "Compacted SQLite datastore %s (freed about %.1f MiB)",
+                self.path,
+                free_bytes / (1024 * 1024),
+            )
+            return True
 
     def close(self) -> None:
         """

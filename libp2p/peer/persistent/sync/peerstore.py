@@ -70,6 +70,7 @@ class SyncPersistentPeerStore(IPeerStore):
         sync_interval: float = 1.0,
         auto_sync: bool = True,
         max_cached_peers: int = 1000,
+        max_stored_peers: int | None = None,
     ) -> None:
         """
         Initialize synchronous persistent peerstore.
@@ -80,6 +81,8 @@ class SyncPersistentPeerStore(IPeerStore):
             sync_interval: Minimum interval between sync operations (seconds)
             auto_sync: Whether to automatically sync after writes
             max_cached_peers: Maximum number of peer data objects to cache in memory
+            max_stored_peers: Maximum number of peers whose records are kept in
+                the datastore. ``None`` uses ``max_records``.
 
         :raises ValueError: If datastore is None or max_records is invalid
 
@@ -90,12 +93,20 @@ class SyncPersistentPeerStore(IPeerStore):
             raise ValueError("max_records must be positive")
         if max_cached_peers <= 0:
             raise ValueError("max_cached_peers must be positive")
+        if max_stored_peers is not None and max_stored_peers <= 0:
+            raise ValueError("max_stored_peers must be positive")
 
         self.datastore = datastore
         self.max_records = max_records
         self.sync_interval = sync_interval
         self.auto_sync = auto_sync
         self.max_cached_peers = max_cached_peers
+        # A cache cap alone does not bound the datastore: evicted peers keep
+        # their rows forever, so every peer ever seen grows the database.
+        self.max_stored_peers = (
+            max_records if max_stored_peers is None else max_stored_peers
+        )
+        self._writes_since_prune = 0
         self.local_peer_id: ID | None = None
         self._last_sync = time.time()
         self._pending_sync = False
@@ -171,6 +182,157 @@ class SyncPersistentPeerStore(IPeerStore):
         """Evict least-recently used peer records from memory cache."""
         while len(self.peer_record_map) > self.max_cached_peers:
             self.peer_record_map.popitem(last=False)
+
+    # --------BOUNDED PERSISTED PEER SET--------
+
+    # Every N writes (while the cache is saturated) the datastore is checked
+    # against max_stored_peers.  The check is O(stored peers), so running it
+    # rarely keeps the amortized cost negligible.
+    DATASTORE_PRUNE_INTERVAL = 512
+    # Peers removed per periodic check.  Large legacy databases are drained
+    # by the startup call with no per-call budget.
+    DATASTORE_PRUNE_BATCH = 512
+
+    def _count_stored_peers(self) -> int:
+        """Number of peers with a persisted address record."""
+        try:
+            counter = getattr(self.datastore, "count", None)
+            if counter is not None:
+                return int(counter(self.ADDR_PREFIX))
+            return sum(1 for _ in self.datastore.query(self.ADDR_PREFIX))
+        except Exception as e:
+            logger.error(f"Failed to count stored peers: {e}")
+            return 0
+
+    def _iter_stored_peer_ids(self) -> list[ID]:
+        """Peer IDs that currently have a persisted address record."""
+        peer_ids: list[ID] = []
+        prefix_len = len(self.ADDR_PREFIX)
+        try:
+            if hasattr(self.datastore, "query_keys"):
+                key_iter = self.datastore.query_keys(self.ADDR_PREFIX)
+            else:
+                key_iter = (k for k, _ in self.datastore.query(self.ADDR_PREFIX))
+            for key in key_iter:
+                if not key.startswith(self.ADDR_PREFIX):
+                    continue
+                try:
+                    peer_ids.append(ID(key[prefix_len:]))
+                except Exception:
+                    continue
+        except Exception as e:
+            logger.error(f"Failed to enumerate stored peers: {e}")
+        return peer_ids
+
+    def _peer_recency(self, peer_id: ID) -> int:
+        """Best-effort last-seen timestamp for a persisted peer."""
+        try:
+            data = self.datastore.get(self._get_additional_key(peer_id))
+            if data:
+                return int(deserialize_metadata(data).get("last_identified", 0))
+        except Exception:
+            pass
+        return 0
+
+    def _delete_peers_from_datastore(self, peer_ids: Sequence[ID]) -> None:
+        """Delete all persisted rows for the given peers in one transaction."""
+        if not peer_ids:
+            return
+        try:
+            batch_factory = getattr(self.datastore, "batch", None)
+            batch = batch_factory() if batch_factory is not None else None
+            for peer_id in peer_ids:
+                for key in (
+                    self._get_addr_key(peer_id),
+                    self._get_key_key(peer_id),
+                    self._get_metadata_key(peer_id),
+                    self._get_protocol_key(peer_id),
+                    self._get_peer_record_key(peer_id),
+                    self._get_additional_key(peer_id),
+                    self._get_latency_key(peer_id),
+                ):
+                    if batch is not None:
+                        batch.delete(key)
+                    else:
+                        self.datastore.delete(key)
+                if batch is None:
+                    self.peer_data_map.pop(peer_id, None)
+                    self.peer_record_map.pop(peer_id, None)
+            if batch is not None:
+                batch.commit()
+                for peer_id in peer_ids:
+                    self.peer_data_map.pop(peer_id, None)
+                    self.peer_record_map.pop(peer_id, None)
+            self.datastore.sync(b"")
+        except Exception as e:
+            logger.error(f"Failed to delete {len(peer_ids)} peers from datastore: {e}")
+
+    def enforce_datastore_limit(
+        self,
+        limit: int | None = None,
+        max_deletes: int | None = None,
+    ) -> int:
+        """
+        Trim the persisted peer set down to ``limit`` peers.
+
+        Evicting a peer from the in-memory cache does not remove its rows, so
+        without this the datastore retains one (potentially large) record for
+        every peer the node has ever seen.  Peers that are currently cached
+        are never candidates: they are local, connected, or actively used.
+        Among the rest, the least recently seen peers are removed first.
+
+        Args:
+            limit: Maximum number of stored peers (defaults to
+                ``max_stored_peers``).
+            max_deletes: Optional cap on peers removed by this call, so a
+                periodic check stays cheap.  ``None`` drains the whole
+                overflow.
+
+        Returns:
+            The number of peers removed.
+
+        """
+        cap = self.max_stored_peers if limit is None else limit
+        with self._lock:
+            overflow = self._count_stored_peers() - cap
+            if overflow <= 0:
+                return 0
+            if max_deletes is not None:
+                overflow = min(overflow, max_deletes)
+
+            cached = set(self.peer_data_map)
+            candidates: list[tuple[int, ID]] = []
+            for peer_id in self._iter_stored_peer_ids():
+                if peer_id == self.local_peer_id or peer_id in cached:
+                    continue
+                candidates.append((self._peer_recency(peer_id), peer_id))
+            if not candidates:
+                return 0
+
+            candidates.sort(key=lambda item: item[0])
+            victims = [peer_id for _, peer_id in candidates[:overflow]]
+            self._delete_peers_from_datastore(victims)
+            if victims:
+                logger.info(
+                    "Peerstore datastore trimmed: removed %d stale peers (limit %d)",
+                    len(victims),
+                    cap,
+                )
+            return len(victims)
+
+    def _maybe_prune_datastore(self) -> None:
+        """Periodically bound the persisted peer set (see enforce_datastore_limit)."""
+        self._writes_since_prune += 1
+        if self._writes_since_prune < self.DATASTORE_PRUNE_INTERVAL:
+            return
+        # Growth only happens once writes start displacing cached peers.
+        if len(self.peer_data_map) < self.max_cached_peers:
+            return
+        self._writes_since_prune = 0
+        try:
+            self.enforce_datastore_limit(max_deletes=self.DATASTORE_PRUNE_BATCH)
+        except Exception:
+            logger.exception("Peerstore datastore trim failed")
 
     def _load_peer_data(self, peer_id: ID) -> PeerData:
         """Load peer data from datastore, creating if not exists."""
@@ -327,6 +489,7 @@ class SyncPersistentPeerStore(IPeerStore):
 
             # Conditionally sync to ensure data is persisted
             self._maybe_sync()
+            self._maybe_prune_datastore()
 
         except SerializationError:
             raise
@@ -434,6 +597,7 @@ class SyncPersistentPeerStore(IPeerStore):
                 self._get_protocol_key(peer_id),
                 self._get_peer_record_key(peer_id),
                 self._get_additional_key(peer_id),
+                self._get_latency_key(peer_id),
             ]
             for key in keys_to_delete:
                 self.datastore.delete(key)

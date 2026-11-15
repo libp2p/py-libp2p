@@ -493,3 +493,53 @@ def test_sync_peerstore_count_peers(tmp_path):
     assert store.count_peers() == 5
     store.close()
 
+
+def test_sync_peerstore_bounds_persisted_peers(tmp_path):
+    """Evicting peers from the cache must also bound the datastore rows."""
+    from libp2p.peer.persistent.datastore.sqlite_sync import SQLiteDatastoreSync
+    from libp2p.peer.persistent.sync.peerstore import SyncPersistentPeerStore
+
+    datastore = SQLiteDatastoreSync(path=tmp_path / "bounded_peerstore.db")
+    store = SyncPersistentPeerStore(
+        datastore, max_cached_peers=50, max_stored_peers=200
+    )
+
+    for i in range(1000):
+        store.add_addrs(
+            ID(b"peer-%08d" % i),
+            [Multiaddr(f"/ip4/10.0.0.1/tcp/{1000 + i}")],
+            ttl=3600,
+        )
+
+    rows = datastore.count(store.ADDR_PREFIX)
+    assert rows <= 200 + store.DATASTORE_PRUNE_INTERVAL
+    store.close()
+
+
+def test_sync_peerstore_trim_legacy_backlog(tmp_path):
+    """enforce_datastore_limit() drains rows written by an older build."""
+    from libp2p.peer.persistent.datastore.sqlite_sync import SQLiteDatastoreSync
+    from libp2p.peer.persistent.sync.peerstore import SyncPersistentPeerStore
+
+    db_path = tmp_path / "legacy_peerstore.db"
+    datastore = SQLiteDatastoreSync(path=db_path)
+    # An unbounded legacy store: every peer keeps its rows.
+    legacy = SyncPersistentPeerStore(
+        datastore, max_cached_peers=500, max_stored_peers=500
+    )
+    for i in range(500):
+        legacy.add_addrs(
+            ID(b"legacy-%08d" % i),
+            [Multiaddr(f"/ip4/10.0.0.2/tcp/{2000 + i}")],
+            ttl=3600,
+        )
+    assert datastore.count(legacy.ADDR_PREFIX) == 500
+
+    # Restart with a smaller cap: the cache is empty, so the backlog is visible.
+    store = SyncPersistentPeerStore(
+        datastore, max_cached_peers=100, max_stored_peers=100
+    )
+    removed = store.enforce_datastore_limit()
+    assert removed == 400
+    assert datastore.count(store.ADDR_PREFIX) == 100
+    store.close()
