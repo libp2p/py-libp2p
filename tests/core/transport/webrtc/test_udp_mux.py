@@ -624,3 +624,36 @@ class TestIceLite:
             assert conn.ice_controlling is False
         finally:
             await mux.close()
+
+
+# ---------------------------------------------------------------------------
+# aioice private-API compatibility (UdpMux pin / #1602)
+# ---------------------------------------------------------------------------
+
+
+class TestAioiceMuxCompatibility:
+    """Fail loudly if aioice renames slots UdpMux injects into."""
+
+    _REQUIRED_CONNECTION_ATTRS = (
+        "_protocols",
+        "_local_candidates",
+        "_local_candidates_start",
+        "_local_candidates_end",
+    )
+
+    def test_connection_exposes_mux_injection_slots(self) -> None:
+        import aioice.ice as ice
+
+        conn = ice.Connection(ice_controlling=False)
+        missing = [a for a in self._REQUIRED_CONNECTION_ATTRS if not hasattr(conn, a)]
+        assert not missing, (
+            "aioice.Connection missing private attrs required by UdpMux "
+            f"{missing!r}; re-validate _udp_mux.py against this aioice version "
+            "(pinned aioice>=0.10.2,<0.11; upstream: aiortc/aioice#158)"
+        )
+
+    def test_stun_protocol_is_importable(self) -> None:
+        import aioice.ice as ice
+
+        assert hasattr(ice, "StunProtocol")
+        assert callable(ice.StunProtocol)
