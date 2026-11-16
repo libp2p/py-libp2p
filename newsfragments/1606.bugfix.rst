@@ -1,0 +1,1 @@
+Fixed the circuit relay example so a source can reach a destination through the relay: the circuit address now names the relay, the destination keeps its relay services running and makes its reservation as soon as it connects, and a malformed log call no longer raises ``TypeError``.
