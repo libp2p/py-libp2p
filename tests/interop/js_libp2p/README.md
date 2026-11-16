@@ -79,3 +79,19 @@ This starts the Python server on port 8000 and runs the JavaScript client to sen
 
 - Ping protocol handler fails to complete pings (JS client reports "operation aborted").
 - Potential issues with stream handling or protocol negotiation.
+
+## WebRTC-Direct interop (pytest)
+
+`webrtc_direct/` holds a js-libp2p harness (`@libp2p/webrtc` 7.0.2, pinned in
+`package-lock.json`) used by `test_js_webrtc_direct_interop.py`. The tests check
+py dialing js and js dialing py, with both the v1 and v2 WebRTC-Direct flows.
+`conftest.py` runs `npm ci` once on first use and skips the tests when Node.js
+is not installed.
+
+```
+pytest tests/interop/js_libp2p/test_js_webrtc_direct_interop.py
+```
+
+The harness has the same CLI and output as the go-libp2p one in
+`tests/interop/go_libp2p/webrtc_direct/`:
+`node harness.mjs listen` and `node harness.mjs dial -version N <multiaddr>`.
