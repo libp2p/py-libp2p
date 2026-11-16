@@ -14,6 +14,7 @@ hard_coded_slash) are reported but do not block the pre-commit hook.
 import argparse
 from pathlib import Path
 import re
+import sys
 from typing import Any
 
 
@@ -69,8 +70,9 @@ def scan_for_path_issues(directory: Path) -> dict[str, list[dict[str, Any]]]:
     ]
 
     for py_file in directory.rglob("*.py"):
-        # Skip excluded files
-        if any(re.search(pattern, str(py_file)) for pattern in exclude_patterns):
+        # Skip excluded files (use posix format)
+        posix_path = py_file.as_posix()
+        if any(re.search(pattern, posix_path) for pattern in exclude_patterns):
             continue
 
         try:
@@ -223,6 +225,12 @@ def generate_summary_report(issues: dict[str, list[dict[str, Any]]]) -> str:
 
 def main():
     """Main function to run the audit."""
+    # Force UTF-8 on Windows consoles to prevent UnicodeEncodeError on cp1252
+    if sys.platform == "win32":
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8")
+        if hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(
         description="Audit py-libp2p codebase for path handling issues"
     )
