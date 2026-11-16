@@ -50,14 +50,22 @@ def _load_libssl() -> ctypes.CDLL:
         dll_file = getattr(_ssl, "__file__", None)
         if dll_file:
             dll_dir = Path(dll_file).resolve().parent
-            for name in ("libssl-3.dll", "libssl-1_1.dll", "ssleay32.dll"):
-                for candidate in (dll_dir / name, Path(name)):
-                    if not candidate.is_file():
-                        continue
-                    try:
-                        return ctypes.CDLL(str(candidate))
-                    except OSError:
-                        continue
+            # Glob for any libssl-3 variant (e.g. libssl-3.dll, libssl-3-x64.dll,
+            # libssl-3-arm64.dll) before falling back to legacy names.
+            candidates = [
+                *sorted(dll_dir.glob("libssl-3*.dll")),
+                dll_dir / "libssl-1_1.dll",
+                dll_dir / "ssleay32.dll",
+                Path("libssl-3.dll"),
+                Path("libssl-1_1.dll"),
+            ]
+            for candidate in candidates:
+                if not candidate.is_file():
+                    continue
+                try:
+                    return ctypes.CDLL(str(candidate))
+                except OSError:
+                    continue
         raise RuntimeError("Could not load libssl on Windows")
 
     if sys.platform == "darwin":
