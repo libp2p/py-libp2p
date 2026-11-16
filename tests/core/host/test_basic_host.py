@@ -270,6 +270,20 @@ async def test_on_notifee_connected_schedules_identify_for_inbound(monkeypatch):
     assert scheduled == [(remote, "notifee-connected")]
 
 
+@pytest.mark.trio
+async def test_run_registers_own_addrs_in_peerstore():
+    """``host.run`` must record the host's listen addrs under its own peer ID."""
+    key_pair = create_new_key_pair()
+    host = BasicHost(new_swarm(key_pair))
+
+    async with host.run(listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0")]):
+        assert host.get_id() in host.get_peerstore().peers_with_addrs()
+        registered = host.get_peerstore().addrs(host.get_id())
+        assert {str(addr) for addr in registered} == {
+            str(addr) for addr in host.get_transport_addrs()
+        }
+
+
 def test_announce_addrs_replaces_listen_addrs():
     announce = [Multiaddr("/ip4/1.2.3.4/tcp/4001")]
     host = _make_host_with_listener(announce_addrs=announce)

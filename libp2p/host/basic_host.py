@@ -589,6 +589,13 @@ class BasicHost(IHost):
             network = self.get_network()
             async with background_trio_service(network):
                 await network.listen(*listen_addrs)
+                # Register our own listen addresses in the peerstore, matching
+                # go-libp2p's BasicHost. Without this the local entry only has
+                # a key and no addresses, making it the first eviction
+                # candidate once the peerstore reaches ``max_peers``.
+                self.get_peerstore().add_addrs(
+                    self.get_id(), self.get_transport_addrs(), ttl=0
+                )
                 if self.mDNS is not None:
                     logger.debug("Starting mDNS Discovery")
                     self.mDNS.start()

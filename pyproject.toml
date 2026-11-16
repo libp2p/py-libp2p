@@ -83,7 +83,7 @@ classifiers = [
 Homepage = "https://github.com/libp2p/py-libp2p"
 
 [project.optional-dependencies]
-webrtc = ["aiortc>=1.15,<2.0", "aioice>=0.10.0,<0.11"]
+webrtc = ["aiortc>=1.15,<2.0", "aioice>=0.10.2,<0.11"]
 health-demo = ["rich>=13.0"]
 # The XXhfs suite prefers the native ML-KEM-768 backend, which needs
 # cryptography 48.0.0: hazmat.primitives.asymmetric.mlkem landed in 47.0.0 for
@@ -135,7 +135,7 @@ dev = [
     # Match [project.optional-dependencies] webrtc / health-demo so contributor
     # setup (uv sync --group dev / setup_dev) can run those tests and demos.
     "aiortc>=1.15,<2.0",
-    "aioice>=0.10.0,<0.11",
+    "aioice>=0.10.2,<0.11",
     "rich>=13.0",
     "ipython",
     "mypy>=1.15.0",

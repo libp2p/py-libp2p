@@ -24,6 +24,7 @@ import trio
 from libp2p.crypto.secp256k1 import (
     create_new_key_pair,
 )
+from libp2p.custom_types import TProtocol
 from libp2p.kad_dht.kad_dht import DHTMode, KadDHT
 from libp2p.kad_dht.routing_table import (
     BUCKET_SIZE,
@@ -781,3 +782,61 @@ class TestKadDHTSubnetConfig:
         dht = KadDHT(host, DHTMode.SERVER)
         assert dht.routing_table.max_peers_per_subnet is None
         assert dht.routing_table.max_peers_per_subnet_table == 0
+
+
+class TestKadDHTProtocolPrefix:
+    """
+    ``protocol_prefix`` decides the protocol this DHT speaks and answers on.
+
+    It used to be stored and then ignored: every stream and the inbound handler
+    used the module constant ``/ipfs/kad/1.0.0``, so a DHT built for another
+    network silently spoke IPFS's protocol and could never reach its own peers.
+    Worse, ``validate_config`` skips its checks for a non-default prefix, so
+    passing one turned off validation without changing the wire.
+    """
+
+    @staticmethod
+    def _host():
+        host = Mock()
+        host.get_id.return_value = create_valid_peer_id("local")
+        host.get_peerstore.return_value = Mock()
+        host.new_stream = AsyncMock()
+        return host
+
+    def test_prefix_decides_the_protocol_everywhere(self):
+        host = self._host()
+        dht = KadDHT(host, DHTMode.SERVER, protocol_prefix=TProtocol("/mesh"))
+
+        assert str(dht.protocol_id) == "/mesh/kad/1.0.0"
+        # Every component that dials or filters on the protocol agrees.
+        for component in (
+            dht.peer_routing,
+            dht.value_store,
+            dht.provider_store,
+            dht.routing_table,
+        ):
+            assert str(component.protocol_id) == "/mesh/kad/1.0.0", component
+        # And the inbound handler answers on it, not on /ipfs.
+        host.set_stream_handler.assert_called_once()
+        assert str(host.set_stream_handler.call_args[0][0]) == "/mesh/kad/1.0.0"
+
+    def test_default_prefix_is_unchanged(self):
+        host = self._host()
+        dht = KadDHT(host, DHTMode.SERVER)
+
+        assert str(dht.protocol_id) == "/ipfs/kad/1.0.0"
+        assert str(host.set_stream_handler.call_args[0][0]) == "/ipfs/kad/1.0.0"
+
+    @pytest.mark.trio
+    async def test_server_mode_check_uses_this_dht_s_protocol(self):
+        """A peer counts as a server only if it speaks *this* DHT's protocol."""
+        host = self._host()
+        dht = KadDHT(host, DHTMode.SERVER, protocol_prefix=TProtocol("/mesh"))
+        peer = create_valid_peer_id("remote")
+
+        # Identify has run and says the peer speaks the IPFS DHT, not ours.
+        host.get_peerstore.return_value.get_protocols.return_value = ["/ipfs/kad/1.0.0"]
+        assert await dht.routing_table.add_peer(PeerInfo(peer, [])) is False
+
+        host.get_peerstore.return_value.get_protocols.return_value = ["/mesh/kad/1.0.0"]
+        assert await dht.routing_table.add_peer(PeerInfo(peer, [])) is True

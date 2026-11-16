@@ -4,6 +4,7 @@ import pytest
 from multiaddr import Multiaddr
 import trio
 
+from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.peer.id import ID
 from libp2p.peer.peerstore import (
     PeerStore,
@@ -90,6 +91,33 @@ def test_peers():
     store.add_addr(ID(b"peer3"), Multiaddr("/ip4/127.0.0.1/tcp/4001"), 10)
 
     assert set(store.peer_ids()) == {ID(b"peer1"), ID(b"peer2"), ID(b"peer3")}
+
+
+def test_local_identity_is_never_evicted():
+    """
+    The local key must survive peer-limit eviction even without addresses.
+
+    Regression test: the local entry is inserted first and used to be the first
+    candidate for eviction. Once it was gone, Identify called
+    ``host.get_public_key()`` -> ``peerstore.pubkey(local_id)`` and crashed the
+    whole swarm with ``PeerStoreError``.
+    """
+    store = PeerStore(max_peers=5)
+    local_key_pair = create_new_key_pair()
+    local_id = ID.from_pubkey(local_key_pair.public_key)
+    # Deliberately do not add addresses: this is the state new_swarm creates.
+    store.add_key_pair(local_id, local_key_pair)
+
+    for i in range(12):
+        remote_key_pair = create_new_key_pair()
+        remote_id = ID.from_pubkey(remote_key_pair.public_key)
+        store.add_pubkey(remote_id, remote_key_pair.public_key)
+        store.add_addrs(remote_id, [Multiaddr(f"/ip4/10.0.0.{i + 1}/tcp/4001")], ttl=0)
+
+    assert store.has_peer(local_id)
+    assert store.pubkey(local_id) == local_key_pair.public_key
+    # Remote peers are still evicted, so the cap is not bypassed.
+    assert len(store.peer_data_map) == 5
 
 
 @pytest.mark.trio

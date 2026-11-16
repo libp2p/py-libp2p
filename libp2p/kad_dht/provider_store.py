@@ -110,7 +110,11 @@ class ProviderStore:
     """
 
     def __init__(
-        self, host: IHost, peer_routing: Any = None, persist_path: str | None = None
+        self,
+        host: IHost,
+        peer_routing: Any = None,
+        persist_path: str | None = None,
+        protocol_id: TProtocol = PROTOCOL_ID,
     ) -> None:
         """
         Initialize a new provider store.
@@ -118,11 +122,13 @@ class ProviderStore:
         :param host: The libp2p host instance (optional)
         :param peer_routing: The peer routing instance (optional)
         :param persist_path: Optional file path for JSON persistence
+        :param protocol_id: Kademlia protocol id to dial (default: ``/ipfs/kad/1.0.0``)
         """
         # Maps content keys to a dict of provider records (peer_id -> record)
         self.providers: dict[bytes, dict[str, ProviderRecord]] = {}
         self.host = host
         self.peer_routing = peer_routing
+        self.protocol_id = protocol_id
         self.providing_keys: set[bytes] = set()
         self.local_peer_id = host.get_id()
         # Track when each key was last republished
@@ -294,7 +300,7 @@ class ProviderStore:
 
         try:
             # Open a stream to the peer
-            stream = await self.host.new_stream(peer_id, [TProtocol(PROTOCOL_ID)])
+            stream = await self.host.new_stream(peer_id, [self.protocol_id])
 
             # Get our addresses to include in the message
             addrs = []
@@ -479,7 +485,7 @@ class ProviderStore:
         closer_peers: list[ID] = []
         try:
             # Open a stream to the peer
-            stream = await self.host.new_stream(peer_id, [TProtocol(PROTOCOL_ID)])
+            stream = await self.host.new_stream(peer_id, [self.protocol_id])
 
             try:
                 # Create the GET_PROVIDERS message

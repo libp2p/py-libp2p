@@ -18,7 +18,7 @@ Read more in the [documentation on ReadTheDocs](https://py-libp2p.readthedocs.io
 
 ## Maintainers
 
-Currently maintained by [@pacrob](https://github.com/pacrob), [@seetadev](https://github.com/seetadev) and [@dhuseby](https://github.com/dhuseby). Please reach out to us for collaboration or active feedback. If you have questions, feel free to open a new [discussion](https://github.com/libp2p/py-libp2p/discussions). We are also available on the libp2p Discord — join us at #py-libp2p [sub-channel](https://discord.gg/d92MEugb).
+Currently maintained by [@pacrob](https://github.com/pacrob), [@seetadev](https://github.com/seetadev), [@sumanjeet](https://github.com/sumanjeet0012), [@luca](https://github.com/acul71) and [@dhuseby](https://github.com/dhuseby). Please reach out to us for collaboration or active feedback. If you have questions, feel free to open a new [discussion](https://github.com/libp2p/py-libp2p/discussions). We are also available on the libp2p Discord — join us at #py-libp2p [sub-channel](https://discord.gg/d92MEugb).
 
 ## Feature Breakdown
 
@@ -51,12 +51,14 @@ production.
 **Choosing a dial version.** The listener always accepts both v1 and v2; the
 dialer picks with `WebRTCTransportConfig(webrtc_direct_dial_version=1|2)`:
 
-- **v1** (default today) — the migration path (SDP ufrag/pwd munging). Kept the
-  default while [libp2p/specs#715](https://github.com/libp2p/specs/pull/715) is
-  unmerged so existing v1 peers keep working.
-- **v2** (recommended) — the specs#715 flow, no SDP munging. Prefer it for new
-  deployments; **browser dialling needs v2** once `NoSdpMangleUfrag` support is
-  widespread. The default flips to v2 once specs#715 lands.
+- **v1** (default today) — the migration path (SDP ufrag/pwd munging). Kept as
+  the default while go/js dialers still start on v1 for wider-network
+  compatibility; the listener already accepts both.
+- **v2** (recommended) — the [specs#715](https://github.com/libp2p/specs/blob/master/webrtc/webrtc-direct.md)
+  flow (merged), no SDP munging. Prefer it for new deployments; **browser
+  dialling needs v2** once `NoSdpMangleUfrag` support is widespread. Opt in with
+  `webrtc_direct_dial_version=2`; the default flips to v2 when the network is
+  ready, not merely because the spec has landed.
 
 ______________________________________________________________________
 

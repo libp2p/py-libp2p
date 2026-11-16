@@ -1,0 +1,10 @@
+``KadDHT``'s ``protocol_prefix`` now decides the protocol the DHT speaks and answers
+on. It was accepted, documented and stored, but every outbound stream and the
+inbound stream handler used the hardcoded ``/ipfs/kad/1.0.0``, so a DHT built for
+another network could never reach its own peers; the prefix's only effect was to
+make ``validate_config`` skip its checks. The id is now derived once with
+``protocol_id_for(prefix)`` and threaded through ``RoutingTable``, ``PeerRouting``,
+``ValueStore`` and ``ProviderStore``, which also fixes the routing table's
+server-mode check -- on a ``/mesh`` DHT it admitted peers advertising only
+``/ipfs/kad/1.0.0`` and rejected peers speaking ``/mesh/kad/1.0.0``. A ``KadDHT``
+built without a prefix is unchanged.

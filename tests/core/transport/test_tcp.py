@@ -502,3 +502,86 @@ def test_get_ip_protocol_from_multiaddr():
     maddr_no_ip = Multiaddr("/tcp/4001")
     protocol = get_ip_protocol_from_multiaddr(maddr_no_ip)
     assert protocol is None
+
+
+@pytest.mark.trio
+async def test_tcp_dial_post_connect_cleanup_on_error():
+    """Verify that socket stream is closed if post-connect processing fails."""
+    from unittest.mock import patch
+
+    transport = TCP()
+
+    async def handler(_s):
+        pass
+
+    listener = transport.create_listener(handler)
+    await listener.listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
+    listen_addr = listener.get_addrs()[0]
+
+    captured_stream = None
+    original_open = trio.open_tcp_stream
+
+    async def intercepted_open(host, port):
+        nonlocal captured_stream
+        stream = await original_open(host, port)
+        captured_stream = stream
+        return stream
+
+    try:
+        with patch("trio.open_tcp_stream", side_effect=intercepted_open):
+            with patch(
+                "libp2p.transport.tcp.tcp.RawConnection",
+                side_effect=RuntimeError("simulated post-connect error"),
+            ):
+                with pytest.raises(RuntimeError, match="simulated post-connect error"):
+                    await transport.dial(listen_addr)
+
+        assert captured_stream is not None
+        assert captured_stream.socket.fileno() == -1
+    finally:
+        await listener.close()
+
+
+@pytest.mark.trio
+async def test_tcp_dial_cancellation_fd_leak_stress():
+    """Verify 0 FD leaks across multiple cancelled dials."""
+    import os
+
+    def get_open_fd_count() -> int | None:
+        if os.path.exists("/proc/self/fd"):
+            return len(os.listdir("/proc/self/fd"))
+        elif os.path.exists("/dev/fd"):
+            return len(os.listdir("/dev/fd"))
+        return None
+
+    transport = TCP()
+
+    async def handler(_s):
+        pass
+
+    listener = transport.create_listener(handler)
+    await listener.listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
+    listen_addr = listener.get_addrs()[0]
+
+    try:
+        # Warmup single dial to stabilize interpreter and trio baseline FDs
+        warmup_conn = await transport.dial(listen_addr)
+        await warmup_conn.close()
+        await trio.sleep(0.02)
+
+        initial_fds = get_open_fd_count()
+
+        for _ in range(25):
+            with trio.CancelScope() as cancel_scope:
+                async with trio.open_nursery() as nursery:
+                    nursery.start_soon(transport.dial, listen_addr)
+                    cancel_scope.cancel()
+
+        await trio.sleep(0.05)
+        final_fds = get_open_fd_count()
+        if initial_fds is not None and final_fds is not None:
+            # Allow a small tolerance (<= initial_fds + 1) to tolerate environment noise
+            # (e.g. background threads or resolver FDs) while catching real socket leaks
+            assert final_fds <= initial_fds + 1
+    finally:
+        await listener.close()

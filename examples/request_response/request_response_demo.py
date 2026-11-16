@@ -88,6 +88,7 @@ async def run(
         )
         print(f"Sent: {message}")
         print(f"Received: {response}")
+        nursery.cancel_scope.cancel()
 
 
 def main() -> None:

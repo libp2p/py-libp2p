@@ -509,6 +509,43 @@ class TestQUICConnection:
         assert quic_connection.is_closed
         assert len(quic_connection._streams) == 0
 
+    @pytest.mark.trio
+    async def test_handle_connection_terminated_shielded_under_cancellation(
+        self, quic_connection: QUICConnection
+    ) -> None:
+        """
+        Verify termination cleanup runs shielded and notifies parent even when
+        cancelled.
+        """
+        from aioquic.quic.events import ConnectionTerminated
+
+        quic_connection._started = True
+        event = ConnectionTerminated(
+            error_code=0, frame_type=None, reason_phrase="closed"
+        )
+
+        parent_notified = False
+        on_close_called = False
+
+        async def mock_notify():
+            nonlocal parent_notified
+            parent_notified = True
+
+        async def mock_on_close():
+            nonlocal on_close_called
+            on_close_called = True
+
+        quic_connection._notify_parent_of_termination = mock_notify
+        quic_connection.on_close = mock_on_close
+
+        with trio.CancelScope() as cancel_scope:
+            cancel_scope.cancel()
+            await quic_connection._handle_connection_terminated(event)
+
+        assert quic_connection.is_closed
+        assert parent_notified is True
+        assert on_close_called is True
+
     # Concurrent operations tests
 
     @pytest.mark.trio

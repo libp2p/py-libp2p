@@ -4,8 +4,11 @@ from libp2p.exceptions import ParseError
 from libp2p.io.abc import Reader
 from libp2p.io.exceptions import IncompleteReadError, MessageTooLarge
 from libp2p.utils.varint import (
+    MAX_MULTISTREAM_MESSAGE_SIZE,
+    encode_delim,
     encode_uvarint,
     encode_varint_prefixed,
+    read_delim,
     read_varint_prefixed_bytes_limited,
 )
 
@@ -76,3 +79,30 @@ async def test_read_varint_prefixed_bytes_limited_oversized_varint_encoding():
     reader = MockReader(b"\x80" * 11)
     with pytest.raises(ParseError, match="64 bits"):
         await read_varint_prefixed_bytes_limited(reader, max_length=64)
+
+
+@pytest.mark.trio
+async def test_read_delim_success():
+    reader = MockReader(encode_delim(b"/multistream/1.0.0"))
+    assert await read_delim(reader) == b"/multistream/1.0.0"
+
+
+@pytest.mark.trio
+async def test_read_delim_rejects_oversize_before_body_read():
+    # Claim more than MaxReadSize; must raise before allocating/reading the body.
+    claimed_length = MAX_MULTISTREAM_MESSAGE_SIZE + 1
+    prefix = encode_uvarint(claimed_length)
+    reader = MockReader(prefix + b"x" * 64)
+
+    with pytest.raises(MessageTooLarge, match="exceeds maximum allowed"):
+        await read_delim(reader)
+
+    assert reader.position == len(prefix)
+
+
+@pytest.mark.trio
+async def test_read_delim_accepts_message_at_max_size():
+    # Body is (max - 1) payload bytes + trailing newline == MAX size.
+    payload = b"a" * (MAX_MULTISTREAM_MESSAGE_SIZE - 1)
+    reader = MockReader(encode_delim(payload))
+    assert await read_delim(reader) == payload

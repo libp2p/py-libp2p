@@ -814,14 +814,18 @@ class PeerAuthenticator:
                 format=serialization.PublicFormat.SubjectPublicKeyInfo,
             )
 
-            # Verify the signature proves ownership of the libp2p private key
+            # Verify the signature proves ownership of the libp2p private key.
+            # NOTE: libp2p PublicKey.verify() returns a bool (it does not raise
+            # on a bad signature), so the result MUST be checked. Treating this
+            # as exception-raising made the proof-of-possession check a no-op and
+            # allowed peer-ID impersonation. Matches libp2p/security/tls/
+            # certificate.py:356.
             signature_payload = b"libp2p-tls-handshake:" + cert_public_key_bytes
 
-            try:
-                public_key.verify(signature_payload, signature)
-            except Exception as e:
+            if not public_key.verify(signature_payload, signature):
                 raise QUICPeerVerificationError(
-                    f"Invalid signature in libp2p extension: {e}"
+                    "Invalid signature in libp2p extension: "
+                    "proof-of-possession does not match the embedded public key"
                 )
 
             # Derive peer ID from public key

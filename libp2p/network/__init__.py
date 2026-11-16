@@ -6,6 +6,7 @@ rate limiting, address management, DNS resolution, and tagging functionality.
 """
 
 from libp2p.network.auto_connector import AutoConnector
+from libp2p.network.backoff import DialBackoff
 from libp2p.network.connection_pruner import ConnectionPruner
 from libp2p.network.tag_store import (
     CommonTags,
@@ -20,6 +21,7 @@ __all__ = [
     "AutoConnector",
     "CommonTags",
     "ConnectionPruner",
+    "DialBackoff",
     "TagInfo",
     "TagStore",
     "upsert_add",

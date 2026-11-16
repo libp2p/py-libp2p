@@ -1,0 +1,8 @@
+The contributor setup scripts now select the newest supported Python from
+``pyproject.toml``, check system prerequisites (including ``uv``, unless
+``--pip`` / ``-Pip``) before installing, install a missing interpreter via
+``uv python install`` when needed, and expose ``--help`` / ``-Help`` flags.
+Sourcing the script (``source ./scripts/setup_dev.sh`` or
+``. .\scripts\setup_dev.ps1``) also activates ``.venv`` in the current shell.
+Linux and macOS use ``scripts/setup_dev.sh``; Windows-native setup is
+available via ``scripts/setup_dev.ps1``.
