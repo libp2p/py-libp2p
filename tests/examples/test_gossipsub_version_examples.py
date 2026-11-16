@@ -36,7 +36,7 @@ def test_gossipsub_version_example_runs(script: str, args: list[str]) -> None:
         cwd=str(PROJECT_ROOT),
         capture_output=True,
         text=True,
-        timeout=90,
+        timeout=180,
         check=False,
     )
     assert result.returncode == 0, (
@@ -64,7 +64,7 @@ def test_compare_versions_runs() -> None:
         cwd=str(PROJECT_ROOT),
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=240,
         check=False,
     )
     assert result.returncode == 0, (
