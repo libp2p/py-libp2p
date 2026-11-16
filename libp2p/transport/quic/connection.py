@@ -1083,6 +1083,42 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 return True
         return False
 
+    def _abandon_quic_stream(self, stream_id: int, error_code: int = 0) -> None:
+        """
+        Release an aioquic stream that py-libp2p will never wrap.
+
+        aioquic only discards a stream from ``QuicConnection._streams`` once
+        both halves report finished, and the send half finishes only when its
+        FIN or RESET is acknowledged. When a late, duplicate or unexpected
+        event is ignored and no wrapper is created, nothing ever closes that
+        send half, so the stream and its receiver, sender and range sets stay
+        reachable for the lifetime of the connection. Stopping the receive
+        side and resetting the send side is what lets aioquic discard it.
+        """
+        quic = getattr(self, "_quic", None)
+        if quic is None:
+            return
+        streams = getattr(quic, "_streams", None)
+        if isinstance(streams, dict) and stream_id not in streams:
+            # aioquic already discarded the stream, nothing to release.
+            return
+        for name, operation in (
+            ("stop_stream", quic.stop_stream),
+            ("reset_stream", quic.reset_stream),
+        ):
+            try:
+                operation(stream_id, error_code)
+            except Exception as error:
+                # StreamTypeError (peer-initiated unidirectional) and
+                # StreamStateError (not open yet) mean there is nothing this
+                # side can close.
+                logger.debug(
+                    "Cannot release abandoned QUIC stream %s via %s: %s",
+                    stream_id,
+                    name,
+                    error,
+                )
+
     def _remove_stream(self, stream_id: int) -> None:
         """
         Remove stream from connection registry.
@@ -1231,6 +1267,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
                             None,
                         ),
                     )
+                    self._abandon_quic_stream(stream_id)
                     continue
 
                 if self._is_incoming_stream(stream_id):
@@ -1245,6 +1282,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
                             "Ignoring late event for closed inbound stream %s",
                             stream_id,
                         )
+                        self._abandon_quic_stream(stream_id)
                         continue
                     if stream_id not in self._quic._streams:
                         # Late/duplicate events for a stream aioquic already
@@ -1278,6 +1316,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
                         f"quic.is_client={is_client}, streams={len(self._streams)}, "
                         f"cached={stream_id in self._stream_cache})"
                     )
+                    self._abandon_quic_stream(stream_id)
                     continue
 
             # Process all events for this stream
@@ -1300,6 +1339,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
             # have already reset the send side ("cannot call write() after
             # reset()") or dropped the stream entirely.
             logger.debug("Ignoring late event for closed inbound stream %s", stream_id)
+            self._abandon_quic_stream(stream_id)
             raise QUICStreamError(f"Closed inbound stream {stream_id}")
 
         quic_streams = getattr(self._quic, "_streams", None)
@@ -1582,6 +1622,10 @@ class QUICConnection(IRawConnection, IMuxedConn):
         if stream:
             # Handle stop sending on the stream if method exists
             await stream.handle_stop_sending(event.error_code)
+        else:
+            # Without a wrapper nothing will close our receive half, so the
+            # stream would stay in aioquic's registry forever.
+            self._abandon_quic_stream(event.stream_id)
 
     async def _handle_handshake_completed(
         self, event: events.HandshakeCompleted
@@ -1739,6 +1783,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         if not is_incoming:
             # This shouldn't happen - outbound streams should be created by open_stream
+            self._abandon_quic_stream(stream_id)
             raise QUICStreamError(
                 f"Received data for unknown outbound stream {stream_id}"
             )
@@ -1746,6 +1791,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         if stream_id in self._recently_closed_streams:
             # Late event for a stream we already handled and closed.
             logger.debug("Ignoring late event for closed inbound stream %s", stream_id)
+            self._abandon_quic_stream(stream_id)
             raise QUICStreamError(f"Closed inbound stream {stream_id}")
 
         quic_streams = getattr(self._quic, "_streams", None)
@@ -1814,6 +1860,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 self._remove_stream(stream_id)
         else:
             logger.debug(f"Received reset for unknown stream {stream_id}")
+            self._abandon_quic_stream(stream_id)
 
     async def _handle_datagram_received(
         self, event: events.DatagramFrameReceived

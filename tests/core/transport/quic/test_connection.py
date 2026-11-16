@@ -754,3 +754,53 @@ async def test_connection_id_issued_notifies_listener():
     # Verify listener was notified and registered the new CID
     conn_found, _, _ = await mock_listener._registry.find_by_connection_id(new_cid)
     assert conn_found is conn
+
+
+def test_abandon_quic_stream_stops_and_resets_an_unwrapped_stream() -> None:
+    """
+    A stream without a wrapper must be released explicitly.
+
+    aioquic only discards a stream once both halves finish, and the send half
+    finishes only when its FIN or RESET is acknowledged. Ignored events (late
+    FIN, duplicate reset, refused inbound stream) create exactly that state, so
+    the abandoned stream has to be stopped and reset or it stays in
+    ``_quic._streams`` for the lifetime of the connection.
+    """
+    calls: list[tuple[str, int, int]] = []
+    quic = Mock()
+    quic._streams = {4: Mock()}
+    quic.stop_stream.side_effect = lambda sid, code: calls.append(("stop", sid, code))
+    quic.reset_stream.side_effect = lambda sid, code: calls.append(("reset", sid, code))
+    conn = Mock(spec=QUICConnection)
+    conn._quic = quic
+
+    QUICConnection._abandon_quic_stream(conn, 4)
+
+    assert calls == [("stop", 4, 0), ("reset", 4, 0)]
+
+
+def test_abandon_quic_stream_is_a_noop_once_aioquic_discarded_it() -> None:
+    """No frames are queued for a stream aioquic no longer tracks."""
+    quic = Mock()
+    quic._streams = {}
+    conn = Mock(spec=QUICConnection)
+    conn._quic = quic
+
+    QUICConnection._abandon_quic_stream(conn, 4)
+
+    quic.stop_stream.assert_not_called()
+    quic.reset_stream.assert_not_called()
+
+
+def test_abandon_quic_stream_survives_unidirectional_streams() -> None:
+    """Peer-initiated unidirectional streams cannot be reset; still stop them."""
+    quic = Mock()
+    quic._streams = {3: Mock()}
+    quic.reset_stream.side_effect = ValueError("cannot reset")
+    conn = Mock(spec=QUICConnection)
+    conn._quic = quic
+
+    QUICConnection._abandon_quic_stream(conn, 3)
+
+    quic.stop_stream.assert_called_once_with(3, 0)
+    quic.reset_stream.assert_called_once_with(3, 0)
