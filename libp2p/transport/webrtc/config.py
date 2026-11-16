@@ -80,8 +80,9 @@ class WebRTCTransportConfig:
     enable_sdp_http_harness: bool = False
     # WebRTC-Direct version our *dialer* speaks: 1 munges the local ICE
     # credentials (ufrag == pwd); 2 keeps them and encodes our pwd in the
-    # synthetic answer's ufrag (libp2p/specs#715). Default 1 while #715 is
-    # unmerged. The listener accepts both regardless.
+    # synthetic answer's ufrag (libp2p/specs#715, merged). Default 1 until
+    # wider-network dialers move off v1 (go/js still start on v1). The
+    # listener accepts both regardless.
     webrtc_direct_dial_version: int = 1
 
     def __post_init__(self) -> None:
