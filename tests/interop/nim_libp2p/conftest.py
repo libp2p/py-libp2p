@@ -1,4 +1,7 @@
-import fcntl
+try:
+    import fcntl
+except ImportError:
+    fcntl = None  # type: ignore[assignment]
 import logging
 from pathlib import Path
 import shutil
@@ -24,6 +27,8 @@ def check_nim_binary_built():
 
 def run_nim_setup_with_lock():
     """Run nim setup with file locking to prevent parallel execution."""
+    if fcntl is None:
+        raise RuntimeError("fcntl is not available on this platform")
     current_dir = Path(__file__).parent
     lock_file = current_dir / ".setup_lock"
     setup_script = current_dir / "scripts" / "setup_nim_echo.sh"
@@ -91,6 +96,8 @@ def run_nim_setup_with_lock():
 @pytest.fixture(scope="function")  # Changed to function scope
 def nim_echo_binary():
     """Get nim echo server binary path."""
+    if fcntl is None:
+        pytest.skip("fcntl is not available (Unix-only interop harness)")
     current_dir = Path(__file__).parent
     binary_path = current_dir / "nim_echo_server"
 

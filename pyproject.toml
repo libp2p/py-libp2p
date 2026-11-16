@@ -345,6 +345,7 @@ force-to-top = ["pytest"]
 # Options like quote-style = "double" or indent-style = "space" can be set here if needed.
 
 [tool.pyrefly]
+python_interpreter = ".venv/Scripts/python.exe"
 project_includes = ["libp2p", "examples", "tests"]
 project_excludes = [
     "**/.project-template/**",
@@ -353,6 +354,7 @@ project_excludes = [
     "**/*pb2_grpc.py",
     "**/*.pyi",
     ".venv/**",
+    "./tests/interop/**",
     "./tests/core/transport/webrtc",
     "./libp2p/transport/webrtc/_asyncio_bridge.py",
     "./libp2p/transport/webrtc/_aiortc_helpers.py",
