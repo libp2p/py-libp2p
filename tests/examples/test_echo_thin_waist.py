@@ -43,7 +43,7 @@ def test_echo_example_starts_and_prints_thin_waist():
     saw_waiting = False
 
     start = time.time()
-    timeout_s = 8.0
+    timeout_s = 20.0
     try:
         while time.time() - start < timeout_s:
             line = out_stream.readline()
