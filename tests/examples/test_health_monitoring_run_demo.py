@@ -11,8 +11,6 @@ import socket
 import subprocess
 import sys
 
-import pytest
-
 # Project root (from tests/examples/ -> tests/ -> root)
 _current_file = Path(__file__).resolve()
 PROJECT_ROOT = _current_file.parent.parent.parent
@@ -20,7 +18,7 @@ RUN_DEMO = PROJECT_ROOT / "examples" / "health_monitoring" / "run_demo.py"
 
 
 def _free_port() -> int:
-    """Return a free ephemeral port on 127.0.0.1 (OS-assigned, avoids xdist collisions)."""
+    """Return a free ephemeral port on 127.0.0.1(OS-assigned,avoids xdist collisions)"""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
