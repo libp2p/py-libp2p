@@ -216,6 +216,9 @@ async def read_varint_prefixed_bytes_limited(reader: Reader, max_length: int) ->
 
 # Delimited read/write, used by multistream-select.
 # Reference: https://github.com/gogo/protobuf/blob/07eab6a8298cf32fac45cceaac59424f98421bbc/io/varint.go#L109-L126  # noqa: E501
+# Match go-multistream MaxReadSize (64 KiB) to bound pre-auth negotiation reads.
+# See: https://github.com/multiformats/go-multistream/blob/master/multistream.go
+MAX_MULTISTREAM_MESSAGE_SIZE = 64 << 10
 
 
 def encode_delim(msg: bytes) -> bytes:
@@ -224,7 +227,9 @@ def encode_delim(msg: bytes) -> bytes:
 
 
 async def read_delim(reader: Reader) -> bytes:
-    msg_bytes = await read_varint_prefixed_bytes(reader)
+    msg_bytes = await read_varint_prefixed_bytes_limited(
+        reader, MAX_MULTISTREAM_MESSAGE_SIZE
+    )
     if len(msg_bytes) == 0:
         raise ParseError("`len(msg_bytes)` should not be 0")
     if msg_bytes[-1:] != b"\n":
