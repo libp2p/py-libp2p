@@ -9,13 +9,17 @@ This is the foundational primitive for a spec-aligned WebRTC-Direct listener
 that advertises a single fixed UDP port and demuxes concurrent inbound dials
 without spinning up a new port per peer.
 
-Validated against ``aioice`` 0.10.x. It relies on private ``aioice`` internals
-(``StunProtocol``, ``Connection._protocols`` / ``_local_candidates`` /
-``_local_candidates_end``) to inject a mux-backed protocol without aioice
-binding its own UDP socket, so it may need updating on aioice major bumps.
-Upstreaming a real ``UdpMux`` into aioice is tracked as follow-up on #1352.
+Validated against ``aioice`` 0.10.2 (dependency pinned ``aioice>=0.10.2,<0.11``).
+It relies on private ``aioice`` internals (``StunProtocol``,
+``Connection._protocols`` / ``_local_candidates`` / ``_local_candidates_end``)
+to inject a mux-backed protocol without aioice binding its own UDP socket, so
+it may need updating on aioice minor/major bumps within or beyond that range.
 
-Refs: libp2p/specs#715 (WebRTC-Direct v2), libp2p/py-libp2p#1352 (spike).
+Upstreaming a real shared-socket / ``UdpMux`` API into aioice is tracked on
+aiortc/aioice#158; the py-libp2p pin + compatibility guards are #1602.
+
+Refs: libp2p/specs#715 (WebRTC-Direct v2), libp2p/py-libp2p#1352 (spike),
+libp2p/py-libp2p#1602 (pin / track upstream).
 """
 
 from __future__ import annotations

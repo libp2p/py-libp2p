@@ -1,0 +1,1 @@
+Raise the WebRTC ``aioice`` floor to ``>=0.10.2,<0.11`` (the band validated with in-tree ``UdpMux`` private-API injection) and document upstream tracking for a real shared-socket API in aioice.
