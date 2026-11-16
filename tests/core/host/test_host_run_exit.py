@@ -17,6 +17,7 @@ import trio
 from libp2p import new_host
 from libp2p.abc import IHost
 from libp2p.crypto.ed25519 import create_new_key_pair
+from libp2p.network import swarm as swarm_module
 from libp2p.peer.peerinfo import PeerInfo
 
 LISTEN = Multiaddr("/ip4/127.0.0.1/tcp/0")
@@ -65,5 +66,62 @@ async def test_leaving_run_closes_connections_and_listener(
             assert probe.connect_ex(("127.0.0.1", port)) != 0, (
                 "the stopped hub's listen port still accepts connections"
             )
+
+        stop.set()
+
+
+@pytest.mark.trio
+async def test_stuck_connection_close_still_releases_listener(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    If one connection never finishes closing, the bounded teardown gives up on
+    it but still clears the swarm's state and closes the listener (#1600).
+    """
+    monkeypatch.setattr(swarm_module, "SHUTDOWN_CLEANUP_TIMEOUT", 0.5)
+    monkeypatch.setattr(swarm_module, "SHUTDOWN_RETRY_TIMEOUT", 1.0)
+
+    stop = trio.Event()
+    ready = trio.Event()
+    peer = new_host(key_pair=create_new_key_pair())
+
+    async def serve() -> None:
+        async with peer.run([LISTEN]):
+            ready.set()
+            await stop.wait()
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(serve)
+        await ready.wait()
+
+        hub = new_host(key_pair=create_new_key_pair())
+        network = hub.get_network()
+        closed_listens: list[Multiaddr] = []
+
+        async def record_listen_close(maddr: Multiaddr) -> None:
+            closed_listens.append(maddr)
+
+        async with hub.run([LISTEN]):
+            port_str = hub.get_addrs()[0].value_for_protocol("tcp")
+            assert port_str is not None
+            port = int(port_str)
+            await hub.connect(PeerInfo(peer.get_id(), peer.get_addrs()))
+            (conn,) = network.connections[peer.get_id()]
+
+            async def hang() -> None:
+                await trio.sleep_forever()
+
+            monkeypatch.setattr(conn, "close", hang)
+            monkeypatch.setattr(network, "notify_listen_close", record_listen_close)
+            started = trio.current_time()
+        elapsed = trio.current_time() - started
+
+        # 0.5s cleanup bound + 1.0s retry bound, with slack for slow CI.
+        assert elapsed < 4.0, f"leaving run() took {elapsed:.2f}s"
+        assert network.connections == {}
+        assert network.listeners == {}
+        assert len(closed_listens) == 1
+        with socket.socket() as probe:
+            assert probe.connect_ex(("127.0.0.1", port)) != 0
 
         stop.set()
