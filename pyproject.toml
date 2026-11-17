@@ -345,7 +345,6 @@ force-to-top = ["pytest"]
 # Options like quote-style = "double" or indent-style = "space" can be set here if needed.
 
 [tool.pyrefly]
-python_interpreter = ".venv/Scripts/python.exe"
 project_includes = ["libp2p", "examples", "tests"]
 project_excludes = [
     "**/.project-template/**",
