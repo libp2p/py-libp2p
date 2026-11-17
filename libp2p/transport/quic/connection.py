@@ -2036,13 +2036,19 @@ class QUICConnection(IRawConnection, IMuxedConn):
     async def _transmit(self) -> None:
         """Transmit pending QUIC packets using available socket."""
         sock = self._socket
-        if not sock:
-            logger.debug("No socket to transmit")
+        quic = self._quic
+        if not sock or quic is None:
+            # Teardown clears ``_quic`` before background tasks are cancelled.
+            # Raising here (AttributeError: 'NoneType' has no attribute
+            # 'datagrams_to_send') aborted the drain and turned routine
+            # shutdown into a connection error, with the ACKs/RESETs for a
+            # closing connection never sent.
+            logger.debug("No socket or QUIC state to transmit")
             return
 
         try:
             current_time = time.time()
-            datagrams = self._quic.datagrams_to_send(now=current_time)
+            datagrams = quic.datagrams_to_send(now=current_time)
 
             # Batch stats updates
             packet_count = 0
@@ -2096,13 +2102,19 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
     async def _handle_connection_error(self, error: Exception) -> None:
         """Handle connection-level errors."""
+        if self._closed:
+            # Nothing left to tear down: a task raced with close() and hit
+            # state that close() had already released. Logging ERROR here
+            # buried real faults under one line per shutdown.
+            logger.debug(f"Ignoring error on already-closed connection: {error}")
+            return
+
         logger.error(f"Connection error: {error}")
 
-        if not self._closed:
-            try:
-                await self.close()
-            except Exception as close_error:
-                logger.error(f"Error during connection close: {close_error}")
+        try:
+            await self.close()
+        except Exception as close_error:
+            logger.error(f"Error during connection close: {close_error}")
 
     # Connection close
 

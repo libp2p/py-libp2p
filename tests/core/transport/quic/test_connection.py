@@ -4,6 +4,7 @@ Tests all new features including advanced stream management, resource management
 error handling, and concurrent operations.
 """
 
+import logging
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -900,3 +901,50 @@ async def test_cleanup_abandoned_quic_streams_waits_for_the_grace_period() -> No
     assert quic_stream.sender.is_finished is False
     assert quic_stream.receiver.is_finished is False
     assert 8 in conn._abandoned_streams
+
+
+@pytest.mark.trio
+async def test_transmit_returns_quietly_once_teardown_cleared_quic() -> None:
+    """
+    Teardown nulls ``_quic`` while transmit-capable tasks may still run.
+
+    Regression: ``_transmit()`` only checked the socket, so it raised
+    ``AttributeError: 'NoneType' object has no attribute 'datagrams_to_send'``,
+    which the caller reported as a connection error (582 times in 55 minutes
+    on the production node) and which skipped sending the closing packets.
+    """
+    conn = Mock(spec=QUICConnection)
+    conn._socket = Mock()
+    conn._quic = None
+
+    await QUICConnection._transmit(conn)
+
+    conn._handle_connection_error.assert_not_called()
+
+
+@pytest.mark.trio
+async def test_handle_connection_error_ignores_error_after_close(caplog) -> None:
+    """A task racing close() must not log ERROR or try to close again."""
+    conn = Mock(spec=QUICConnection)
+    conn._closed = True
+    conn.close = AsyncMock()
+
+    with caplog.at_level(logging.ERROR):
+        await QUICConnection._handle_connection_error(conn, RuntimeError("boom"))
+
+    conn.close.assert_not_awaited()
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
+
+
+@pytest.mark.trio
+async def test_handle_connection_error_still_closes_an_open_connection(caplog) -> None:
+    """Real connection errors must keep logging and tearing the connection down."""
+    conn = Mock(spec=QUICConnection)
+    conn._closed = False
+    conn.close = AsyncMock()
+
+    with caplog.at_level(logging.ERROR):
+        await QUICConnection._handle_connection_error(conn, RuntimeError("boom"))
+
+    conn.close.assert_awaited_once()
+    assert any(r.levelno >= logging.ERROR for r in caplog.records)
