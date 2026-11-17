@@ -7,6 +7,7 @@ from collections.abc import (
     Iterable,
     Sequence,
 )
+import hashlib
 import logging
 import random
 import statistics
@@ -84,6 +85,23 @@ logger = logging.getLogger(__name__)
 
 _MAX_PENDING_GRAFT_PRUNE_PER_PEER = 64
 
+# Upper bound on retained equivocation fingerprints.  Entries are evicted on
+# insert, so the dict cannot outgrow this between heartbeats.
+MAX_EQUIVOCATION_ENTRIES = 1000
+
+
+def _message_fingerprint(msg: rpc_pb2.Message) -> bytes:
+    """Digest the content used to detect equivocation (data + topic list)."""
+    digest = hashlib.sha256()
+    digest.update(len(msg.data).to_bytes(8, "big"))
+    digest.update(msg.data)
+    for topic in msg.topicIDs:
+        encoded = topic.encode()
+        digest.update(len(encoded).to_bytes(4, "big"))
+        digest.update(encoded)
+    return digest.digest()
+
+
 # A remote peer controls the PRUNE backoff duration and topic IDs. Clamp the
 # duration and bound the topic map so a peer cannot pin arbitrary topics for
 # years or grow back_off without limit on a long-lived connection.
@@ -151,8 +169,8 @@ class GossipSub(IPubsubRouter, Service):
     message_rate_limits: dict[ID, dict[str, list[float]]]  # peer -> topic -> timestamps
     max_messages_per_topic_per_second: float
     equivocation_detection: dict[
-        bytes, rpc_pb2.Message
-    ]  # msg_id (from_id + seqno) -> first_msg
+        bytes, bytes
+    ]  # msg_id (from_id + seqno) -> content fingerprint
     eclipse_protection_enabled: bool
     min_mesh_diversity_ips: int  # Minimum number of different IPs in mesh
 
@@ -2974,19 +2992,26 @@ class GossipSub(IPubsubRouter, Service):
         :return: True if message is valid, False if equivocation detected
         """
         msg_key = msg.from_id + msg.seqno
+        fingerprint = _message_fingerprint(msg)
 
-        if msg_key in self.equivocation_detection:
-            existing_msg = self.equivocation_detection[msg_key]
+        known = self.equivocation_detection.get(msg_key)
+        if known is not None:
             # Check if content differs (equivocation)
-            if existing_msg.data != msg.data or existing_msg.topicIDs != msg.topicIDs:
+            if known != fingerprint:
                 logger.warning("Equivocation detected from peer %s", ID(msg.from_id))
                 # Severely penalize equivocating peer
                 if self.scorer is not None:
                     self.scorer.penalize_equivocation(ID(msg.from_id), 100.0)
                 return False
-        else:
-            # Store first occurrence
-            self.equivocation_detection[msg_key] = msg
+            return True
+
+        # Store only a fingerprint: keeping the whole first message retains up
+        # to a full RPC payload per entry (attacker controlled), and the table
+        # used to be bounded only by the heartbeat sweep.
+        self.equivocation_detection[msg_key] = fingerprint
+        while len(self.equivocation_detection) > MAX_EQUIVOCATION_ENTRIES:
+            oldest = next(iter(self.equivocation_detection))
+            del self.equivocation_detection[oldest]
 
         return True
 

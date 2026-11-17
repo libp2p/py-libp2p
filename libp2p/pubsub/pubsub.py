@@ -516,12 +516,27 @@ class Pubsub(Service, IPubsub):
             await self.manager.wait_finished()
         finally:
             self._clear_subscription_state()
+            self._stop_caches()
 
     def _clear_subscription_state(self) -> None:
         """Release remote subscription tracking state on service shutdown."""
         self.peer_topics.clear()
         self._peer_subscription_count.clear()
         self._replayed_recent_topics.clear()
+
+    def _stop_caches(self) -> None:
+        """
+        Stop the seen-message sweeper and drop cached state on shutdown.
+
+        The sweeper owns a background thread that keeps the cache (and the
+        message IDs in it) alive for the life of the process.  Without this
+        every Pubsub instance ever created leaves a daemon thread plus its
+        cache behind after the host is closed.
+        """
+        self.seen_messages.stop()
+        self.seen_messages.cache.clear()
+        self.validation_cache.cache.clear()
+        self.validation_cache.access_order.clear()
 
     @property
     def my_id(self) -> ID:
