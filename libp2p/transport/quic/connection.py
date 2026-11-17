@@ -60,6 +60,10 @@ aioquic_compat.apply()
 # spinning without a sooner timer so peer packet tasks are not starved.
 _IDLE_POLL_INTERVAL = 2.0  # seconds: max idle gap between event-loop polls
 _ACTIVE_POLL_INTERVAL = 0.0001  # seconds: yield gap when actively draining
+# Grace period before an aioquic stream that no longer has a py-libp2p wrapper
+# is discarded unconditionally. Long enough for a healthy peer to answer our
+# FIN/STOP_SENDING, short enough to bound the memory of a stuck stream.
+_ABANDONED_STREAM_TIMEOUT = 120.0
 
 
 class QUICConnection(IRawConnection, IMuxedConn):
@@ -146,6 +150,10 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self._streams: dict[int, QUICStream] = {}
         self._stream_cache: dict[int, QUICStream] = {}  # Cache for frequent lookups
         self._recently_closed_streams: deque[int] = deque(maxlen=128)
+        # aioquic streams whose wrapper was removed, keyed by the monotonic
+        # time of removal. aioquic only discards a stream once both halves are
+        # finished, so wrappers must not be dropped while a half is still open.
+        self._abandoned_streams: dict[int, float] = {}
         self._next_stream_id: int = self._calculate_initial_stream_id()
         self._stream_handler: TQUICStreamHandlerFn | None = None
 
@@ -613,6 +621,10 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
                 # Check for orphaned streams (active but no activity for a long time)
                 await self._cleanup_orphaned_streams()
+
+                # Discard streams whose wrapper is gone but whose aioquic half
+                # was never answered by the peer.
+                await self._cleanup_abandoned_quic_streams()
 
                 if logger.isEnabledFor(logging.DEBUG):
                     cid_stats = self.get_connection_id_stats()
@@ -1129,6 +1141,13 @@ class QUICConnection(IRawConnection, IMuxedConn):
             self._stream_cache.pop(stream_id, None)
             self._recently_closed_streams.append(stream_id)
 
+            # The wrapper is gone, so nothing can read or write this stream any
+            # more. aioquic still may be tracking it with a half open, and it
+            # only discards a stream once both halves finish. Close what is left
+            # open here, otherwise the stream (and its buffers) stays reachable
+            # for the lifetime of the connection.
+            self._release_unfinished_quic_stream(stream_id)
+
             # A remotely reset stream may still be queued for acceptance.
             # Leaving it there retains the closed object (and any receive
             # buffer) for as long as acceptance is paused.
@@ -1156,6 +1175,119 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 self._nursery.start_soon(update_counts)
 
             logger.debug(f"Removed stream {stream_id} from connection")
+
+    def _release_unfinished_quic_stream(self, stream_id: int) -> None:
+        """
+        Close the aioquic halves of a stream whose wrapper was just removed.
+
+        aioquic discards a stream from ``QuicConnection._streams`` only when
+        both halves report finished, and a half finishes only when its FIN or
+        RESET is acknowledged. A wrapper can be removed while one half is still
+        open: a ``close_write`` that failed after the send side was reset, a
+        close driven by STOP_SENDING, or a peer reset that left our send side
+        untouched. Nothing owns the stream afterwards, so finish what is open.
+        """
+        quic = getattr(self, "_quic", None)
+        streams = getattr(quic, "_streams", None)
+        if not isinstance(streams, dict):
+            return
+        quic_stream = streams.get(stream_id)
+        if quic_stream is None:
+            return
+
+        sender = getattr(quic_stream, "sender", None)
+        if sender is not None and not getattr(sender, "is_finished", False):
+            # A FIN or RESET already queued is retransmitted by aioquic while
+            # the stream stays in its service queue. Only a send half that was
+            # never closed needs a new frame.
+            if (
+                getattr(sender, "_buffer_fin", None) is None
+                and getattr(sender, "_reset_error_code", None) is None
+            ):
+                try:
+                    quic.send_stream_data(stream_id, b"", end_stream=True)
+                except Exception as error:
+                    logger.debug(
+                        "Cannot finish QUIC stream %s gracefully: %s",
+                        stream_id,
+                        error,
+                    )
+                    self._abandon_quic_stream(stream_id)
+
+        receiver = getattr(quic_stream, "receiver", None)
+        if (
+            receiver is not None
+            and not getattr(receiver, "is_finished", False)
+            and getattr(receiver, "_stop_error_code", None) is None
+        ):
+            try:
+                quic.stop_stream(stream_id, 0)
+            except Exception as error:
+                logger.debug(
+                    "Cannot stop receiving on QUIC stream %s: %s", stream_id, error
+                )
+
+        # aioquic drops streams it has nothing left to send for out of
+        # ``_streams_queue``, so a lost STOP_SENDING/RESET is never retransmitted
+        # even though its delivery callback re-arms the pending flag. Hand the
+        # stream back once so those frames go out; the sweeper below force-
+        # finishes anything a peer still never answers.
+        queue = getattr(quic, "_streams_queue", None)
+        if isinstance(queue, list) and quic_stream not in queue:
+            queue.append(quic_stream)
+        self._abandoned_streams.setdefault(stream_id, time.monotonic())
+
+    async def _cleanup_abandoned_quic_streams(self) -> None:
+        """
+        Discard aioquic streams that no wrapper owns and that never finished.
+
+        Healthy peers answer FIN/RESET/STOP_SENDING quickly and aioquic drops
+        the stream itself. A peer that is gone, black-holed or lost the answer
+        leaves the stream in ``_streams`` forever, and each one costs its
+        sender, receiver and range sets. Marking both halves finished and
+        letting aioquic's writer discard the stream keeps that population
+        bounded without reaching into its bookkeeping.
+        """
+        quic = getattr(self, "_quic", None)
+        streams = getattr(quic, "_streams", None)
+        if not isinstance(streams, dict) or not streams:
+            self._abandoned_streams.clear()
+            return
+
+        now = time.monotonic()
+        queue = getattr(quic, "_streams_queue", None)
+        owned = set(self._streams)
+        for stream_id in list(streams):
+            if stream_id not in owned:
+                # First time this connection notices the stream has no owner.
+                self._abandoned_streams.setdefault(stream_id, now)
+
+        discarded = 0
+        for stream_id, abandoned_at in list(self._abandoned_streams.items()):
+            quic_stream = streams.get(stream_id)
+            if quic_stream is None:
+                self._abandoned_streams.pop(stream_id, None)
+                continue
+            if quic_stream.is_finished:
+                if isinstance(queue, list) and quic_stream not in queue:
+                    queue.append(quic_stream)
+                continue
+            if now - abandoned_at < _ABANDONED_STREAM_TIMEOUT:
+                continue
+
+            quic_stream.receiver.is_finished = True
+            quic_stream.sender.is_finished = True
+            if isinstance(queue, list) and quic_stream not in queue:
+                queue.append(quic_stream)
+            self._abandoned_streams.pop(stream_id, None)
+            discarded += 1
+
+        if discarded:
+            logger.info(
+                "Discarded %d abandoned QUIC stream(s) on connection to %s",
+                discarded,
+                self._remote_peer_id,
+            )
 
     # Batched event processing to reduce overhead
     async def _process_quic_events_batched(self) -> bool:
@@ -1666,6 +1798,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
             finally:
                 self._streams.clear()
                 self._stream_cache.clear()  # Clear cache too
+                self._abandoned_streams.clear()
                 self._closed = True
                 self._closed_event.set()
 
@@ -2062,6 +2195,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
                 self._streams.clear()
                 self._stream_cache.clear()  # Clear cache
+                self._abandoned_streams.clear()
                 self._closed_event.set()
                 self._stream_accept_event.set()
 

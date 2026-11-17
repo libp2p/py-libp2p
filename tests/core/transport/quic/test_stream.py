@@ -179,3 +179,37 @@ def test_aioquic_compat_apply_is_idempotent() -> None:
     first = QuicStreamSender.get_frame
     aioquic_compat.apply()
     assert QuicStreamSender.get_frame is first
+
+
+@pytest.mark.trio
+async def test_close_write_treats_stream_state_error_as_closed(
+    quic_connection: QUICConnection,
+) -> None:
+    """
+    StreamStateError means the local write side is already closed.
+
+    aioquic 1.8 raises it instead of AssertionError for a stream that was
+    already reset. It must count as a closed write side: leaving the flag unset
+    let the wrapper be removed with an unfinished send half, which aioquic can
+    never discard (the production leak).
+    """
+    from libp2p.transport.quic.stream import StreamStateError
+
+    if StreamStateError is None:
+        pytest.skip("aioquic < 1.8 raises AssertionError for this case")
+
+    stream = QUICStream(
+        connection=quic_connection,
+        stream_id=0,
+        direction=StreamDirection.OUTBOUND,
+        remote_addr=("127.0.0.1", 4001),
+    )
+    quic_connection._quic.send_stream_data.side_effect = StreamStateError(  # type: ignore[attr-defined]
+        "Cannot send data after the stream was reset"
+    )
+
+    await stream.close_write()
+
+    assert stream._write_closed is True
+    assert not stream.is_closed()  # only the write half is closed
+    quic_connection._quic.reset_stream.assert_not_called()  # type: ignore[attr-defined]

@@ -32,6 +32,21 @@ except ImportError:
     QuicConnectionError = None  # type: ignore[assignment,misc]
     StreamFinishedError = None  # type: ignore[assignment,misc]
 
+try:
+    # Added in aioquic 1.8: write() on a finished or reset stream raises this
+    # instead of AssertionError.
+    from aioquic.quic.connection import StreamStateError
+except ImportError:
+    StreamStateError = None  # type: ignore[assignment,misc]
+
+# Errors that mean the local write side is already closed, not that the stream
+# is broken. Older aioquic uses AssertionError, newer releases StreamStateError.
+_WRITE_CLOSED_ERRORS: tuple[type[BaseException], ...] = (
+    (AssertionError, StreamStateError)
+    if StreamStateError is not None
+    else (AssertionError,)
+)
+
 if TYPE_CHECKING:
     from libp2p.abc import IMuxedStream
     from libp2p.custom_types import TProtocol
@@ -398,10 +413,11 @@ class QUICStream(IMuxedStream):
             logger.error(f"Error writing to stream {self._stream_id}: {e}")
             await self._handle_stream_error(e)
             raise
-        except AssertionError as e:
-            # aioquic asserts on "cannot call write() after FIN" / "after reset()".
-            # Our write side is already closed; surface that as a closed-stream
-            # error instead of resetting the stream (which would also kill the
+        except _WRITE_CLOSED_ERRORS as e:
+            # aioquic rejects writes on a finished or reset stream
+            # (AssertionError before 1.8, StreamStateError since). Our write
+            # side is already closed; surface that as a closed-stream error
+            # instead of resetting the stream (which would also kill the
             # peer's still-open read side).
             msg = str(e)
             if "after FIN" in msg or "after reset" in msg:
@@ -485,11 +501,16 @@ class QUICStream(IMuxedStream):
 
         except Exception as e:
             # Classify the exception using isinstance instead of string matching.
-            # AssertionError: aioquic raises this for "after FIN" / "after reset".
+            # AssertionError: aioquic before 1.8 raises this for "after FIN" /
+            # "after reset".
+            # StreamStateError: aioquic 1.8+ raises this for the same cases, and
+            # for a stream it already discarded. Leaving _write_closed unset
+            # here used to hand a stream to _remove_stream whose send half was
+            # never FINed or reset, which aioquic can then never discard.
             # ValueError: aioquic raises this for unknown peer-initiated streams.
             # StreamFinishedError: explicit stream-finished signal.
             is_expected_shutdown = (
-                isinstance(e, AssertionError)
+                isinstance(e, _WRITE_CLOSED_ERRORS)
                 or (
                     StreamFinishedError is not None
                     and isinstance(e, StreamFinishedError)

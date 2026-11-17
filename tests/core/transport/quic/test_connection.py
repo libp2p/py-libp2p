@@ -4,6 +4,8 @@ Tests all new features including advanced stream management, resource management
 error handling, and concurrent operations.
 """
 
+import time
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -804,3 +806,97 @@ def test_abandon_quic_stream_survives_unidirectional_streams() -> None:
 
     quic.stop_stream.assert_called_once_with(3, 0)
     quic.reset_stream.assert_called_once_with(3, 0)
+
+
+def _unfinished_quic_stream(**sender_fields: object) -> SimpleNamespace:
+    defaults: dict[str, object] = {
+        "is_finished": False,
+        "_buffer_fin": None,
+        "_reset_error_code": None,
+    }
+    defaults.update(sender_fields)
+    sender = SimpleNamespace(**defaults)
+    receiver = SimpleNamespace(is_finished=False)
+    return SimpleNamespace(sender=sender, receiver=receiver, is_finished=False)
+
+
+def test_remove_stream_finishes_a_stream_whose_send_half_was_never_closed() -> None:
+    """
+    A wrapper can disappear before its QUIC send half was FINed or reset.
+
+    aioquic only discards a stream once both halves finish, so removing the
+    wrapper without closing that half leaks the stream for the lifetime of the
+    connection (the dominant leak shape on the production node: 143k streams
+    with no FIN, no reset and no pending frame).
+    """
+    quic_stream = _unfinished_quic_stream()
+    quic = Mock()
+    quic._streams = {4: quic_stream}
+    quic._streams_queue = []
+    conn = Mock(spec=QUICConnection)
+    conn._quic = quic
+    conn._abandoned_streams = {}
+
+    QUICConnection._release_unfinished_quic_stream(conn, 4)
+
+    quic.send_stream_data.assert_called_once_with(4, b"", end_stream=True)
+    quic.stop_stream.assert_called_once_with(4, 0)
+    assert quic._streams_queue == [quic_stream]
+    assert 4 in conn._abandoned_streams
+
+
+def test_remove_stream_does_not_fin_a_stream_that_was_already_reset() -> None:
+    """A reset send half is already terminal; only the receive half is stopped."""
+    quic_stream = _unfinished_quic_stream(_reset_error_code=0)
+    quic = Mock()
+    quic._streams = {4: quic_stream}
+    quic._streams_queue = []
+    conn = Mock(spec=QUICConnection)
+    conn._quic = quic
+    conn._abandoned_streams = {}
+
+    QUICConnection._release_unfinished_quic_stream(conn, 4)
+
+    quic.send_stream_data.assert_not_called()
+    quic.stop_stream.assert_called_once_with(4, 0)
+
+
+@pytest.mark.trio
+async def test_cleanup_abandoned_quic_streams_discards_stale_streams() -> None:
+    """A stream no peer ever answered is handed to aioquic's discard path."""
+    quic_stream = _unfinished_quic_stream()
+    quic = Mock()
+    quic._streams = {8: quic_stream}
+    quic._streams_queue = []
+    conn = Mock(spec=QUICConnection)
+    conn._quic = quic
+    conn._streams = {}
+    conn._abandoned_streams = {8: time.monotonic() - 300.0}
+    conn._remote_peer_id = "peer"
+
+    await QUICConnection._cleanup_abandoned_quic_streams(conn)
+
+    assert quic_stream.sender.is_finished is True
+    assert quic_stream.receiver.is_finished is True
+    assert quic._streams_queue == [quic_stream]
+    assert conn._abandoned_streams == {}
+
+
+@pytest.mark.trio
+async def test_cleanup_abandoned_quic_streams_waits_for_the_grace_period() -> None:
+    """A just-closed stream still has time to be answered by a healthy peer."""
+    quic_stream = _unfinished_quic_stream()
+    quic = Mock()
+    quic._streams = {8: quic_stream}
+    quic._streams_queue = []
+    conn = Mock(spec=QUICConnection)
+    conn._quic = quic
+    conn._streams = {}
+    conn._abandoned_streams = {8: time.monotonic()}
+    conn._remote_peer_id = "peer"
+
+    await QUICConnection._cleanup_abandoned_quic_streams(conn)
+
+    assert quic_stream.sender.is_finished is False
+    assert quic_stream.receiver.is_finished is False
+    assert 8 in conn._abandoned_streams
