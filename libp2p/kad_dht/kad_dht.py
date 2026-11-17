@@ -63,6 +63,9 @@ from .common import (
     ALPHA,
     BUCKET_SIZE,
     MAX_DHT_MESSAGE_SIZE,
+    MAX_LOOKUP_CANDIDATES,
+    MAX_LOOKUP_DURATION,
+    MAX_LOOKUP_QUERIES,
     MAX_PROVIDERS_PER_MSG,
     MAX_RECORD_AGE,
     MAX_RECORD_SIZE,
@@ -1594,6 +1597,7 @@ class KadDHT(Service):
                             cp not in queried_peers
                             and cp not in candidates
                             and cp != self.local_peer_id
+                            and len(candidates) < MAX_LOOKUP_CANDIDATES
                         ):
                             candidates.append(cp)
                     # Re-sort candidates by distance to key (per spec)
@@ -1609,7 +1613,12 @@ class KadDHT(Service):
 
         async with trio.open_nursery() as nursery:
             # Iterative lookup: query peers, add closer peers, continue
-            while candidate_peers_wrapper[0] and not quorum_reached.is_set():
+            while (
+                candidate_peers_wrapper[0]
+                and not quorum_reached.is_set()
+                and len(queried_peers) < MAX_LOOKUP_QUERIES
+                and time.monotonic() - get_start < MAX_LOOKUP_DURATION
+            ):
                 # Take next unqueried peer from candidates
                 while candidate_peers_wrapper[0]:
                     peer = candidate_peers_wrapper[0].pop(0)
@@ -1627,6 +1636,10 @@ class KadDHT(Service):
                 query_scopes.append(scope)
                 nursery.start_soon(run_query, peer, scope)
 
+        if len(queried_peers) >= MAX_LOOKUP_QUERIES:
+            logger.debug(
+                "Value lookup stopped at query cap (%d peers)", MAX_LOOKUP_QUERIES
+            )
         logger.debug(
             f"get_value query complete: {total_responses_list[0]} responses, "
             f"{len(valid_records)} valid records from {len(closest_peers)} peers"

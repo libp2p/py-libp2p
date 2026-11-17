@@ -41,6 +41,9 @@ from .common import (
     ALPHA,
     BUCKET_SIZE,
     MAX_DHT_MESSAGE_SIZE,
+    MAX_LOOKUP_CANDIDATES,
+    MAX_LOOKUP_DURATION,
+    MAX_LOOKUP_QUERIES,
     MAX_PROVIDER_KEYS,
     PROTOCOL_ID,
     QUERY_TIMEOUT,
@@ -442,7 +445,12 @@ class ProviderStore:
         queried_peers: set[ID] = set()
         candidate_peers = list(closest_peers)
 
-        while candidate_peers and len(all_providers) < count:
+        while (
+            candidate_peers
+            and len(all_providers) < count
+            and len(queried_peers) < MAX_LOOKUP_QUERIES
+            and time.monotonic() - find_start < MAX_LOOKUP_DURATION
+        ):
             # Take ALPHA peers from candidates
             batch = candidate_peers[:ALPHA]
             candidate_peers = candidate_peers[ALPHA:]
@@ -495,6 +503,7 @@ class ProviderStore:
                         peer not in queried_peers
                         and peer not in candidate_peers
                         and peer != self.local_peer_id
+                        and len(candidate_peers) < MAX_LOOKUP_CANDIDATES
                     ):
                         candidate_peers.append(peer)
 
@@ -510,6 +519,11 @@ class ProviderStore:
             if not candidate_peers:
                 break
 
+        if len(queried_peers) >= MAX_LOOKUP_QUERIES:
+            logger.debug(
+                "Provider lookup stopped at query cap (%d peers)",
+                MAX_LOOKUP_QUERIES,
+            )
         logger.debug(f"Found {len(all_providers)} providers for key {key.hex()}")
 
         event = KadDhtEvent()
