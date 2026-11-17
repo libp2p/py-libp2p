@@ -40,12 +40,13 @@ except ImportError:
     StreamStateError = None  # type: ignore[assignment,misc]
 
 # Errors that mean the local write side is already closed, not that the stream
-# is broken. Older aioquic uses AssertionError, newer releases StreamStateError.
-_WRITE_CLOSED_ERRORS: tuple[type[BaseException], ...] = (
-    (AssertionError, StreamStateError)
-    if StreamStateError is not None
-    else (AssertionError,)
-)
+# is broken. aioquic before 1.8 signals this with a bare AssertionError; from
+# 1.8 it raises StreamStateError. Keep the two distinct so an unrelated
+# AssertionError is not silently swallowed as "stream already closed".
+if StreamStateError is not None:
+    _WRITE_CLOSED_ERRORS: tuple[type[BaseException], ...] = (StreamStateError,)
+else:
+    _WRITE_CLOSED_ERRORS = (AssertionError,)
 
 if TYPE_CHECKING:
     from libp2p.abc import IMuxedStream
@@ -419,18 +420,17 @@ class QUICStream(IMuxedStream):
             # side is already closed; surface that as a closed-stream error
             # instead of resetting the stream (which would also kill the
             # peer's still-open read side).
-            msg = str(e)
-            if "after FIN" in msg or "after reset" in msg:
-                self._write_closed = True
-                logger.debug(
-                    f"Write on stream {self.stream_id} after local FIN/reset: {e}"
-                )
-                raise QUICStreamClosedError(
-                    f"Stream {self.stream_id} write side is closed"
-                ) from e
-            logger.error(f"Error writing to stream {self.stream_id}: {e}")
-            await self._handle_stream_error(e)
-            raise
+            #
+            # Classified by type, never by message. aioquic 1.8 raises
+            # "Cannot send data after the stream was reset", which no
+            # "after reset" substring check matches, so that branch used to
+            # fall through to _handle_stream_error() and reset one stream per
+            # write attempt on an already-reset stream.
+            self._write_closed = True
+            logger.debug(f"Write on stream {self.stream_id} after local FIN/reset: {e}")
+            raise QUICStreamClosedError(
+                f"Stream {self.stream_id} write side is closed"
+            ) from e
         except Exception as e:
             logger.error(f"Error writing to stream {self.stream_id}: {e}")
             # Convert QUIC-specific errors using isinstance checks
