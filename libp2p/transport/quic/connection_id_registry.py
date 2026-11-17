@@ -159,6 +159,24 @@ class ConnectionIDRegistry:
         bucket = sequence if 0 <= sequence < 128 else -1
         self._sequence_distribution[bucket] += 1
 
+    def _cleanup_address_mappings(
+        self, cid: bytes, linked_cid: bytes | None = None
+    ) -> None:
+        """Clean up forward and reverse address mappings for cid and its linked CID."""
+        target_cids = {cid}
+        if linked_cid:
+            target_cids.add(linked_cid)
+
+        addrs_to_check: set[tuple[str, int]] = set()
+        for c in target_cids:
+            addr = self._connection_id_to_addr.pop(c, None)
+            if addr:
+                addrs_to_check.add(addr)
+
+        for addr in addrs_to_check:
+            if self._addr_to_connection_id.get(addr) in target_cids:
+                self._addr_to_connection_id.pop(addr, None)
+
     async def find_by_connection_id(  # pyrefly: ignore[bad-return]
         self, connection_id: bytes, is_initial: bool = False
     ) -> tuple["QUICConnection | None", "QuicConnection | None", bool]:
@@ -534,12 +552,6 @@ class ConnectionIDRegistry:
                     )
                     evicted_conn = self._pending.pop(oldest_cid, None)
                     self._pending_created_at.pop(oldest_cid, None)
-                    oldest_addr = self._connection_id_to_addr.pop(oldest_cid, None)
-                    if (
-                        oldest_addr
-                        and self._addr_to_connection_id.get(oldest_addr) == oldest_cid
-                    ):
-                        self._addr_to_connection_id.pop(oldest_addr, None)
                     self._connection_id_sequences.pop(oldest_cid, None)
                     self._connection_sequence_counters.pop(oldest_cid, None)
 
@@ -547,6 +559,7 @@ class ConnectionIDRegistry:
                     linked_init_dcid = self._host_cid_to_initial_dcid.pop(
                         oldest_cid, None
                     )
+                    linked_host_cid = None
                     if linked_init_dcid:
                         self._initial_dcid_to_host_cid.pop(linked_init_dcid, None)
                         init_conn = self._initial_connection_ids.pop(
@@ -555,7 +568,6 @@ class ConnectionIDRegistry:
                         if init_conn and not evicted_conn:
                             evicted_conn = init_conn
                         self._pending_created_at.pop(linked_init_dcid, None)
-                        self._connection_id_to_addr.pop(linked_init_dcid, None)
                         self._connection_id_sequences.pop(linked_init_dcid, None)
                     else:
                         # oldest_cid might itself be an initial DCID
@@ -568,7 +580,6 @@ class ConnectionIDRegistry:
                             if h_conn and not evicted_conn:
                                 evicted_conn = h_conn
                             self._pending_created_at.pop(linked_host_cid, None)
-                            self._connection_id_to_addr.pop(linked_host_cid, None)
                             self._connection_id_sequences.pop(linked_host_cid, None)
                             self._connection_sequence_counters.pop(
                                 linked_host_cid, None
@@ -576,6 +587,10 @@ class ConnectionIDRegistry:
                         init_conn = self._initial_connection_ids.pop(oldest_cid, None)
                         if init_conn and not evicted_conn:
                             evicted_conn = init_conn
+
+                    self._cleanup_address_mappings(
+                        oldest_cid, linked_init_dcid or linked_host_cid
+                    )
 
                     if evicted_conn:
                         _purge_quic_conn(evicted_conn)
@@ -854,12 +869,6 @@ class ConnectionIDRegistry:
         async with self._lock:
             conn = self._pending.pop(connection_id, None)
             self._pending_created_at.pop(connection_id, None)
-            addr = self._connection_id_to_addr.pop(connection_id, None)
-            if addr:
-                if self._addr_to_connection_id.get(addr) == connection_id:
-                    del self._addr_to_connection_id[addr]
-
-            # Clean up sequence mapping
             self._connection_id_sequences.pop(connection_id, None)
             self._connection_sequence_counters.pop(connection_id, None)
 
@@ -871,8 +880,9 @@ class ConnectionIDRegistry:
                 if iconn and not conn:
                     conn = iconn
                 self._pending_created_at.pop(init_dcid, None)
-                self._connection_id_to_addr.pop(init_dcid, None)
                 self._connection_id_sequences.pop(init_dcid, None)
+
+            self._cleanup_address_mappings(connection_id, init_dcid)
 
             if conn:
                 _purge_quic_conn(conn)
@@ -1218,9 +1228,6 @@ class ConnectionIDRegistry:
                 if init_conn:
                     stale_conns.add(init_conn)
                 self._pending_created_at.pop(cid, None)
-                addr = self._connection_id_to_addr.pop(cid, None)
-                if addr and self._addr_to_connection_id.get(addr) == cid:
-                    self._addr_to_connection_id.pop(addr, None)
                 self._connection_id_sequences.pop(cid, None)
                 self._connection_sequence_counters.pop(cid, None)
 
@@ -1232,7 +1239,6 @@ class ConnectionIDRegistry:
                     if iconn:
                         stale_conns.add(iconn)
                     self._pending_created_at.pop(linked_init, None)
-                    self._connection_id_to_addr.pop(linked_init, None)
                     self._connection_id_sequences.pop(linked_init, None)
                     removed_cids.add(linked_init)
 
@@ -1243,10 +1249,11 @@ class ConnectionIDRegistry:
                     if hconn:
                         stale_conns.add(hconn)
                     self._pending_created_at.pop(linked_host, None)
-                    self._connection_id_to_addr.pop(linked_host, None)
                     self._connection_id_sequences.pop(linked_host, None)
                     self._connection_sequence_counters.pop(linked_host, None)
                     removed_cids.add(linked_host)
+
+                self._cleanup_address_mappings(cid, linked_init or linked_host)
 
             # Sweep any orphan initial_connection_ids pointing to stale connections
             # or created more than max_age ago
@@ -1319,7 +1326,6 @@ class ConnectionIDRegistry:
                 oldest_k = next(iter(self._initial_connection_ids))
                 evicted_conn = self._initial_connection_ids.pop(oldest_k, None)
                 self._pending_created_at.pop(oldest_k, None)
-                self._connection_id_to_addr.pop(oldest_k, None)
                 self._connection_id_sequences.pop(oldest_k, None)
                 linked_host_cid = self._initial_dcid_to_host_cid.pop(oldest_k, None)
                 if linked_host_cid:
@@ -1328,9 +1334,9 @@ class ConnectionIDRegistry:
                     if p_conn and not evicted_conn:
                         evicted_conn = p_conn
                     self._pending_created_at.pop(linked_host_cid, None)
-                    self._connection_id_to_addr.pop(linked_host_cid, None)
                     self._connection_id_sequences.pop(linked_host_cid, None)
                     self._connection_sequence_counters.pop(linked_host_cid, None)
+                self._cleanup_address_mappings(oldest_k, linked_host_cid)
                 if evicted_conn:
                     _purge_quic_conn(evicted_conn)
 
@@ -1356,15 +1362,19 @@ class ConnectionIDRegistry:
             self._initial_connection_ids.pop(connection_id, None)
             self._pending_created_at.pop(connection_id, None)
             self._connection_id_sequences.pop(connection_id, None)
-            addr = self._connection_id_to_addr.pop(connection_id, None)
-            if addr:
-                if self._addr_to_connection_id.get(addr) == connection_id:
-                    del self._addr_to_connection_id[addr]
             h_cid = self._initial_dcid_to_host_cid.pop(connection_id, None)
             if h_cid:
                 self._host_cid_to_initial_dcid.pop(h_cid, None)
-            # Clean up sequence mapping
-            self._connection_id_sequences.pop(connection_id, None)
+            addr = self._connection_id_to_addr.pop(connection_id, None)
+            if addr:
+                if self._addr_to_connection_id.get(addr) == connection_id:
+                    if h_cid and (h_cid in self._pending or h_cid in self._connections):
+                        self._addr_to_connection_id[addr] = h_cid
+                    else:
+                        self._addr_to_connection_id.pop(addr, None)
+                elif h_cid and self._addr_to_connection_id.get(addr) == h_cid:
+                    if h_cid not in self._pending and h_cid not in self._connections:
+                        self._addr_to_connection_id.pop(addr, None)
 
     async def get_sequence_for_connection_id(self, connection_id: bytes) -> int | None:
         """

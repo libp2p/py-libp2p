@@ -176,6 +176,7 @@ class QUICStream(IMuxedStream):
         # Close/reset state
         self._write_closed = False
         self._read_closed = False
+        self._cleaned_up = False
         self._close_event = trio.Event()
         self._close_callback: Callable[[], Awaitable[None]] | None = None
         self._reset_error_code: int | None = None
@@ -453,7 +454,8 @@ class QUICStream(IMuxedStream):
         are closed and resources are cleaned up.
         """
         async with self._state_lock:
-            if self._state in (StreamState.CLOSED, StreamState.RESET):
+            if self._cleaned_up and self._state in (StreamState.CLOSED, StreamState.RESET):
+                self._receive_buffer.clear()
                 return
 
             logger.debug(f"Closing stream {self.stream_id}")
@@ -731,11 +733,14 @@ class QUICStream(IMuxedStream):
         # Wake up any pending write operations
         self._backpressure_event.set()
 
+        terminal = False
         async with self._state_lock:
             if self.direction == StreamDirection.OUTBOUND:
                 self._state = StreamState.CLOSED
+                terminal = True
             elif self._read_closed:
                 self._state = StreamState.CLOSED
+                terminal = True
             else:
                 # Only write side closed - add WRITE_CLOSED state if needed
                 self._state = StreamState.WRITE_CLOSED
@@ -750,6 +755,9 @@ class QUICStream(IMuxedStream):
             logger.warning(
                 f"Could not send RESET_STREAM for stream {self.stream_id}: {e}"
             )
+
+        if terminal:
+            await self._finish_graceful_close()
 
     async def handle_reset(self, error_code: int) -> None:
         """
@@ -939,10 +947,6 @@ class QUICStream(IMuxedStream):
 
     async def _cleanup_resources(self, discard_buffer: bool = True) -> None:
         """Clean up stream resources."""
-        # Release all reserved memory
-        if self._memory_reserved > 0:
-            self._release_memory(self._memory_reserved)
-
         # Clear the receive buffer to release C-level memory immediately.
         # The old comment ("allow application to drain") kept the buffer
         # alive until GC collected the QUICStream, but reference cycles
@@ -950,6 +954,14 @@ class QUICStream(IMuxedStream):
         # collection, causing indefinite RSS growth.
         if discard_buffer:
             self._receive_buffer.clear()
+
+        if self._cleaned_up:
+            return
+        self._cleaned_up = True
+
+        # Release all reserved memory
+        if self._memory_reserved > 0:
+            self._release_memory(self._memory_reserved)
 
         # Release resource scope if present
         if self._resource_scope:
