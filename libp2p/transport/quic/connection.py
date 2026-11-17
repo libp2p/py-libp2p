@@ -1433,8 +1433,8 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     try:
                         stream = await self._create_inbound_stream(stream_id)
                     except QUICStreamLimitError:
-                        # Reset stream if we can't handle it
-                        self._quic.reset_stream(stream_id, error_code=0x04)
+                        # _create_inbound_stream() already stopped/reset the
+                        # aioquic stream it refused; just push the frames out.
                         await self._transmit()
                         continue
                 else:
@@ -1497,6 +1497,11 @@ class QUICConnection(IRawConnection, IMuxedConn):
             # Check limits
             if self._inbound_stream_count >= self.MAX_INCOMING_STREAMS:
                 logger.warning(f"Rejecting inbound stream {stream_id}: limit reached")
+                # The peer still holds this stream open. Refusing it without
+                # stopping the receive side and resetting the send side leaves
+                # an aioquic stream that nothing owns and that aioquic can
+                # never discard (same defect as the ignored-event paths).
+                self._abandon_quic_stream(stream_id)
                 raise QUICStreamLimitError("Too many inbound streams")
 
             # Acquire stream scope from resource manager if available
@@ -1510,6 +1515,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     )
                 except Exception as e:
                     logger.warning(f"Failed to acquire stream scope: {e}")
+                    self._abandon_quic_stream(stream_id)
                     raise QUICStreamLimitError(f"Resource limit exceeded: {e}")
 
             # Create stream

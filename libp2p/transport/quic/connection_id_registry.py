@@ -1111,6 +1111,20 @@ class ConnectionIDRegistry:
                 if conn == connection:
                     cids_to_remove.add(cid)
 
+            raw_quic = getattr(connection, "_quic", None)
+            if raw_quic:
+                # A connection can end while its handshake is still pending,
+                # before any CID was promoted. Those entries are keyed only by
+                # the aioquic object, not by a registered QUICConnection.
+                cids_to_remove.update(
+                    cid
+                    for cid, pending in self._initial_connection_ids.items()
+                    if pending is raw_quic
+                )
+                cids_to_remove.update(
+                    cid for cid, pending in self._pending.items() if pending is raw_quic
+                )
+
             for cid in cids_to_remove:
                 self._connections.pop(cid, None)
                 self._initial_connection_ids.pop(cid, None)
@@ -1121,6 +1135,16 @@ class ConnectionIDRegistry:
                 addr = self._connection_id_to_addr.pop(cid, None)
                 if addr and self._addr_to_connection_id.get(addr) == cid:
                     self._addr_to_connection_id.pop(addr, None)
+
+                # Unlink the host-CID <-> initial-DCID pair. These maps are not
+                # keyed by connection, so an aborted handshake would otherwise
+                # leave both entries behind forever.
+                linked_initial = self._host_cid_to_initial_dcid.pop(cid, None)
+                if linked_initial:
+                    self._initial_dcid_to_host_cid.pop(linked_initial, None)
+                linked_host = self._initial_dcid_to_host_cid.pop(cid, None)
+                if linked_host:
+                    self._host_cid_to_initial_dcid.pop(linked_host, None)
 
             addr = self._connection_addresses.pop(connection, None)
             if addr:
@@ -1135,21 +1159,6 @@ class ConnectionIDRegistry:
             self._connection_primary_cid.pop(connection, None)
             self._connection_cid_counts.pop(connection, None)
             self._connection_sequences.pop(connection, None)
-
-            raw_quic = getattr(connection, "_quic", None)
-            if raw_quic:
-                for k, v in list(self._initial_connection_ids.items()):
-                    if v is raw_quic:
-                        self._initial_connection_ids.pop(k, None)
-                        self._pending_created_at.pop(k, None)
-                        self._connection_id_to_addr.pop(k, None)
-                        self._connection_id_sequences.pop(k, None)
-                for k, v in list(self._pending.items()):
-                    if v is raw_quic:
-                        self._pending.pop(k, None)
-                        self._pending_created_at.pop(k, None)
-                        self._connection_id_to_addr.pop(k, None)
-                        self._connection_id_sequences.pop(k, None)
 
     async def cleanup_stale_address_mapping(self, addr: tuple[str, int]) -> None:
         """

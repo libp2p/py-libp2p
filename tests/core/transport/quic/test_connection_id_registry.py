@@ -1004,3 +1004,39 @@ async def test_cleanup_stale_pending_purges_both_cids(
     assert len(mock_pending_connection._events) == 0
     assert len(await registry.get_all_pending_cids()) == 0
     assert len(await registry.get_all_initial_cids()) == 0
+
+
+@pytest.mark.trio
+async def test_unregister_pending_connection_clears_every_mapping(
+    registry, mock_connection, mock_pending_connection
+):
+    """
+    Ending a handshaking connection must purge all of its registry state.
+
+    Such a connection has no promoted CID yet, so it is invisible to the
+    connection-keyed cleanup. Its initial-CID link pair, address mapping and
+    sequence counter would otherwise stay in the registry for the lifetime of
+    the listener, growing with every aborted handshake.
+    """
+    host_cid = b"host_cid_pending"
+    initial_dcid = b"initial_dcid_pending"
+    addr = ("127.0.0.1", 41234)
+
+    await registry.register_pending(
+        host_cid, mock_pending_connection, addr, sequence=0, initial_dcid=initial_dcid
+    )
+    await registry.register_initial_connection_id(
+        initial_dcid, mock_pending_connection, addr, sequence=0, host_cid=host_cid
+    )
+    mock_connection._quic = mock_pending_connection
+
+    await registry.unregister_connection_object(mock_connection)
+
+    assert len(await registry.get_all_pending_cids()) == 0
+    assert len(await registry.get_all_initial_cids()) == 0
+    assert not registry._host_cid_to_initial_dcid
+    assert not registry._initial_dcid_to_host_cid
+    assert addr not in registry._addr_to_connection_id
+    assert not registry._connection_id_to_addr
+    assert not registry._connection_id_sequences
+    assert not registry._connection_sequence_counters

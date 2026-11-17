@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-from aioquic.quic.events import ConnectionIdIssued
+from aioquic.quic.events import ConnectionIdIssued, StreamDataReceived
 from multiaddr.multiaddr import Multiaddr
 import trio
 
@@ -979,3 +979,37 @@ async def test_handle_connection_error_still_closes_an_open_connection(caplog) -
 
     conn.close.assert_awaited_once()
     assert any(r.levelno >= logging.ERROR for r in caplog.records)
+
+
+@pytest.mark.trio
+async def test_refused_inbound_stream_is_released_in_aioquic() -> None:
+    """
+    Refusing an inbound stream at the limit must release it in aioquic.
+
+    The peer keeps its side open, so resetting only our send half leaves the
+    receive half unfinished and aioquic can never discard the stream. It has no
+    wrapper either, so nothing else will ever close it.
+    """
+    mock_quic = Mock()
+    mock_quic._streams = {0: Mock()}
+    mock_quic.configuration = Mock(is_client=False)
+    peer_id = ID.from_pubkey(create_new_key_pair().private_key.get_public_key())
+    server = QUICConnection(
+        quic_connection=mock_quic,
+        remote_addr=("127.0.0.1", 4001),
+        remote_peer_id=peer_id,
+        local_peer_id=peer_id,
+        is_initiator=False,
+        maddr=Multiaddr("/ip4/127.0.0.1/udp/4001/quic"),
+        transport=Mock(_config=QUICTransportConfig()),
+    )
+    server._started = True
+    server._inbound_stream_count = server.MAX_INCOMING_STREAMS
+
+    await server._handle_stream_data_batch(
+        [StreamDataReceived(data=b"request", end_stream=False, stream_id=0)]
+    )
+
+    assert 0 not in server._streams
+    mock_quic.stop_stream.assert_called_once_with(0, 0)
+    mock_quic.reset_stream.assert_called_once_with(0, 0)

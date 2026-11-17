@@ -1104,6 +1104,13 @@ class QUICListener(IListener):
                         pending_cid, connection, addr, sequence
                     )
 
+                # Routing for this connection now lives in the established
+                # table, so it is no longer a pending handshake. Keeping the
+                # entry makes _periodic_cleanup_loop see a pending CID that the
+                # registry no longer tracks, treat the live connection as an
+                # orphan and close it on the next sweep.
+                self._pending_cid_by_quic_id.pop(quic_key, None)
+
                 # Ensure the packet's destination CID also routes to this connection.
                 if destination_connection_id != pending_cid:
                     await self._registry.register_new_connection_id_for_existing_conn(
