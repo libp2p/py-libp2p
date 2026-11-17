@@ -454,7 +454,10 @@ class QUICStream(IMuxedStream):
         are closed and resources are cleaned up.
         """
         async with self._state_lock:
-            if self._cleaned_up and self._state in (StreamState.CLOSED, StreamState.RESET):
+            if self._cleaned_up and self._state in (
+                StreamState.CLOSED,
+                StreamState.RESET,
+            ):
                 self._receive_buffer.clear()
                 return
 

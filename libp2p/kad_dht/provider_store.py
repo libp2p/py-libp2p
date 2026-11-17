@@ -210,12 +210,20 @@ class ProviderStore:
         # Only republish keys that are due (last republish > 22h ago or never)
         republished = 0
         for key in providing_keys_snapshot:
+            # The snapshot goes stale while earlier keys in this pass await
+            # network work: unprovide() or capacity eviction can drop a key.
+            if key not in self.providing_keys:
+                continue
             last_republished = self._last_republish.get(key, 0)
             if (current_time - last_republished) >= PROVIDER_RECORD_REPUBLISH_INTERVAL:
                 logger.debug(f"Republishing provider record for key {key.hex()}")
                 await self.provide(key)
-                self._last_republish[key] = current_time
-                republished += 1
+                # provide() yields while finding peers and announcing. If the
+                # key was removed meanwhile, writing the timestamp back would
+                # leave metadata that no record or cleanup pass ever visits.
+                if key in self.providing_keys:
+                    self._last_republish[key] = current_time
+                    republished += 1
 
         if republished > 0:
             event = KadDhtEvent()

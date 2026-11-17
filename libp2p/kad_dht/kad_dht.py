@@ -599,7 +599,27 @@ class KadDHT(Service):
             return
 
         async with self._inbound_limiter:
-            await self._do_handle_stream(stream)
+            try:
+                await self._do_handle_stream(stream)
+            except BaseException:
+                # Trio cancellation derives from BaseException, so it bypasses
+                # every cleanup path inside the handler (including the manual
+                # close/reset in its ``else`` branch). The muxed stream is then
+                # still owned by the transport, so release it here.
+                await self._abort_stream(stream)
+                raise
+
+    async def _abort_stream(self, stream: INetStream) -> None:
+        """Reset an inbound stream, shielding teardown from cancellation."""
+        with trio.CancelScope() as scope:
+            scope.shield = True
+            try:
+                await stream.reset()
+            except Exception:
+                try:
+                    await stream.close()
+                except Exception:
+                    pass
 
     def _add_closer_peers_to_response(
         self,

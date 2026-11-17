@@ -200,12 +200,19 @@ async def push_identify_to_peer(
             event.peer_id = str(peer_id)
             event.success = False
             host.get_event_bus().emit(event)
-            if stream is not None:
-                try:
-                    await stream.reset()
-                except Exception:
-                    pass
             return False
+        finally:
+            # Trio cancellation derives from BaseException, so the handler above
+            # never sees it. Without this the acquired stream is neither closed
+            # nor reset, and the transport keeps it (plus its buffers) until the
+            # connection dies.
+            if stream is not None:
+                with trio.CancelScope() as shield:
+                    shield.shield = True
+                    try:
+                        await stream.reset()
+                    except Exception:
+                        pass
 
 
 async def push_identify_to_peers(

@@ -20,6 +20,7 @@ import pytest
 from multiaddr import (
     Multiaddr,
 )
+import trio
 
 from libp2p.kad_dht.provider_store import (
     PROVIDER_RECORD_EXPIRATION_INTERVAL,
@@ -850,3 +851,36 @@ class TestProviderStoreLocalUnprovide:
             await store._republish_provider_records()
             assert b"local-7" not in store.providers
             assert b"local-7" not in store.providing_keys
+
+
+class TestRepublishMetadataOwnership:
+    """Republish must not recreate metadata for a key that is no longer local."""
+
+    @pytest.mark.trio
+    async def test_unprovide_during_republish_leaves_no_metadata(self):
+        store = ProviderStore(host=_FakeHost(), peer_routing=_FakePeerRouting())
+        key = b"racy-key"
+        await store.provide(key)
+        store._last_republish[key] = 0  # Force a republish pass to consider it.
+
+        started = trio.Event()
+        release = trio.Event()
+
+        async def gated_provide(provided_key):
+            started.set()
+            await release.wait()
+            return True
+
+        store.provide = gated_provide  # type: ignore[method-assign]
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(store._republish_provider_records)
+            await started.wait()
+            store.unprovide(key)
+            release.set()
+
+        # provide() yielded after the key was removed; its completion must not
+        # write a timestamp that no record or cleanup pass would ever visit.
+        assert key not in store.providing_keys
+        assert key not in store.providers
+        assert key not in store._last_republish
