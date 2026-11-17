@@ -196,3 +196,127 @@ async def test_yamux_full_close_is_bounded_but_write_half_close_is_preserved():
     assert abandoned.stream_id not in yamux.streams
     assert half_stream.stream_id in yamux.streams
     assert not half_stream.recv_closed
+
+
+class _EchoPingStream:
+    """Minimal INetStream stand-in that echoes a 32-byte ping."""
+
+    is_closed = False
+
+    def __init__(self):
+        self._pending = b""
+
+    async def write(self, data):
+        await trio.lowlevel.checkpoint()
+        self._pending = data
+
+    async def read(self, n):
+        await trio.lowlevel.checkpoint()
+        data, self._pending = self._pending[:n], self._pending[n:]
+        return data
+
+    async def close(self):
+        await trio.lowlevel.checkpoint()
+        self.is_closed = True
+
+    async def reset(self):
+        await trio.lowlevel.checkpoint()
+        self.is_closed = True
+
+
+def _ping_host(new_stream):
+    return cast(
+        IHost,
+        SimpleNamespace(
+            new_stream=new_stream,
+            get_event_bus=lambda: SimpleNamespace(emit=lambda event: None),
+        ),
+    )
+
+
+@pytest.mark.trio
+async def test_concurrent_pings_share_one_stream_and_aclose_releases_it():
+    """
+    Overlapping first pings must not each open (and orphan) a stream.
+
+    The cache lookup and stream creation were not serialized, so N callers
+    could all cache-miss, open N streams and leave only the last one reachable
+    through the service registry.
+    """
+    opened: list[_EchoPingStream] = []
+
+    async def new_stream(*args):
+        await trio.lowlevel.checkpoint()
+        stream = _EchoPingStream()
+        opened.append(stream)
+        return stream
+
+    service = PingService(_ping_host(new_stream))
+    peer = ID(b"peer")
+
+    async with trio.open_nursery() as nursery:
+        for _ in range(25):
+            nursery.start_soon(service.ping, peer)
+
+    assert len(opened) == 1
+    assert len(service._outbound_streams) == 1
+    # The per-peer lock registry must not retain idle peers.
+    assert service._peer_locks == {}
+
+    await service.aclose()
+    assert opened[0].is_closed
+    assert service._outbound_streams == {}
+
+
+@pytest.mark.trio
+async def test_aclose_during_stream_open_does_not_adopt_new_stream():
+    """A ping that resumes after aclose() must release its stream, not keep it."""
+    gate = trio.Event()
+    opened = trio.Event()
+    created: list[_EchoPingStream] = []
+    errors: list[BaseException] = []
+
+    async def new_stream(*args):
+        stream = _EchoPingStream()
+        created.append(stream)
+        opened.set()
+        await gate.wait()
+        return stream
+
+    service = PingService(_ping_host(new_stream))
+
+    async def run_ping():
+        try:
+            await service.ping(ID(b"peer"))
+        except BaseException as error:  # noqa: BLE001 - recorded for the assertion
+            errors.append(error)
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(run_ping)
+        await opened.wait()
+        await service.aclose()
+        gate.set()
+
+    assert errors and isinstance(errors[0], RuntimeError)
+    assert created[0].is_closed
+    assert service._outbound_streams == {}
+
+
+@pytest.mark.trio
+async def test_cancelled_inbound_ping_handler_resets_stream():
+    """External cancellation must not leave the muxed stream owned."""
+    stream = _EchoPingStream()
+    stream.muxed_conn = SimpleNamespace(peer_id=ID(b"peer"))
+
+    async def read_forever(n):
+        await trio.sleep_forever()
+
+    stream.read = read_forever
+
+    service = PingService(_ping_host(lambda *args: None))
+    with trio.move_on_after(0.02) as scope:
+        await service.handle_ping(stream)
+
+    assert scope.cancelled_caught
+    assert stream.is_closed
+    assert service._inbound_streams == {}

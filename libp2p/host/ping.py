@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 import logging
 import secrets
 import time
@@ -160,6 +161,46 @@ async def _ping(
     return rtt
 
 
+def _stream_is_usable(stream: INetStream) -> bool:
+    """Return False for a stream that is closed or has been reset."""
+    # A stream may be closed (connection dropped) or in reset state (protocol
+    # error). In both cases a fresh stream is needed.
+    is_closed = getattr(stream, "is_closed", False)
+    if callable(is_closed):
+        is_closed = is_closed()
+    if is_closed:
+        return False
+    if hasattr(stream, "_state") and getattr(stream._state, "value", None) == "RESET":
+        return False
+    return True
+
+
+async def _shielded_reset(stream: INetStream) -> None:
+    """Reset a stream without letting the caller's cancellation interrupt it."""
+    with trio.move_on_after(5) as cleanup_scope:
+        cleanup_scope.shield = True
+        try:
+            await stream.reset()
+        except Exception:
+            logger.debug("Failed to reset ping stream", exc_info=True)
+
+
+async def _release_stream(stream: INetStream) -> None:
+    """Close or reset a stream that is no longer wanted, even when cancelled."""
+    is_closed = getattr(stream, "is_closed", False)
+    if callable(is_closed) and is_closed():
+        return
+    with trio.move_on_after(5) as cleanup_scope:
+        cleanup_scope.shield = True
+        try:
+            await stream.close()
+        except Exception:
+            try:
+                await stream.reset()
+            except Exception:
+                logger.debug("Failed to release ping stream", exc_info=True)
+
+
 class PingService(INotifee):
     """
     PingService executes pings and returns RTT in milliseconds (ms).
@@ -172,6 +213,10 @@ class PingService(INotifee):
         self._rcmgr = rcmgr
         self._outbound_streams: dict[PeerID, INetStream] = {}
         self._inbound_streams: dict[PeerID, set[INetStream]] = {}
+        # Serializes cache check, stream creation and round-trips per peer.
+        self._peer_locks: dict[PeerID, trio.Lock] = {}
+        self._peer_lock_users: dict[PeerID, int] = {}
+        self._closed = False
         try:
             network = self._host.get_network()
             if hasattr(network, "register_notifee"):
@@ -181,6 +226,10 @@ class PingService(INotifee):
 
     async def aclose(self) -> None:
         """Unregister this service and terminate streams owned by it."""
+        # Set first: an acquisition in flight when close runs must not adopt
+        # the stream it is about to receive and leave it open for a service
+        # that no longer tracks it.
+        self._closed = True
         try:
             network = self._host.get_network()
             if hasattr(network, "remove_notifee"):
@@ -287,6 +336,62 @@ class PingService(INotifee):
                 self._inbound_streams[peer_id].discard(stream)
                 if not self._inbound_streams[peer_id]:
                     self._inbound_streams.pop(peer_id, None)
+            # Trio cancellation derives from BaseException, so it bypasses the
+            # handlers above. Without this the muxed stream stays owned by the
+            # transport, and aclose() cannot find it (already unregistered).
+            await _release_stream(stream)
+
+    @asynccontextmanager
+    async def _peer_guard(self, peer_id: PeerID) -> AsyncIterator[None]:
+        """
+        Serialize ping work for a single peer.
+
+        The cache lookup and the asynchronous stream creation are not atomic
+        on their own: concurrent first pings each opened a stream and then
+        overwrote the cache, so all but the last stream became unreachable
+        and survived ``aclose()``. Round-trips sharing a stream are serialized
+        for the same reason -- overlapping readers can consume each other's
+        random payload replies and report a false mismatch.
+        """
+        lock = self._peer_locks.get(peer_id)
+        if lock is None:
+            lock = trio.Lock()
+            self._peer_locks[peer_id] = lock
+        # The refcount moves in step with the lock object (no checkpoint in
+        # between), so an idle peer's entry can be dropped without ever leaving
+        # two locks for the same peer.
+        self._peer_lock_users[peer_id] = self._peer_lock_users.get(peer_id, 0) + 1
+        try:
+            async with lock:
+                yield
+        finally:
+            users = self._peer_lock_users.get(peer_id, 0) - 1
+            if users > 0:
+                self._peer_lock_users[peer_id] = users
+            else:
+                self._peer_lock_users.pop(peer_id, None)
+                self._peer_locks.pop(peer_id, None)
+
+    async def _acquire_stream(self, peer_id: PeerID) -> INetStream:
+        """
+        Return a usable outbound stream, creating one if needed.
+
+        The caller must hold ``_peer_guard`` for ``peer_id``.
+        """
+        stream = self._outbound_streams.get(peer_id)
+        if stream is not None and _stream_is_usable(stream):
+            return stream
+        self._outbound_streams.pop(peer_id, None)
+
+        stream = await self._host.new_stream(peer_id, [ID])
+        if self._closed:
+            # aclose() ran while new_stream() was awaiting. Nobody owns this
+            # stream any more, so release it instead of adopting it into a
+            # service that has already cleared its maps.
+            await _shielded_reset(stream)
+            raise RuntimeError("PingService has been closed")
+        self._outbound_streams[peer_id] = stream
+        return stream
 
     async def ping_iter(
         self,
@@ -297,31 +402,27 @@ class PingService(INotifee):
         if ping_amt < 1:
             raise ValueError(f"ping_amt must be >= 1, got {ping_amt!r}")
 
-        stream = self._outbound_streams.get(peer_id)
-        # Check if cached stream is still usable. A stream may be closed
-        # (connection dropped) or in reset state (protocol error). In both
-        # cases we must create a fresh stream.
-        needs_new = stream is None
-        if stream is not None:
-            is_closed = getattr(stream, "is_closed", False)
-            if callable(is_closed):
-                is_closed = is_closed()
-            if is_closed:
-                needs_new = True
-            elif hasattr(stream, "_state"):
-                if getattr(stream._state, "value", None) == "RESET":
-                    needs_new = True
-        if needs_new:
-            stream = await self._host.new_stream(peer_id, [ID])
-            self._outbound_streams[peer_id] = stream
-
-        assert stream is not None
         event: PingEvent | None = None
         rtts: list[int] = []
 
         try:
             for _ in range(ping_amt):
-                rtt = await _ping(stream, cancel_scope=cancel_scope)
+                async with self._peer_guard(peer_id):
+                    stream = await self._acquire_stream(peer_id)
+                    try:
+                        rtt = await _ping(stream, cancel_scope=cancel_scope)
+                    except BaseException as error:
+                        # An outer fail_after delivers Cancelled here, not
+                        # TooSlowError. Drop ownership before any await and
+                        # shield transport cleanup.
+                        if self._outbound_streams.get(peer_id) is stream:
+                            self._outbound_streams.pop(peer_id, None)
+                        await _shielded_reset(stream)
+                        if isinstance(error, Exception):
+                            event = PingEvent(
+                                peer_id=peer_id, rtts=None, failure_error=error
+                            )
+                        raise
                 rtts.append(rtt)
                 yield rtt
             # Keep the stream open for reuse across ping cycles.
@@ -332,20 +433,6 @@ class PingService(INotifee):
             # so the stream stays alive. QUIC idle timeout handles cleanup
             # if the connection dies.
             event = PingEvent(peer_id=peer_id, rtts=rtts, failure_error=None)
-        except BaseException as error:
-            # An outer fail_after delivers Cancelled here, not TooSlowError.
-            # Drop ownership before any await, and shield transport cleanup.
-            if self._outbound_streams.get(peer_id) is stream:
-                self._outbound_streams.pop(peer_id, None)
-            with trio.move_on_after(5) as cleanup_scope:
-                cleanup_scope.shield = True
-                try:
-                    await stream.reset()
-                except Exception:
-                    logger.debug("Failed to reset ping stream", exc_info=True)
-            if isinstance(error, Exception):
-                event = PingEvent(peer_id=peer_id, rtts=None, failure_error=error)
-            raise
         finally:
             if event is not None:
                 self._host.get_event_bus().emit(event)
@@ -386,3 +473,7 @@ async def handle_ping(stream: INetStream) -> None:
             await stream.reset()
         except Exception:
             pass
+    finally:
+        # External cancellation derives from BaseException and skips the
+        # handlers above, leaving the muxed stream owned by the transport.
+        await _release_stream(stream)
