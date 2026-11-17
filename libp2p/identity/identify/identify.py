@@ -225,17 +225,12 @@ def identify_handler_for(
         response = protobuf.SerializeToString()
 
         try:
-            # Read the remote peer's identify message so the stream is
-            # fully consumed and can be properly closed.  Without this
-            # the yamux read-side stays open and the muxer tracks the
-            # stream indefinitely, which artificially inflates
-            # "streams_inbound" counts.
-            try:
-                with trio.move_on_after(5):
-                    await stream.read()
-            except Exception:
-                pass
-
+            # Per the Identify spec the requester only reads: it never sends
+            # on this stream.  Do not try to read here — waiting for data that
+            # will not arrive held every inbound identify handler (and its
+            # stream) open for the full read timeout, slowing each exchange
+            # and pinning a stream per pending request.  The stream is closed
+            # in ``finally`` below, which releases the muxer-side state.
             if use_varint_format:
                 # Send length-prefixed protobuf message (new format)
                 # Combine length prefix and response into a single write to avoid races
