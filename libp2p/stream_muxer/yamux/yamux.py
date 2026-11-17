@@ -847,14 +847,15 @@ class Yamux(IMuxedConn):
         except Exception as e:
             logger.debug(f"Error closing secured_conn for peer {self.peer_id}: {e}")
         self.event_closed.set()
-        if self.on_close:
+        on_close = getattr(self, "on_close", None)
+        if on_close:
             logger.debug(f"Calling on_close in Yamux.close for peer {self.peer_id}")
-            if inspect.iscoroutinefunction(self.on_close):
-                if self.on_close is not None:
-                    await self.on_close()
+            if inspect.iscoroutinefunction(on_close):
+                if on_close is not None:
+                    await on_close()
             else:
-                if self.on_close is not None:
-                    await self.on_close()
+                if on_close is not None:
+                    await on_close()
         await trio.sleep(0.1)
 
     @property
@@ -1782,12 +1783,13 @@ class Yamux(IMuxedConn):
         self.event_closed.set()
 
         # Call on_close callback if provided
-        if self.on_close:
+        on_close = getattr(self, "on_close", None)
+        if on_close:
             logger.debug(f"Calling on_close for peer {self.peer_id}")
             try:
-                if inspect.iscoroutinefunction(self.on_close):
-                    await self.on_close()
+                if inspect.iscoroutinefunction(on_close):
+                    await on_close()
                 else:
-                    self.on_close()
+                    on_close()
             except Exception as callback_error:
                 logger.error(f"Error in on_close callback: {callback_error}")

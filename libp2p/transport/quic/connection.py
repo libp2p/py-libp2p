@@ -1846,9 +1846,14 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
                 # Notify swarm/on_close listeners so peer bookkeeping is cleaned
                 # up too — close() does this but this termination path bypassed it.
-                if self.on_close:
+                #
+                # getattr, not self.on_close: SwarmConnection deletes the hook
+                # when it tears down, so the attribute can legitimately be gone
+                # by the time a late ConnectionTerminated event is processed.
+                on_close = getattr(self, "on_close", None)
+                if on_close:
                     try:
-                        await self.on_close()
+                        await on_close()
                     except Exception as e:
                         logger.debug(f"Error in on_close during termination: {e}")
 
@@ -2174,9 +2179,10 @@ class QUICConnection(IRawConnection, IMuxedConn):
                             except Exception:
                                 pass
 
-                if self.on_close:
+                on_close = getattr(self, "on_close", None)
+                if on_close:
                     try:
-                        await self.on_close()
+                        await on_close()
                     except Exception as e:
                         logger.debug(f"Error in on_close callback: {e}")
 

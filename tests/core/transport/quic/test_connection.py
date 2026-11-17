@@ -904,6 +904,37 @@ async def test_cleanup_abandoned_quic_streams_waits_for_the_grace_period() -> No
 
 
 @pytest.mark.trio
+async def test_connection_termination_survives_removed_on_close_hook(caplog) -> None:
+    """
+    SwarmConnection deletes ``on_close`` when it tears itself down.
+
+    A late ConnectionTerminated event then hit the attribute directly and
+    logged ERROR ('QUICConnection' object has no attribute 'on_close') instead
+    of finishing cleanup. Teardown must treat a missing hook as "no hook".
+    """
+    conn = Mock(spec=QUICConnection)
+    conn._streams = {}
+    conn._stream_cache = {}
+    conn._abandoned_streams = {}
+    conn._closed_event = trio.Event()
+    conn._stream_accept_event = trio.Event()
+    conn._socket = None
+    conn._owns_socket = False
+    conn._task_cancel_scopes = []
+    conn._cancel_scope = None
+    conn._notify_parent_of_termination = AsyncMock()
+    del conn.on_close
+
+    with caplog.at_level(logging.ERROR):
+        await QUICConnection._handle_connection_terminated(
+            conn, SimpleNamespace(reason_phrase="done", error_code=0)
+        )
+
+    assert conn._closed is True
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
+
+
+@pytest.mark.trio
 async def test_transmit_returns_quietly_once_teardown_cleared_quic() -> None:
     """
     Teardown nulls ``_quic`` while transmit-capable tasks may still run.
