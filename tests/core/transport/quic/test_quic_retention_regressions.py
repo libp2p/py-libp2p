@@ -22,12 +22,19 @@ from aioquic.quic.packet import QuicFrameType
 from aioquic.quic.packet_builder import QuicDeliveryState
 from multiaddr import Multiaddr
 import trio
+from trio.testing import wait_all_tasks_blocked
 
 from libp2p.crypto.ed25519 import create_new_key_pair
+from libp2p.host.basic_host import BasicHost
 from libp2p.peer.id import ID
 from libp2p.transport.quic.config import QUICTransportConfig
 from libp2p.transport.quic.connection import QUICConnection
-from libp2p.transport.quic.exceptions import QUICDialError, QUICListenError
+from libp2p.transport.quic.exceptions import (
+    QUICConnectionClosedError,
+    QUICDialError,
+    QUICListenError,
+    QUICStreamTimeoutError,
+)
 from libp2p.transport.quic.transport import QUICTransport
 
 
@@ -53,6 +60,53 @@ def make_conn(transport=None) -> tuple[QuicConnection, QUICConnection]:
     )
     conn._started = True
     return raw, conn
+
+
+@pytest.mark.trio
+async def test_outbound_opens_wait_for_peer_credit(autojump_clock):
+    raw, conn = make_conn()
+    assert raw._remote_max_streams_bidi == 0
+    semaphore = trio.Semaphore(1)
+    conn._negotiation_semaphore = semaphore
+
+    async def open_for_peer(peer_id):
+        return await conn.open_stream(timeout=1)
+
+    host = SimpleNamespace(
+        _get_first_connection=lambda peer: SimpleNamespace(muxed_conn=conn),
+        _network=SimpleNamespace(new_stream=open_for_peer),
+    )
+    # Repeated Identify attempts must return their negotiation slot even
+    # when admission fails before the host obtains a stream to reset.
+    for _ in range(100):
+        with pytest.raises(QUICStreamTimeoutError):
+            await BasicHost.new_stream(host, conn._remote_peer_id, [])
+        assert semaphore.value == 1
+    assert conn._next_stream_id == 0
+    assert not conn._streams and not raw._streams and not raw._streams_blocked_bidi
+
+    opened = []
+    closed = []
+
+    async def open_one():
+        try:
+            opened.append(await conn.open_stream())
+        except QUICConnectionClosedError:
+            closed.append(True)
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(open_one)
+        nursery.start_soon(open_one)
+        await wait_all_tasks_blocked()
+        # Both packet receive paths signal activity after aioquic processes
+        # MAX_STREAMS. Exactly one caller can consume this single credit.
+        raw._remote_max_streams_bidi = 1
+        conn._signal_activity()
+        await wait_all_tasks_blocked()
+        assert [stream._stream_id for stream in opened] == [0]
+        assert conn._next_stream_id == 4
+        await conn.close()
+    assert closed == [True]
 
 
 class _FrameBuilder:
@@ -300,6 +354,7 @@ async def test_accept_backlog_eviction_releases_live_stream(batched, cancel_deli
 @pytest.mark.trio
 async def test_cancelled_stop_sending_still_closes_stream():
     raw, conn = make_conn()
+    raw._remote_max_streams_bidi = 10
     callbacks: list[bool] = []
 
     async def callback():

@@ -49,6 +49,7 @@ class TestQUICConnection:
     def mock_quic_connection(self):
         """Create mock aioquic QuicConnection."""
         mock = Mock()
+        mock._remote_max_streams_bidi = 100
         mock.next_event.return_value = None
         mock.datagrams_to_send.return_value = []
         mock.get_timer.return_value = None

@@ -954,7 +954,13 @@ class BasicHost(IHost):
                     peer_id,
                 )
 
-        net_stream = await self._network.new_stream(peer_id)
+        try:
+            net_stream = await self._network.new_stream(peer_id)
+        except BaseException:
+            # Admission may time out or be cancelled before a stream exists.
+            if semaphore_acquired and semaphore_to_use is not None:
+                semaphore_to_use.release()
+            raise
 
         # Perform protocol muxing to determine protocol to use
         # Use ConnectionConfig timeout if available (outbound stream negotiation)

@@ -154,6 +154,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         # time of removal. aioquic only discards a stream once both halves are
         # finished, so wrappers must not be dropped while a half is still open.
         self._abandoned_streams: dict[int, float] = {}
+        self._credit_waiter: trio.Event | None = None
         self._next_stream_id: int = self._calculate_initial_stream_id()
         self._stream_handler: TQUICStreamHandlerFn | None = None
 
@@ -559,6 +560,12 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
     def _signal_activity(self) -> None:
         """Signal that new datagram or stream activity occurred."""
+        if self._credit_waiter is not None and (
+            self._closed
+            or self._next_stream_id // 4 < self._quic._remote_max_streams_bidi
+        ):
+            self._credit_waiter.set()
+            self._credit_waiter = None
         if hasattr(self, "_activity_event") and not self._activity_event.is_set():
             self._activity_event.set()
 
@@ -964,52 +971,57 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         # Use single lock for all stream operations
         with trio.move_on_after(timeout):
-            async with self._stream_lock:
-                # Check stream limits inside lock
-                if self._outbound_stream_count >= self.MAX_OUTGOING_STREAMS:
-                    raise QUICStreamLimitError(
-                        "Maximum outbound streams "
-                        f"({self.MAX_OUTGOING_STREAMS}) reached"
-                    )
-
-                # Generate next stream ID
-                stream_id = self._next_stream_id
-                self._next_stream_id += 4  # Increment by 4 for bidirectional streams
-
-                # Acquire stream scope from resource manager if available
-                stream_scope = None
-                if self._resource_scope and hasattr(
-                    self._resource_scope, "_resource_manager"
-                ):
-                    try:
-                        stream_scope = (
-                            self._resource_scope._resource_manager.open_stream(
-                                peer_id=self._remote_peer_id,
-                                direction=Direction.OUTBOUND,
-                            )
-                        )
-                    except Exception as e:
-                        logger.warning(f"Failed to acquire stream scope: {e}")
-                        raise QUICStreamLimitError(f"Resource limit exceeded: {e}")
-
-                stream = QUICStream(
-                    connection=self,
-                    stream_id=stream_id,
-                    direction=StreamDirection.OUTBOUND,
-                    resource_scope=stream_scope,
-                    remote_addr=self._remote_addr,
-                )
-
-                self._streams[stream_id] = stream
-                self._stream_cache[stream_id] = stream  # Add to cache
-
-                self._outbound_stream_count += 1
-                self._stats["streams_opened"] += 1
-
-                logger.debug(f"Opened outbound QUIC stream {stream_id}")
-                return stream
+            while True:
+                async with self._stream_lock:
+                    if self._closed:
+                        raise QUICConnectionClosedError("Connection is closed")
+                    if self._outbound_stream_count >= self.MAX_OUTGOING_STREAMS:
+                        raise QUICStreamLimitError("Maximum outbound streams reached")
+                    # MAX_STREAMS is cumulative. Even an empty local registry
+                    # cannot open a stream whose ordinal exceeds peer credit.
+                    if self._next_stream_id // 4 < self._quic._remote_max_streams_bidi:
+                        return self._allocate_outbound_stream()
+                    if self._credit_waiter is None:
+                        self._credit_waiter = trio.Event()
+                    waiter = self._credit_waiter
+                await waiter.wait()
 
         raise QUICStreamTimeoutError(f"Stream creation timed out after {timeout}s")
+
+    def _allocate_outbound_stream(self) -> QUICStream:
+        """Allocate an admitted stream while holding the stream lock."""
+        # Generate next stream ID
+        stream_id = self._next_stream_id
+
+        # Acquire stream scope from resource manager if available
+        stream_scope = None
+        if self._resource_scope and hasattr(self._resource_scope, "_resource_manager"):
+            try:
+                stream_scope = self._resource_scope._resource_manager.open_stream(
+                    peer_id=self._remote_peer_id,
+                    direction=Direction.OUTBOUND,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to acquire stream scope: {e}")
+                raise QUICStreamLimitError(f"Resource limit exceeded: {e}")
+
+        stream = QUICStream(
+            connection=self,
+            stream_id=stream_id,
+            direction=StreamDirection.OUTBOUND,
+            resource_scope=stream_scope,
+            remote_addr=self._remote_addr,
+        )
+
+        self._next_stream_id += 4
+        self._streams[stream_id] = stream
+        self._stream_cache[stream_id] = stream  # Add to cache
+
+        self._outbound_stream_count += 1
+        self._stats["streams_opened"] += 1
+
+        logger.debug(f"Opened outbound QUIC stream {stream_id}")
+        return stream
 
     async def accept_stream(self, timeout: float | None = None) -> QUICStream:
         """
@@ -1995,6 +2007,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 self._stream_cache.clear()  # Clear cache too
                 self._abandoned_streams.clear()
                 self._closed = True
+                self._signal_activity()
                 self._closed_event.set()
 
                 # Release resource scope if present (mirrors close())
