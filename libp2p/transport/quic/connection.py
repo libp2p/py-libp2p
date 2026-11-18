@@ -1101,27 +1101,25 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 return True
         return False
 
-    def _release_dropped_queued_stream(self, stream: QUICStream) -> None:
+    async def _release_dropped_queued_stream(self, stream: QUICStream) -> None:
         """Release a queued inbound stream that overflowed the accept backlog."""
         stream_id = int(stream._stream_id)
-        try:
-            stream._receive_buffer.clear()
-        except Exception:
-            pass
+        # Release the bytes before reset can yield to network I/O. Reset also
+        # releases the resource scope and prevents later batched events from
+        # refilling a wrapper that no longer belongs to the accept queue.
+        stream._receive_buffer.clear()
         self._stats["inbound_streams_dropped"] = (
             self._stats.get("inbound_streams_dropped", 0) + 1
         )
-        if stream_id in self._streams:
-            self._remove_stream(stream_id)
-        else:
-            # The wrapper was already cleaned up, so only aioquic's halves
-            # remain; close them or the peer keeps the stream open forever.
-            self._abandon_quic_stream(stream_id)
+        await stream.reset()
+        # Already-cleaned FIN wrappers no longer call _remove_stream during
+        # reset, but their native halves may still need retirement.
+        self._abandon_quic_stream(stream_id)
         logger.warning(
             "Dropped queued inbound stream %s: accept backlog exceeded", stream_id
         )
 
-    def _enforce_accept_queue_bounds(self) -> None:
+    async def _enforce_accept_queue_bounds(self) -> None:
         """
         Keep the inbound accept backlog bounded independently of wrappers.
 
@@ -1129,16 +1127,30 @@ class QUICConnection(IRawConnection, IMuxedConn):
         queued so a late acceptor can drain remaining data, but the queue had
         no entry or byte limit: a peer that opens streams the application
         never accepts could pin unbounded buffers and resource scopes. Drop
-        the oldest entries first.
+        the oldest entries first. Recheck after data delivery as well as queue
+        insertion: an already-queued stream can grow without another insertion.
         """
-        queue = self._stream_accept_queue
-        while len(queue) > self.MAX_QUEUED_INBOUND_STREAMS:
-            self._release_dropped_queued_stream(queue.pop(0))
-        while queue:
-            buffered = sum(len(stream._receive_buffer) for stream in queue)
-            if buffered <= self.MAX_QUEUED_INBOUND_BYTES:
-                break
-            self._release_dropped_queued_stream(queue.pop(0))
+        # Cancellation after buffering data must not skip the budget check or
+        # strand the resources of an entry already removed from the queue.
+        with trio.CancelScope(shield=True):
+            queue = self._stream_accept_queue
+            while queue:
+                buffered = sum(len(stream._receive_buffer) for stream in queue)
+                if (
+                    len(queue) <= self.MAX_QUEUED_INBOUND_STREAMS
+                    and buffered <= self.MAX_QUEUED_INBOUND_BYTES
+                ):
+                    break
+                await self._release_dropped_queued_stream(queue.pop(0))
+
+    async def _deliver_stream_data(
+        self, stream: QUICStream, data: bytes, end_stream: bool
+    ) -> None:
+        """Deliver one event and bound unread data still waiting for acceptance."""
+        try:
+            await stream.handle_data_received(data, end_stream)
+        finally:
+            await self._enforce_accept_queue_bounds()
 
     def _abandon_quic_stream(self, stream_id: int, error_code: int = 0) -> None:
         """
@@ -1560,7 +1572,8 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     self._stats["bytes_received"] += len(received_event.data)  # type: ignore
 
                     if hasattr(received_event, "end_stream"):
-                        await stream.handle_data_received(
+                        await self._deliver_stream_data(
+                            stream,
                             received_event.data,  # type: ignore
                             received_event.end_stream,  # type: ignore
                         )
@@ -1637,11 +1650,13 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
             # Add to accept queue
             self._stream_accept_queue.append(stream)
-            self._enforce_accept_queue_bounds()
             self._stream_accept_event.set()
 
-            logger.debug(f"Created inbound stream {stream_id}")
-            return stream
+        # Eviction can run close callbacks; do not hold the stream lock across
+        # cleanup, since those callbacks may themselves access the connection.
+        await self._enforce_accept_queue_bounds()
+        logger.debug(f"Created inbound stream {stream_id}")
+        return stream
 
     async def _process_quic_events(self) -> None:
         """Process all pending QUIC events."""
@@ -2083,7 +2098,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     )
                     return
 
-            await stream.handle_data_received(event.data, event.end_stream)
+            await self._deliver_stream_data(stream, event.data, event.end_stream)
 
         except Exception as e:
             logger.error(f"Error handling stream data for stream {stream_id}: {e}")

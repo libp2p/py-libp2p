@@ -1405,6 +1405,9 @@ class QUICListener(IListener):
         spawns a private internal nursery as a trio system task.  In either
         case the listener no longer requires the caller to supply a nursery.
         """
+        if self._closed:
+            raise QUICListenError("Cannot listen on a closed QUIC listener")
+
         if self._listening:
             raise QUICListenError("Already listening")
 
@@ -1433,8 +1436,13 @@ class QUICListener(IListener):
                     f"QUIC listener started on {bound_maddr} with connection ID support"
                 )
                 return
-            except Exception as e:
-                await self.close()
+            except BaseException as e:
+                # Cancelled startup must release transport ownership as well
+                # as the socket. close() does not cancel the shared nursery.
+                with trio.CancelScope(shield=True):
+                    await self.close()
+                if not isinstance(e, Exception):
+                    raise
                 raise QUICListenError(f"Failed to start listening: {e}") from e
 
         # Fallback: spawn our own internal nursery as a trio system task
@@ -1494,14 +1502,11 @@ class QUICListener(IListener):
         try:
             await self._owned_started.wait()
         except BaseException:
-            # Do not leave the system task running (and the socket open)
-            # behind a cancelled listen().
-            with trio.CancelScope() as abort_scope:
-                abort_scope.shield = True
-                startup_scope.cancel()
-                if self._owned_stopped is not None:
-                    await self._owned_stopped.wait()
-                self._close_socket()
+            # Use the full lifecycle cleanup: stopping the task/socket alone
+            # leaves this listener retained in the long-lived transport.
+            # close() also cancels and joins in-progress owned startup.
+            with trio.CancelScope(shield=True):
+                await self.close()
             raise
 
         if self._owned_start_error is not None:

@@ -10,7 +10,8 @@ from __future__ import annotations
 import gc
 import time
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+import weakref
 
 import pytest
 from aioquic.buffer import Buffer
@@ -26,7 +27,7 @@ from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.peer.id import ID
 from libp2p.transport.quic.config import QUICTransportConfig
 from libp2p.transport.quic.connection import QUICConnection
-from libp2p.transport.quic.exceptions import QUICDialError
+from libp2p.transport.quic.exceptions import QUICDialError, QUICListenError
 from libp2p.transport.quic.transport import QUICTransport
 
 
@@ -167,12 +168,133 @@ async def test_closed_streams_do_not_grow_accept_backlog_unbounded():
         assert len(queued) <= conn.MAX_QUEUED_INBOUND_STREAMS
         assert (
             sum(len(stream._receive_buffer) for stream in queued)
-            <= conn.MAX_QUEUED_INBOUND_BYTES + 65536
+            <= conn.MAX_QUEUED_INBOUND_BYTES
         )
         conn._nursery = None
 
     conn._stream_accept_queue.clear()
     gc.collect()
+
+
+@pytest.mark.trio
+@pytest.mark.parametrize("batched", [False, True])
+async def test_accept_backlog_budget_applies_to_later_data(batched):
+    raw, conn = make_conn()
+
+    async def deliver(stream_id, data, end_stream=False):
+        event = StreamDataReceived(
+            data=data, end_stream=end_stream, stream_id=stream_id
+        )
+        if batched:
+            await conn._handle_stream_data_batch([event])
+        else:
+            await conn._handle_stream_data(event)
+
+    async with trio.open_nursery() as nursery:
+        conn._nursery = nursery
+        # All streams enter the queue before their large payload arrives.
+        for i in range(32):
+            stream_id = 1 + 4 * i
+            raw._get_or_create_stream(0x08, stream_id)
+            await deliver(stream_id, b"x")
+
+        for i in range(32):
+            stream_id = 1 + 4 * i
+            await deliver(stream_id, bytes(1024 * 1024 - 1), True)
+            await conn._handle_quic_event(
+                StopSendingReceived(error_code=0, stream_id=stream_id)
+            )
+            assert (
+                sum(len(s._receive_buffer) for s in conn._stream_accept_queue)
+                <= conn.MAX_QUEUED_INBOUND_BYTES
+            )
+
+        assert len(conn._stream_accept_queue) == 4
+        assert conn._stats["inbound_streams_dropped"] == 28
+        # Surviving FIN-closed streams must retain their unread payload.
+        for i in range(28, 32):
+            stream = await conn.accept_stream()
+            assert int(stream.stream_id) == 1 + 4 * i
+            assert await stream.read(1024 * 1024) == b"x" + bytes(1024 * 1024 - 1)
+        await conn.close()
+        conn._nursery = None
+
+
+@pytest.mark.trio
+@pytest.mark.parametrize("batched", [False, True])
+async def test_accept_backlog_budget_excludes_accepted_streams(batched):
+    raw, conn = make_conn()
+    conn.MAX_QUEUED_INBOUND_BYTES = 64
+    async with trio.open_nursery() as nursery:
+        conn._nursery = nursery
+        raw._get_or_create_stream(0x08, 1)
+        await conn._handle_stream_data(
+            StreamDataReceived(data=b"x", end_stream=False, stream_id=1)
+        )
+        accepted = await conn.accept_stream()
+        event = StreamDataReceived(data=bytes(128), end_stream=True, stream_id=1)
+        if batched:
+            await conn._handle_stream_data_batch([event])
+        else:
+            await conn._handle_stream_data(event)
+        assert not accepted.is_reset()
+        assert await accepted.read(129) == b"x" + bytes(128)
+        await conn.close()
+        conn._nursery = None
+
+
+@pytest.mark.trio
+@pytest.mark.parametrize("batched", [False, True])
+@pytest.mark.parametrize("cancel_delivery", [False, True])
+async def test_accept_backlog_eviction_releases_live_stream(batched, cancel_delivery):
+    raw, conn = make_conn()
+    conn.MAX_QUEUED_INBOUND_BYTES = 64
+    async with trio.open_nursery() as nursery:
+        conn._nursery = nursery
+        raw._get_or_create_stream(0x08, 1)
+        stream = await conn._create_inbound_stream(1)
+        resource_scope = Mock()
+        stream._resource_scope = resource_scope
+        stream._memory_reserved = 17
+        callback = Mock()
+
+        async def on_close():
+            # Eviction must not hold the connection lock across callbacks.
+            async with conn._stream_lock:
+                callback()
+
+        await stream.set_close_callback(on_close)
+        original_receive = stream.handle_data_received
+        with trio.CancelScope() as cancel_scope:
+
+            async def receive_then_cancel(data, end_stream):
+                await original_receive(data, end_stream)
+                cancel_scope.cancel()
+                await trio.lowlevel.checkpoint()
+
+            if cancel_delivery:
+                stream.handle_data_received = receive_then_cancel
+            event = StreamDataReceived(data=bytes(128), end_stream=False, stream_id=1)
+            if batched:
+                # The second event must not refill the evicted wrapper, even
+                # though the batch still holds a reference to it.
+                await conn._handle_stream_data_batch([event, event])
+            else:
+                await conn._handle_stream_data(event)
+
+        assert cancel_scope.cancelled_caught == cancel_delivery
+        assert not conn._stream_accept_queue
+        assert not conn._streams
+        assert not conn._stream_cache
+        assert stream.is_reset()
+        assert not stream._receive_buffer
+        assert stream._memory_reserved == 0
+        resource_scope.release_memory.assert_called_once_with(17)
+        resource_scope.close.assert_called_once_with()
+        callback.assert_called_once_with()
+        assert conn._stats["inbound_streams_dropped"] == 1
+        await conn.close()
+        conn._nursery = None
 
 
 @pytest.mark.trio
@@ -243,24 +365,47 @@ async def test_cancelled_promotion_rolls_back_registry():
 
 
 @pytest.mark.trio
-async def test_cancelled_listener_start_leaves_no_socket_or_task():
+@pytest.mark.parametrize("shared_nursery", [False, True])
+async def test_cancelled_listener_start_releases_transport_ownership(
+    shared_nursery: bool,
+) -> None:
     transport = make_transport()
     listeners = []
-    for _ in range(5):
-        listener = transport.create_listener(_ignore)
-        with trio.CancelScope() as scope:
-            scope.cancel()
+    async with trio.open_nursery() as nursery:
+        if shared_nursery:
+            transport.set_background_nursery(nursery)
+        for _ in range(100):
+            listener = transport.create_listener(_ignore)
+            with trio.CancelScope() as scope:
+                scope.cancel()
+                await listener.listen(Multiaddr("/ip4/127.0.0.1/udp/0/quic-v1"))
+            assert scope.cancelled_caught
+            listeners.append(listener)
+
+        from trio.testing import wait_all_tasks_blocked
+
+        await wait_all_tasks_blocked()
+        # Check before closing the long-lived transport: its close would hide
+        # listeners retained by failed startup.
+        assert transport._listeners == []
+        assert not transport._closed
+        assert not nursery.cancel_scope.cancel_called
+        assert all(not item.is_listening() for item in listeners)
+        assert all(item._socket is None for item in listeners)
+        assert all(item._close_complete.is_set() for item in listeners)
+        if not shared_nursery:
+            assert all(item._owned_stopped.is_set() for item in listeners)
+
+        # Aborted listeners are closed and unregistered; reopening one would
+        # create a listener the transport can no longer shut down.
+        with pytest.raises(QUICListenError, match="closed"):
             await listener.listen(Multiaddr("/ip4/127.0.0.1/udp/0/quic-v1"))
-        assert scope.cancelled_caught
-        listeners.append(listener)
 
-    from trio.testing import wait_all_tasks_blocked
-
-    await wait_all_tasks_blocked()
-    assert all(not listener.is_listening() for listener in listeners)
-    assert all(listener._socket is None for listener in listeners)
-    assert all(listener._owned_stopped is not None for listener in listeners)
-    assert all(listener._owned_stopped.is_set() for listener in listeners)
+        refs = [weakref.ref(item) for item in listeners]
+        listeners.clear()
+        del listener
+        gc.collect()
+        assert all(ref() is None for ref in refs)
 
     await transport.close()
     assert len(transport._listeners) == 0
