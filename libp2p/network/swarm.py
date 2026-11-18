@@ -504,9 +504,23 @@ class Swarm(Service, INetworkService):
                                 e,
                             )
 
-                    async with trio.open_nursery() as close_nursery:
-                        for peer_id, conns in list(self.connections.items()):
-                            for conn in list(conns):
+                    # A dial already in flight when the auto-connector stopped
+                    # can still register a connection while this runs:
+                    # AutoConnector.stop() sets a flag and does not drain
+                    # self._in_flight_dials. Closing one snapshot and then
+                    # clearing the map would drop such a connection unclosed and
+                    # leak its socket, so drain instead -- take what is there,
+                    # close it, then look again. The enclosing scope bounds it.
+                    while self.connections:
+                        batch = [
+                            (peer_id, conn)
+                            for peer_id, conns in list(self.connections.items())
+                            for conn in list(conns)
+                        ]
+                        for peer_id, _conn in batch:
+                            self.connections.pop(peer_id, None)
+                        async with trio.open_nursery() as close_nursery:
+                            for peer_id, conn in batch:
                                 close_nursery.start_soon(_close_conn, peer_id, conn)
                     await close_listeners_and_transports()
 

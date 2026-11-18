@@ -125,3 +125,55 @@ async def test_stuck_connection_close_still_releases_listener(
             assert probe.connect_ex(("127.0.0.1", port)) != 0
 
         stop.set()
+
+
+@pytest.mark.trio
+async def test_connection_registered_during_teardown_is_closed() -> None:
+    """
+    A dial already in flight when the auto-connector stops can register a
+    connection while the teardown is closing the ones it found. Closing a
+    single snapshot and then clearing the map would drop that connection
+    unclosed and leak its socket, so the teardown drains instead (#1584).
+    """
+    stop = trio.Event()
+    ready = trio.Semaphore(0)
+    early, late = (new_host(key_pair=create_new_key_pair()) for _ in range(2))
+
+    async def serve(peer: IHost) -> None:
+        async with peer.run([LISTEN]):
+            ready.release()
+            await stop.wait()
+
+    async with trio.open_nursery() as nursery:
+        for peer in (early, late):
+            nursery.start_soon(serve, peer)
+            await ready.acquire()
+
+        hub = new_host(key_pair=create_new_key_pair())
+        network = hub.get_network()
+
+        async with hub.run([LISTEN]):
+            for peer in (early, late):
+                await hub.connect(PeerInfo(peer.get_id(), peer.get_addrs()))
+            (early_conn,) = network.connections[early.get_id()]
+            (late_conn,) = network.connections[late.get_id()]
+
+            # Stand `late` back in as if its dial had only just landed: it is
+            # out of the map when the teardown takes its first look, and goes
+            # back in while `early` is being closed.
+            del network.connections[late.get_id()]
+            real_close = early_conn.close
+
+            async def close_then_readmit() -> None:
+                network.connections[late.get_id()] = [late_conn]
+                await real_close()
+
+            early_conn.close = close_then_readmit  # type: ignore[method-assign]
+
+        assert early_conn.is_closed, "the connection present at teardown was not closed"
+        assert late_conn.is_closed, (
+            "a connection registered during teardown was dropped without closing it"
+        )
+        assert network.connections == {}
+
+        stop.set()
