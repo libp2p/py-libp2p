@@ -903,6 +903,86 @@ async def test_cleanup_abandoned_quic_streams_waits_for_the_grace_period() -> No
     assert 8 in conn._abandoned_streams
 
 
+class _BlockedStream:
+    """A blocked-direction entry with aioquic's derived ``is_finished``."""
+
+    def __init__(self, stream_id: int, finished: bool = False) -> None:
+        self.stream_id = stream_id
+        self.sender = SimpleNamespace(is_finished=finished)
+        self.receiver = SimpleNamespace(is_finished=finished)
+
+    @property
+    def is_finished(self) -> bool:
+        return self.sender.is_finished and self.receiver.is_finished
+
+
+def _blocked_quic(streams: dict, blocked_bidi: list, blocked_uni: list):
+    quic = Mock()
+    quic._streams = streams
+    quic._streams_queue = []
+    quic._streams_blocked_bidi = blocked_bidi
+    quic._streams_blocked_uni = blocked_uni
+    return quic
+
+
+def _blocked_conn(quic, streams: dict, abandoned: dict):
+    """A stand-in for QUICConnection whose helper methods really run."""
+    conn = Mock(spec=QUICConnection)
+    conn._quic = quic
+    conn._streams = streams
+    conn._abandoned_streams = abandoned
+    conn._remote_peer_id = "peer"
+    conn._prune_finished_blocked_streams = lambda: (
+        QUICConnection._prune_finished_blocked_streams(conn)
+    )
+    return conn
+
+
+@pytest.mark.trio
+async def test_cleanup_prunes_finished_blocked_streams_and_keeps_live_ones() -> None:
+    """
+    Aioquic leaves finished streams in the blocked-direction lists.
+
+    ``_unblock_streams`` only edits those lists when the peer grants credit, so
+    a connection whose credit never advances keeps every timed-out attempt for
+    its whole life. Pruning must drop exactly the terminal entries and keep the
+    live ones, in order, for a legitimate credit wait.
+    """
+    finished = _BlockedStream(4, finished=True)
+    live = _BlockedStream(8)
+    quic = _blocked_quic({8: live}, [finished, live], [_BlockedStream(2, True)])
+    conn = _blocked_conn(quic, {}, {})
+
+    await QUICConnection._cleanup_abandoned_quic_streams(conn)
+
+    assert quic._streams_blocked_bidi == [live]
+    assert quic._streams_blocked_uni == []
+
+
+@pytest.mark.trio
+async def test_cleanup_prunes_blocked_streams_when_native_registry_is_empty() -> None:
+    """The blocked lists must be pruned even with no native stream left."""
+    quic = _blocked_quic({}, [_BlockedStream(4, True)], [])
+    conn = _blocked_conn(quic, {}, {})
+
+    await QUICConnection._cleanup_abandoned_quic_streams(conn)
+
+    assert quic._streams_blocked_bidi == []
+
+
+@pytest.mark.trio
+async def test_cleanup_releases_an_abandoned_stream_from_the_blocked_list() -> None:
+    """Discarding an abandoned stream must also release its blocked entry."""
+    quic_stream = _BlockedStream(8)
+    quic = _blocked_quic({8: quic_stream}, [quic_stream], [])
+    conn = _blocked_conn(quic, {}, {8: time.monotonic() - 300.0})
+
+    await QUICConnection._cleanup_abandoned_quic_streams(conn)
+
+    assert quic_stream.is_finished is True
+    assert quic._streams_blocked_bidi == []
+
+
 @pytest.mark.trio
 async def test_connection_termination_survives_removed_on_close_hook(caplog) -> None:
     """

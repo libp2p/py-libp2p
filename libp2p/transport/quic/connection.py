@@ -1250,7 +1250,16 @@ class QUICConnection(IRawConnection, IMuxedConn):
         """
         quic = getattr(self, "_quic", None)
         streams = getattr(quic, "_streams", None)
-        if not isinstance(streams, dict) or not streams:
+        if not isinstance(streams, dict):
+            return
+
+        # aioquic never removes a finished stream from its blocked-direction
+        # lists, so prune them even when the native registry is already empty:
+        # that is exactly the state a connection with no credit reaches while
+        # the blocked entries keep the finished streams alive.
+        self._prune_finished_blocked_streams()
+
+        if not streams:
             self._abandoned_streams.clear()
             return
 
@@ -1283,11 +1292,60 @@ class QUICConnection(IRawConnection, IMuxedConn):
             discarded += 1
 
         if discarded:
+            # The streams just finished are still referenced by aioquic's
+            # blocked-direction lists until the peer grants more credit.
+            self._prune_finished_blocked_streams()
             logger.info(
                 "Discarded %d abandoned QUIC stream(s) on connection to %s",
                 discarded,
                 self._remote_peer_id,
             )
+
+    def _prune_finished_blocked_streams(self) -> int:
+        """
+        Drop terminal streams aioquic leaves in its blocked-direction lists.
+
+        ``QuicConnection._get_or_create_stream_for_send`` appends every stream
+        that exceeds the peer's cumulative MAX_STREAMS allowance to
+        ``_streams_blocked_bidi``/``_streams_blocked_uni``.  aioquic discards a
+        finished stream from ``_streams`` and ``_streams_queue`` while writing a
+        packet, but removes it from the blocked list only from
+        ``_unblock_streams``, which runs when the peer grants more credit.  A
+        connection whose credit never advances therefore keeps every blocked
+        stream that ever timed out for as long as it lives.
+
+        Only entries that are terminal are removed: a stream finished on both
+        halves (so aioquic has discarded it) or one already absent from the
+        registry.  Live blocked streams and their order are preserved, because
+        ``_unblock_streams`` pops them from the front by stream id.
+        """
+        quic = getattr(self, "_quic", None)
+        streams = getattr(quic, "_streams", None)
+        if not isinstance(streams, dict):
+            return 0
+
+        pruned = 0
+        for attribute in ("_streams_blocked_bidi", "_streams_blocked_uni"):
+            blocked = getattr(quic, attribute, None)
+            if not isinstance(blocked, list) or not blocked:
+                continue
+            live = [
+                stream
+                for stream in blocked
+                if not getattr(stream, "is_finished", False)
+                and getattr(stream, "stream_id", None) in streams
+            ]
+            if len(live) != len(blocked):
+                pruned += len(blocked) - len(live)
+                blocked[:] = live
+        if pruned:
+            logger.debug(
+                "Pruned %d finished QUIC stream(s) from the blocked-direction "
+                "lists of the connection to %s",
+                pruned,
+                self._remote_peer_id,
+            )
+        return pruned
 
     # Batched event processing to reduce overhead
     async def _process_quic_events_batched(self) -> bool:
