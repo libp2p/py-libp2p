@@ -28,6 +28,8 @@ from libp2p.stream_muxer.yamux.yamux import PROTOCOL_ID as YAMUX_PROTOCOL_ID
 if TYPE_CHECKING:
     from libp2p.network.swarm import Swarm  # noqa: F401
 
+logger = logging.getLogger(__name__)
+
 
 """
 Reference: https://github.com/libp2p/go-libp2p-swarm/blob/
@@ -346,6 +348,23 @@ class SwarmConn(INetConn):
         try:
             await self.swarm.common_stream_handler(net_stream)
         finally:
+            # A handler owns the stream for the duration of the call. When it
+            # returns or is cancelled without closing, the muxed stream used to
+            # stay registered for the lifetime of the connection: no FIN is
+            # sent, and the transport only reclaims entries that are fully
+            # closed, so every abandoned inbound stream leaked its stream,
+            # buffer and event objects. Finish the stream here, matching
+            # go-libp2p where the handler returning ends the stream. NetStream
+            # close is itself shielded and bounded, and is a no-op when the
+            # handler already closed it.
+            if not net_stream.is_closed:
+                try:
+                    await net_stream.close()
+                except Exception:
+                    logger.debug(
+                        "Failed to release inbound stream after handler exit",
+                        exc_info=True,
+                    )
             # Safety net: ensure stream is removed from connection tracking
             self.remove_stream(net_stream)
             # Release resources via notify_closed_stream (idempotent guard)

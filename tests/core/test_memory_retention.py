@@ -320,3 +320,83 @@ async def test_cancelled_inbound_ping_handler_resets_stream():
     assert scope.cancelled_caught
     assert stream.is_closed
     assert service._inbound_streams == {}
+
+
+@pytest.mark.trio
+async def test_inbound_handler_return_releases_muxed_stream():
+    """
+    An inbound handler that returns without closing must not leak the stream.
+
+    The connection wrapper dropped the NetStream but left the muxed stream
+    registered, and Yamux only reclaims fully-closed entries, so every
+    abandoned inbound handler pinned a stream, buffer and event object for the
+    lifetime of the connection.
+    """
+
+    async def write(data):
+        return None
+
+    mux = Yamux(
+        SimpleNamespace(is_initiator=True, write=write), ID(b"peer"), is_initiator=False
+    )
+    notified: list[Any] = []
+
+    async def noop(*args):
+        return None
+
+    async def notify_closed(stream):
+        stream._resource_released = True
+        notified.append(stream)
+
+    conn = SwarmConn(
+        mux,
+        SimpleNamespace(notify_opened_stream=noop, notify_closed_stream=notify_closed),
+    )
+    conn.event_started.set()
+
+    async def handler(stream):
+        return None
+
+    conn.swarm.common_stream_handler = handler
+
+    for stream_id in range(2, 22, 2):
+        stream = YamuxStream(stream_id, mux, False)
+        async with mux.streams_lock:
+            mux.streams[stream_id] = stream
+            mux.stream_buffers[stream_id] = bytearray()
+            mux.stream_events[stream_id] = trio.Event()
+            # Peer already sent its FIN; nothing else can arrive.
+            stream.recv_closed = True
+        await conn._handle_muxed_stream(stream)
+
+    assert mux.streams == {}
+    assert mux.stream_buffers == {}
+    assert mux.stream_events == {}
+    assert len(notified) == 10
+    assert conn.streams == set()
+
+
+@pytest.mark.trio
+async def test_cancelled_open_stream_releases_bookkeeping_and_backlog_slot():
+    """
+    Cancelling open_stream() mid-SYN must not strand the stream registration.
+
+    The stream was registered, then the caller's deadline fired inside the SYN
+    write: the entry, its buffer, its event and one backlog slot stayed charged
+    for the connection's lifetime, and no caller could ever close it.
+    """
+
+    async def write(data):
+        await trio.sleep_forever()
+
+    mux = Yamux(SimpleNamespace(is_initiator=True, write=write), ID(b"peer"))
+
+    for _ in range(10):
+        with trio.move_on_after(0.02) as scope:
+            await mux.open_stream()
+        assert scope.cancelled_caught
+
+    assert mux.streams == {}
+    assert mux.stream_buffers == {}
+    assert mux.stream_events == {}
+    assert mux.stream_backlog_semaphore.value == mux.stream_backlog_limit
