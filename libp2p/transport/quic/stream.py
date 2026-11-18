@@ -758,9 +758,15 @@ class QUICStream(IMuxedStream):
             logger.warning(
                 f"Could not send RESET_STREAM for stream {self.stream_id}: {e}"
             )
-
-        if terminal:
-            await self._finish_graceful_close()
+        finally:
+            # The state transition above is already committed, so terminal
+            # streams must still record their close and release resources if
+            # this task is cancelled while transmitting. Otherwise the wrapper
+            # is neither open nor closed, and retrying close() does nothing.
+            if terminal:
+                with trio.CancelScope() as cleanup_scope:
+                    cleanup_scope.shield = True
+                    await self._finish_graceful_close()
 
     async def handle_reset(self, error_code: int) -> None:
         """

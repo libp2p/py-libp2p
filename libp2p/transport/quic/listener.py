@@ -132,6 +132,7 @@ class QUICListener(IListener):
         self._owned_started: trio.Event | None = None
         self._owned_stopped: trio.Event | None = None
         self._owned_start_error: BaseException | None = None
+        self._owned_scope: trio.CancelScope | None = None
 
         # Serialize promotion of pending connections to avoid duplicate promotions
         # and repeated connect() calls under concurrent packet processing.
@@ -378,30 +379,28 @@ class QUICListener(IListener):
                         )
 
                     if connection_obj:
-                        # Found connection by address - register new Connection ID
-                        # Track fallback routing usage
                         self._stats["fallback_routing_used"] += 1
-                        registry = self._registry
-                        await registry.register_new_connection_id_for_existing_conn(
-                            destination_connection_id, connection_obj, addr
+                        # Deliver the datagram before learning the CID as a
+                        # routing alias: aioquic authenticates the packet, so
+                        # only an issued CID survives the receive call.
+                        await self._handle_established_connection_packet(
+                            connection_obj, data, addr, destination_connection_id
                         )
-                        if original_connection_id:
-                            logger.debug(
-                                f"Registered new Connection ID "
-                                f"{destination_connection_id.hex()[:8]} "
-                                f"for existing connection "
-                                f"{original_connection_id.hex()[:8]} "
-                                f"at address {addr} "
-                                f"(fallback mechanism)"
-                            )
-                    else:
-                        # No connection found - drop packet
-                        logger.debug(
-                            f"No connection found for Connection ID "
-                            f"{destination_connection_id.hex()[:8]} at address {addr}, "
-                            f"dropping packet"
+                        await self._learn_fallback_connection_id(
+                            connection_obj,
+                            destination_connection_id,
+                            original_connection_id,
+                            addr,
                         )
                         return
+
+                    # No connection found - drop packet
+                    logger.debug(
+                        f"No connection found for Connection ID "
+                        f"{destination_connection_id.hex()[:8]} at address {addr}, "
+                        f"dropping packet"
+                    )
+                    return
 
             # Process outside the lock
             if connection_obj:
@@ -429,6 +428,63 @@ class QUICListener(IListener):
 
         except Exception as e:
             logger.error(f"Error handling established connection packet: {e}")
+
+    @staticmethod
+    def _native_connection_id_sequence(
+        connection: QUICConnection, connection_id: bytes
+    ) -> int | None:
+        """Return aioquic's sequence for a CID it issued, or None if unknown."""
+        quic = getattr(connection, "_quic", None)
+        host_cids = getattr(quic, "_host_cids", None)
+        if not isinstance(host_cids, (list, tuple)):
+            return None
+        for host_cid in host_cids:
+            if getattr(host_cid, "cid", None) == connection_id:
+                return int(getattr(host_cid, "sequence_number", 0))
+        return None
+
+    async def _learn_fallback_connection_id(
+        self,
+        connection_obj: QUICConnection,
+        destination_connection_id: bytes,
+        original_connection_id: bytes | None,
+        addr: tuple[str, int],
+    ) -> None:
+        """
+        Register a fallback-routed Connection ID only if aioquic issued it.
+
+        This path covers packets that carry a new CID before the
+        ``ConnectionIdIssued`` event is processed. Such a CID is already in
+        aioquic's host CID table; packets carrying arbitrary or replayed CIDs
+        are dropped by ``receive_datagram``. Registering before that check let
+        unauthenticated traffic add routing aliases without bound.
+        """
+        sequence = self._native_connection_id_sequence(
+            connection_obj, destination_connection_id
+        )
+        if sequence is None:
+            logger.debug(
+                "Not registering unvalidated Connection ID %s for connection at %s",
+                destination_connection_id.hex()[:8],
+                addr,
+            )
+            return
+
+        await self._registry.register_new_connection_id_for_existing_conn(
+            destination_connection_id,
+            connection_obj,
+            addr,
+            sequence=sequence,
+        )
+        if original_connection_id:
+            logger.debug(
+                f"Registered new Connection ID "
+                f"{destination_connection_id.hex()[:8]} "
+                f"for existing connection "
+                f"{original_connection_id.hex()[:8]} "
+                f"at address {addr} "
+                f"(fallback mechanism)"
+            )
 
     async def _handle_pending_connection_packet(
         self,
@@ -1058,6 +1114,7 @@ class QUICListener(IListener):
         async with per_cid_lock:
             if quic_key in self._handler_invoked_quic_ids:
                 return
+            connection = None
             try:
                 connection = self._conn_by_quic_id.get(quic_key)
                 if connection is None:
@@ -1205,7 +1262,14 @@ class QUICListener(IListener):
                         f"for Connection ID {destination_connection_id.hex()[:8]}"
                     )
 
-            except Exception as e:
+            except BaseException as e:
+                # A cancelled promotion used to leave its connection registered
+                # and tracked, or half-promoted in the registry. Undo whatever
+                # was published before propagating the cancellation.
+                if connection is not None:
+                    await self._rollback_promotion(connection, quic_key)
+                if isinstance(e, trio.Cancelled):
+                    raise
                 logger.error(
                     f"Error promoting connection {destination_connection_id.hex()}: {e}"
                 )
@@ -1213,7 +1277,28 @@ class QUICListener(IListener):
                 await self._remove_connection(destination_connection_id)
             finally:
                 # Best-effort cleanup of the per-CID lock and related tracking.
-                await self._cleanup_promotion_lock(quic_key)
+                with trio.CancelScope() as cleanup_scope:
+                    cleanup_scope.shield = True
+                    await self._cleanup_promotion_lock(quic_key)
+
+    async def _rollback_promotion(
+        self, connection: QUICConnection, quic_key: int
+    ) -> None:
+        """Undo a partially published connection promotion."""
+        with trio.CancelScope() as rollback_scope:
+            rollback_scope.shield = True
+            try:
+                await self._registry.unregister_connection_object(connection)
+            except Exception as error:
+                logger.debug(f"Error unregistering cancelled promotion: {error}")
+            try:
+                await self._cleanup_quic_tracking(quic_key)
+            except Exception as error:
+                logger.debug(f"Error clearing cancelled promotion tracking: {error}")
+            try:
+                await connection.close()
+            except Exception as error:
+                logger.debug(f"Error closing cancelled promotion: {error}")
 
     async def _remove_connection(self, destination_connection_id: bytes) -> None:
         """Remove connection by connection ID."""
@@ -1259,15 +1344,25 @@ class QUICListener(IListener):
             )
 
     async def _remove_connection_by_addr(self, addr: tuple[str, int]) -> None:
-        """Remove connection by address (fallback method)."""
-        connection_id = await self._registry.remove_by_address(addr)
-        if connection_id:
-            # Get connection before removing
-            connection_obj, _, _ = await self._registry.find_by_connection_id(
-                connection_id
-            )
-            if connection_obj:
-                await connection_obj.close()
+        """
+        Remove a connection by address (fallback method).
+
+        Resolve the connection object *before* removing its registration:
+        ``remove_by_address`` deletes the CID mappings, so looking the
+        connection up afterwards always missed and left a connection running
+        with no routing entry.
+        """
+        connection_obj, _ = await self._registry.find_by_address(addr)
+        await self._registry.remove_by_address(addr)
+        if connection_obj is None:
+            return
+
+        quic_conn = getattr(connection_obj, "_quic", None)
+        if quic_conn is not None:
+            quic_key = id(quic_conn)
+            await self._cleanup_promotion_lock(quic_key)
+            await self._cleanup_quic_tracking(quic_key)
+        await connection_obj.close()
 
     async def _transmit_for_connection(
         self, quic_conn: QuicConnection, addr: tuple[str, int]
@@ -1343,50 +1438,80 @@ class QUICListener(IListener):
                 raise QUICListenError(f"Failed to start listening: {e}") from e
 
         # Fallback: spawn our own internal nursery as a trio system task
-        # so the listener is fully self-contained.
+        # so the listener is fully self-contained. The system task runs
+        # outside the caller's scope, so it carries its own cancellation
+        # scope that close() (and a cancelled listen()) can cancel.
+        startup_scope = trio.CancelScope()
         started = trio.Event()
         stopped = trio.Event()
+        self._owned_scope = startup_scope
         self._owned_started = started
         self._owned_stopped = stopped
         self._owned_start_error = None
 
         async def _run_server() -> None:
             try:
-                async with trio.open_nursery() as inner_nursery:
-                    try:
-                        self._socket = await self._create_socket(host, port)
-                        self._nursery = inner_nursery
+                with startup_scope:
+                    async with trio.open_nursery() as inner_nursery:
+                        try:
+                            socket_handle = await self._create_socket(host, port)
+                            if self._closed or self._close_complete.is_set():
+                                # close() ran while the socket was being
+                                # created; never publish a live listener.
+                                socket_handle.close()
+                                return
+                            self._socket = socket_handle
+                            self._nursery = inner_nursery
 
-                        bound_host, bound_port = self._socket.getsockname()[:2]
-                        quic_version = multiaddr_to_quic_version(maddr)
-                        bound_maddr = create_quic_multiaddr(
-                            bound_host, bound_port, quic_version
-                        )
-                        self._bound_addresses = [bound_maddr]
-                        self._listening = True
+                            bound_host, bound_port = self._socket.getsockname()[:2]
+                            quic_version = multiaddr_to_quic_version(maddr)
+                            bound_maddr = create_quic_multiaddr(
+                                bound_host, bound_port, quic_version
+                            )
+                            self._bound_addresses = [bound_maddr]
+                            self._listening = True
 
-                        inner_nursery.start_soon(self._handle_incoming_packets)
-                        inner_nursery.start_soon(self._periodic_cleanup_loop)
-                        logger.info(
-                            f"QUIC listener started on {bound_maddr} "
-                            "with connection ID support"
-                        )
-                    except BaseException as error:
-                        self._owned_start_error = error
-                    finally:
-                        started.set()
+                            inner_nursery.start_soon(self._handle_incoming_packets)
+                            inner_nursery.start_soon(self._periodic_cleanup_loop)
+                            logger.info(
+                                f"QUIC listener started on {bound_maddr} "
+                                "with connection ID support"
+                            )
+                        except BaseException as error:
+                            self._owned_start_error = error
+                        finally:
+                            # Release listen() as soon as startup settles; the
+                            # server then keeps running until the scope ends.
+                            started.set()
             finally:
+                # Also set started on exit paths that never reached the
+                # nursery, so a concurrent listen() cannot wait forever.
+                started.set()
                 stopped.set()
                 self._nursery = None
 
         trio.lowlevel.spawn_system_task(_run_server)
-        await self._owned_started.wait()
+        try:
+            await self._owned_started.wait()
+        except BaseException:
+            # Do not leave the system task running (and the socket open)
+            # behind a cancelled listen().
+            with trio.CancelScope() as abort_scope:
+                abort_scope.shield = True
+                startup_scope.cancel()
+                if self._owned_stopped is not None:
+                    await self._owned_stopped.wait()
+                self._close_socket()
+            raise
 
         if self._owned_start_error is not None:
             await self.close()
             raise QUICListenError(
                 f"Failed to start listening: {self._owned_start_error}"
             ) from self._owned_start_error
+
+        if self._closed or not self._listening:
+            raise QUICListenError("Listener closed during startup")
 
     async def _create_socket(self, host: str, port: int) -> trio.socket.SocketType:
         """Create and configure UDP socket."""
@@ -1403,13 +1528,18 @@ class QUICListener(IListener):
             # Create UDP socket
             sock = trio.socket.socket(family=family, type=socket.SOCK_DGRAM)
 
-            # Set socket options
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            if hasattr(socket, "SO_REUSEPORT"):
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)  # type: ignore[attr-defined]
+            try:
+                # Set socket options
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                if hasattr(socket, "SO_REUSEPORT"):
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)  # type: ignore[attr-defined]
 
-            # Bind to address
-            await sock.bind((host, port))
+                # Bind to address
+                await sock.bind((host, port))
+            except BaseException:
+                # A cancelled or failed bind must not leave the socket open.
+                sock.close()
+                raise
 
             logger.debug(f"Created and bound UDP socket to {host}:{port}")
             return sock
@@ -1548,13 +1678,16 @@ class QUICListener(IListener):
                 self._pending_cid_by_quic_id.clear()
                 self._handler_invoked_quic_ids.clear()
 
-            # If we spawned our own internal nursery (fallback path),
-            # cancel it and wait for the background system task to finish.
-            if self._owned_started is not None and self._owned_started.is_set():
+            # If we spawned our own internal nursery (fallback path), cancel
+            # its scope and wait for the system task to finish. This also
+            # covers a startup that is still creating its socket when close()
+            # is called, which previously kept running after _closed was set.
+            if self._owned_scope is not None:
+                self._owned_scope.cancel()
+            if self._owned_started is not None and self._owned_stopped is not None:
                 if self._nursery is not None:
                     self._nursery.cancel_scope.cancel()
-                if self._owned_stopped is not None:
-                    await self._owned_stopped.wait()
+                await self._owned_stopped.wait()
 
             logger.info("QUIC listener closed")
 

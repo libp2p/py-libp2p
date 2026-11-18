@@ -238,6 +238,12 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self.MAX_CONCURRENT_STREAMS = self._transport._config.MAX_CONCURRENT_STREAMS
         self.STREAM_OPEN_TIMEOUT = self._transport._config.STREAM_OPEN_TIMEOUT
 
+        # Bound the inbound accept backlog. Closed streams stay queued so a
+        # late acceptor can still drain unread reply data, and nothing else
+        # limits how many (or how many buffered bytes) a peer can pile up.
+        self.MAX_QUEUED_INBOUND_STREAMS = 128
+        self.MAX_QUEUED_INBOUND_BYTES = 4 * 1024 * 1024
+
         # Performance monitoring thresholds
         self.SLOW_NOTIFICATION_THRESHOLD_SECONDS = 0.01  # 10ms
 
@@ -1095,6 +1101,45 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 return True
         return False
 
+    def _release_dropped_queued_stream(self, stream: QUICStream) -> None:
+        """Release a queued inbound stream that overflowed the accept backlog."""
+        stream_id = int(stream._stream_id)
+        try:
+            stream._receive_buffer.clear()
+        except Exception:
+            pass
+        self._stats["inbound_streams_dropped"] = (
+            self._stats.get("inbound_streams_dropped", 0) + 1
+        )
+        if stream_id in self._streams:
+            self._remove_stream(stream_id)
+        else:
+            # The wrapper was already cleaned up, so only aioquic's halves
+            # remain; close them or the peer keeps the stream open forever.
+            self._abandon_quic_stream(stream_id)
+        logger.warning(
+            "Dropped queued inbound stream %s: accept backlog exceeded", stream_id
+        )
+
+    def _enforce_accept_queue_bounds(self) -> None:
+        """
+        Keep the inbound accept backlog bounded independently of wrappers.
+
+        A stream whose wrapper was cleaned up (FIN, then STOP_SENDING) stays
+        queued so a late acceptor can drain remaining data, but the queue had
+        no entry or byte limit: a peer that opens streams the application
+        never accepts could pin unbounded buffers and resource scopes. Drop
+        the oldest entries first.
+        """
+        queue = self._stream_accept_queue
+        while len(queue) > self.MAX_QUEUED_INBOUND_STREAMS:
+            self._release_dropped_queued_stream(queue.pop(0))
+        while queue:
+            buffered = sum(len(stream._receive_buffer) for stream in queue)
+            if buffered <= self.MAX_QUEUED_INBOUND_BYTES:
+                break
+            self._release_dropped_queued_stream(queue.pop(0))
+
     def _abandon_quic_stream(self, stream_id: int, error_code: int = 0) -> None:
         """
         Release an aioquic stream that py-libp2p will never wrap.
@@ -1592,6 +1637,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
             # Add to accept queue
             self._stream_accept_queue.append(stream)
+            self._enforce_accept_queue_bounds()
             self._stream_accept_event.set()
 
             logger.debug(f"Created inbound stream {stream_id}")
@@ -1642,6 +1688,30 @@ class QUICConnection(IRawConnection, IMuxedConn):
         except Exception as e:
             logger.error(f"Error handling QUIC event {type(event).__name__}: {e}")
 
+    def _connection_id_sequence_number(self, connection_id: bytes) -> int:
+        """
+        Return the sequence number aioquic assigned to an issued Connection ID.
+
+        ``ConnectionIdIssued`` carries only the connection ID, but aioquic
+        tracks the authoritative sequence in ``_host_cids``. Falling back to a
+        local counter keeps the handler working if that internal layout ever
+        changes, but the native value keeps local and peer view consistent.
+        """
+        quic = self._quic
+        host_cids = getattr(quic, "_host_cids", None)
+        if not isinstance(host_cids, (list, tuple)):
+            host_cids = ()
+        for host_cid in host_cids:
+            if getattr(host_cid, "cid", None) == connection_id:
+                sequence = int(getattr(host_cid, "sequence_number", 0))
+                if sequence >= self._connection_id_sequence_counter:
+                    self._connection_id_sequence_counter = sequence + 1
+                return sequence
+
+        sequence = self._connection_id_sequence_counter
+        self._connection_id_sequence_counter += 1
+        return sequence
+
     async def _handle_connection_id_issued(
         self, event: events.ConnectionIdIssued
     ) -> None:
@@ -1654,9 +1724,20 @@ class QUICConnection(IRawConnection, IMuxedConn):
         """
         new_connection_id = event.connection_id
 
-        # Increment sequence counter for this new Connection ID
-        sequence = self._connection_id_sequence_counter
-        self._connection_id_sequence_counter += 1
+        # aioquic re-emits ConnectionIdIssued when a NEW_CONNECTION_ID frame is
+        # retransmitted after loss, with the same connection ID. Registering it
+        # again would add a second, fictitious sequence entry (and a second
+        # routing alias) for a CID this connection already tracks.
+        if new_connection_id in self._available_connection_ids:
+            logger.debug(
+                "Ignoring duplicate ConnectionIdIssued for %s",
+                new_connection_id.hex()[:8],
+            )
+            return
+
+        # Prefer aioquic's sequence number: that is the value the peer sees in
+        # the NEW_CONNECTION_ID frame, and a retransmission must reuse it.
+        sequence = self._connection_id_sequence_number(new_connection_id)
         self._connection_id_sequence_numbers.add(sequence)
         if len(self._connection_id_sequence_numbers) > self._cid_history_limit:
             self._connection_id_sequence_numbers.remove(
@@ -1790,9 +1871,44 @@ class QUICConnection(IRawConnection, IMuxedConn):
         # Update statistics
         self._stats["connection_ids_retired"] += 1
 
-        # Note: The listener's _process_quic_events() will handle proper
-        # retirement ordering via the registry's
-        # retire_connection_ids_by_sequence_range()
+        # aioquic already refuses datagrams addressed to a retired CID, so the
+        # listener's routing entry can never be used again. Leaving it in the
+        # registry keeps this connection (and its crypto state) reachable even
+        # after the peer retires every CID it learned.
+        await self._retire_listener_connection_id(event.connection_id)
+
+    async def _retire_listener_connection_id(self, connection_id: bytes) -> None:
+        """Drop a retired Connection ID from the listener's routing registry."""
+        listener = self._listener
+        registry = getattr(listener, "_registry", None)
+        if registry is None:
+            return
+
+        try:
+            await registry.remove_connection_id(connection_id)
+        except Exception as error:
+            logger.debug(
+                "Error retiring Connection ID %s from listener: %s",
+                connection_id.hex()[:8],
+                error,
+            )
+            return
+
+        if self._listener_connection_id != connection_id:
+            return
+
+        # New issuances are attached to ``_listener_connection_id``; point it at
+        # a CID that is still registered so they do not get dropped.
+        self._listener_connection_id = None
+        try:
+            live_cids = await registry.get_all_cids_for_connection(self)
+        except Exception:
+            live_cids = []
+        live_cids = [cid for cid in live_cids if cid != connection_id]
+        if self._current_connection_id in live_cids:
+            self._listener_connection_id = self._current_connection_id
+        elif live_cids:
+            self._listener_connection_id = live_cids[0]
 
     async def _handle_ping_acknowledged(self, event: events.PingAcknowledged) -> None:
         """Handle ping acknowledgment."""
