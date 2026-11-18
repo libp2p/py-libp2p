@@ -1,0 +1,1 @@
+Refresh WebRTC-Direct v1/v2 dial guidance now that libp2p/specs#715 has merged: the dialer default stays at v1 for wider-network compatibility, and v2 remains opt-in rather than flipping automatically with the spec.

@@ -25,12 +25,13 @@ Provides two transport variants per the libp2p WebRTC specification:
   1|2)``:
 
   * **v1 (default today):** the migration path. Encodes the client password by
-    munging the ICE ufrag/pwd; kept the default while specs#715 is unmerged so
-    py↔py and py↔go keep working against v1 peers.
-  * **v2 (recommended):** the specs#715 flow — no SDP munging
+    munging the ICE ufrag/pwd; kept as the default while go/js dialers still
+    start on v1 so py↔py and py↔go keep working against the wider network.
+  * **v2 (recommended):** the specs#715 flow (merged) — no SDP munging
     (``libp2p+webrtc+v2/<client_pwd>``). Prefer it for new deployments, and it
     is what **browser dialling requires** once ``NoSdpMangleUfrag`` support is
-    widespread. Switch the default to v2 once specs#715 lands.
+    widespread. Opt in with ``webrtc_direct_dial_version=2``; switch the default
+    to v2 when the network is ready, not merely because the spec has landed.
 
 - **WebRTC** (``/webrtc``): Private-to-private connections where both peers are
   behind NAT.  Uses Circuit Relay v2 for signaling, then upgrades to a direct
