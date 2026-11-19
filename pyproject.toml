@@ -29,7 +29,7 @@ dependencies = [
     "certifi>=2026.10.19",
     "coincurve==21.0.0",
     "exceptiongroup>=1.2.0; python_version < '3.11'",
-    "fastecdsa==2.3.2; sys_platform != 'win32'",
+    "fastecdsa>=2.3.2,<5; sys_platform != 'win32'",
     "grpcio>=1.41.0",
     "httpx>=0.25.0",
     "lru-dict>=1.1.6",
