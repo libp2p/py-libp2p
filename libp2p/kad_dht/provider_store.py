@@ -41,9 +41,14 @@ from .common import (
     ALPHA,
     BUCKET_SIZE,
     MAX_DHT_MESSAGE_SIZE,
+    MAX_LOOKUP_CANDIDATES,
+    MAX_LOOKUP_DURATION,
+    MAX_LOOKUP_QUERIES,
+    MAX_PROVIDER_KEYS,
     PROTOCOL_ID,
     QUERY_TIMEOUT,
 )
+from .events import KadDhtEvent
 from .pb.kademlia_pb2 import (
     Message,
 )
@@ -203,12 +208,30 @@ class ProviderStore:
         providing_keys_snapshot = list(self.providing_keys)
 
         # Only republish keys that are due (last republish > 22h ago or never)
+        republished = 0
         for key in providing_keys_snapshot:
+            # The snapshot goes stale while earlier keys in this pass await
+            # network work: unprovide() or capacity eviction can drop a key.
+            if key not in self.providing_keys:
+                continue
             last_republished = self._last_republish.get(key, 0)
             if (current_time - last_republished) >= PROVIDER_RECORD_REPUBLISH_INTERVAL:
                 logger.debug(f"Republishing provider record for key {key.hex()}")
                 await self.provide(key)
-                self._last_republish[key] = current_time
+                # provide() yields while finding peers and announcing. If the
+                # key was removed meanwhile, writing the timestamp back would
+                # leave metadata that no record or cleanup pass ever visits.
+                if key in self.providing_keys:
+                    self._last_republish[key] = current_time
+                    republished += 1
+
+        if republished > 0:
+            event = KadDhtEvent()
+            event.republish = True
+            event.record_type = "provider"
+            event.count = republished
+            event.success = True
+            self.host.get_event_bus().emit(event)
 
     async def provide(self, key: bytes) -> bool:
         """
@@ -276,7 +299,38 @@ class ProviderStore:
 
         success_count = success_count_list[0]
         logger.info(f"Successfully advertised to {success_count} peers")
+
+        # Emit provide metric event on the host's event bus
+        event = KadDhtEvent()
+        event.provide = True
+        event.key = key.hex()
+        event.peers_announced = success_count
+        event.success = success_count > 0
+        self.host.get_event_bus().emit(event)
         return success_count > 0
+
+    def unprovide(self, key: bytes) -> bool:
+        """
+        Stop tracking a local provider record for *key*.
+
+        Removes the key from ``providing_keys`` and ``_last_republish`` and
+        drops the locally stored provider record. Returns True if the key was
+        being provided. This is local bookkeeping only; it does not send a
+        network revocation (Bitswap/DHT have no unprovide message).
+
+        :param key: The content key (multihash) to forget
+
+        Returns
+        -------
+        bool
+            True if the key was previously tracked as locally provided
+
+        """
+        was_providing = key in self.providing_keys
+        self._drop_key(key)
+        if was_providing:
+            self._save()
+        return was_providing
 
     async def _send_add_provider(self, peer_id: ID, key: bytes) -> bool:
         """
@@ -379,6 +433,12 @@ class ProviderStore:
             logger.debug(
                 f"Found {len(local_providers)} providers locally for {key.hex()}"
             )
+            event = KadDhtEvent()
+            event.find_providers = True
+            event.key = key.hex()
+            event.providers_found = len(local_providers[:count])
+            event.success = True
+            self.host.get_event_bus().emit(event)
             return local_providers[:count]
 
         # Get initial closest peers
@@ -386,13 +446,19 @@ class ProviderStore:
         logger.debug(
             f"Searching {len(closest_peers)} peers for providers of {key.hex()}"
         )
+        find_start = time.monotonic()
 
         # Iterative provider lookup
         all_providers: list[PeerInfo] = []
         queried_peers: set[ID] = set()
         candidate_peers = list(closest_peers)
 
-        while candidate_peers and len(all_providers) < count:
+        while (
+            candidate_peers
+            and len(all_providers) < count
+            and len(queried_peers) < MAX_LOOKUP_QUERIES
+            and time.monotonic() - find_start < MAX_LOOKUP_DURATION
+        ):
             # Take ALPHA peers from candidates
             batch = candidate_peers[:ALPHA]
             candidate_peers = candidate_peers[ALPHA:]
@@ -445,6 +511,7 @@ class ProviderStore:
                         peer not in queried_peers
                         and peer not in candidate_peers
                         and peer != self.local_peer_id
+                        and len(candidate_peers) < MAX_LOOKUP_CANDIDATES
                     ):
                         candidate_peers.append(peer)
 
@@ -460,7 +527,22 @@ class ProviderStore:
             if not candidate_peers:
                 break
 
+        if len(queried_peers) >= MAX_LOOKUP_QUERIES:
+            logger.debug(
+                "Provider lookup stopped at query cap (%d peers)",
+                MAX_LOOKUP_QUERIES,
+            )
         logger.debug(f"Found {len(all_providers)} providers for key {key.hex()}")
+
+        event = KadDhtEvent()
+        event.find_providers = True
+        event.key = key.hex()
+        event.providers_found = len(all_providers[:count])
+        event.peers_queried = len(queried_peers)
+        event.peers_responded = [str(p.peer_id) for p in all_providers[:count]][:10]
+        event.success = len(all_providers) > 0
+        event.duration_ms = (time.monotonic() - find_start) * 1000
+        self.host.get_event_bus().emit(event)
         return all_providers[:count]
 
     async def _get_providers_from_peer_with_closers(
@@ -566,6 +648,12 @@ class ProviderStore:
 
         return providers, closer_peers
 
+    def _drop_key(self, key: bytes) -> None:
+        """Forget everything tracked for *key* (provider record and metadata)."""
+        self.providers.pop(key, None)
+        self._last_republish.pop(key, None)
+        self.providing_keys.discard(key)
+
     def add_provider(self, key: bytes, provider: PeerInfo) -> None:
         """
         Add a provider for a given content key.
@@ -581,6 +669,20 @@ class ProviderStore:
         if not provider or not provider.peer_id:
             logger.debug("Skipping add_provider with invalid PeerInfo")
             return
+
+        # Cap total keys in provider store to prevent unbounded memory growth
+        if key not in self.providers and len(self.providers) >= MAX_PROVIDER_KEYS:
+            # Prefer evicting a key that is not locally provided. If every
+            # entry is a local publication (e.g. a node that has added more
+            # than MAX_PROVIDER_KEYS blocks), fall back to the oldest entry so
+            # the cap remains effective instead of being silently disabled.
+            evicted_key = next(
+                (k for k in self.providers if k not in self.providing_keys), None
+            )
+            if evicted_key is None and self.providers:
+                evicted_key = next(iter(self.providers))
+            if evicted_key is not None:
+                self._drop_key(evicted_key)
 
         # Initialize providers for this key if needed
         if key not in self.providers:
@@ -679,7 +781,21 @@ class ProviderStore:
         # Remove empty keys
         for key in expired_keys:
             del self.providers[key]
+            self._last_republish.pop(key, None)
             logger.debug(f"Removed key with no providers: {key.hex()}")
+
+        # Enforce max keys during periodic cleanup. If every record is a local
+        # publication, evict the oldest one so the cap is still enforced.
+        while len(self.providers) > MAX_PROVIDER_KEYS:
+            evicted_key = next(
+                (k for k in self.providers if k not in self.providing_keys), None
+            )
+            if evicted_key is None:
+                evicted_key = next(iter(self.providers), None)
+            if evicted_key is None:
+                break
+            self._drop_key(evicted_key)
+            removed_any = True
 
         if expired_keys or removed_any:
             self._save()

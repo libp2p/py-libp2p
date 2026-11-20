@@ -616,3 +616,27 @@ def test_addr_cache_size_cap():
         mgr._cached_multiaddr(f"/ip4/1.2.3.{i}/tcp/4001")
 
     assert len(mgr._addr_cache) == _ADDR_CACHE_SIZE
+
+
+def test_local_addr_rests_pruned_when_listen_address_changes():
+    """
+    Suffix metadata only tracks addresses the host currently listens on.
+
+    ``_local_addr_rests`` is keyed by local thin waist and was only ever added
+    to, so every listen-address change left an entry behind for the life of the
+    manager.
+    """
+    mgr = ObservedAddrManager()
+
+    mgr._update_local_addr_rests([Multiaddr("/ip4/127.0.0.1/tcp/4001")])
+    mgr._update_local_addr_rests([Multiaddr("/ip4/127.0.0.1/tcp/4002")])
+    assert set(mgr._local_addr_rests) == {"/ip4/127.0.0.1/tcp/4002"}
+
+    # Same listen address keeps its suffix entry.
+    mgr._update_local_addr_rests([Multiaddr("/ip4/127.0.0.1/tcp/4002/p2p-circuit")])
+    assert set(mgr._local_addr_rests) == {"/ip4/127.0.0.1/tcp/4002"}
+    assert mgr._local_addr_rests["/ip4/127.0.0.1/tcp/4002"] == {"/p2p-circuit"}
+
+    # An empty address list is transient, not proof the listener is gone.
+    mgr._update_local_addr_rests([])
+    assert set(mgr._local_addr_rests) == {"/ip4/127.0.0.1/tcp/4002"}

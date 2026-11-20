@@ -84,10 +84,17 @@ class TLSTransport(ISecureTransport):
         # Trusted peer certs (PEM) for accepting self-signed peers during tests
         self._trusted_peer_certs_pem: list[str] = []
         self.enable_autotls = enable_autotls
+        # Cache SSL contexts per role to avoid allocating a new OpenSSL
+        # SSL_CTX (and its internal state) for every TCP connection.
+        self._ssl_context_server: ssl.SSLContext | None = None
+        self._ssl_context_client: ssl.SSLContext | None = None
 
     def create_ssl_context(self, server_side: bool = False) -> ssl.SSLContext:
         """
         Create SSL context for TLS connections.
+
+        Returns a cached context for repeated calls with the same role,
+        avoiding the cost of creating a new OpenSSL SSL_CTX per connection.
 
         Args:
             server_side: Whether this is for server-side connections
@@ -99,6 +106,12 @@ class TLSTransport(ISecureTransport):
             ValueError: If any trusted certificate contains dangerous content
 
         """
+        # Return cached context if available
+        if server_side and self._ssl_context_server is not None:
+            return self._ssl_context_server
+        if not server_side and self._ssl_context_client is not None:
+            return self._ssl_context_client
+
         # Validate trusted peer certificates for security vulnerabilities
         logger.debug("TLS create_ssl_context: starting (server_side=%s)", server_side)
         for cert_pem in self._trusted_peer_certs_pem:
@@ -286,6 +299,12 @@ class TLSTransport(ISecureTransport):
                 except Exception:
                     pass
         logger.debug("TLS create_ssl_context: completed")
+
+        # Cache the context so subsequent calls reuse the same OpenSSL state
+        if server_side:
+            self._ssl_context_server = ctx
+        else:
+            self._ssl_context_client = ctx
 
         return ctx
 

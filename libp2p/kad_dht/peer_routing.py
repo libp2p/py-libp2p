@@ -34,6 +34,7 @@ from .common import (
     PROTOCOL_ID,
     QUERY_TIMEOUT,
 )
+from .events import KadDhtEvent
 from .pb.kademlia_pb2 import (
     Message,
 )
@@ -83,7 +84,7 @@ class PeerRouting(IPeerRouting):
 
     async def find_peer(self, peer_id: ID) -> PeerInfo | None:
         """
-        Find a peer with the given ID.
+        Find a peer with the given ID (emits a metric event).
 
         :param peer_id: The ID of the peer to find
 
@@ -93,6 +94,16 @@ class PeerRouting(IPeerRouting):
             The peer information if found, None otherwise
 
         """
+        result = await self._find_peer_impl(peer_id)
+        event = KadDhtEvent()
+        event.find_peer = True
+        event.target = str(peer_id)
+        event.success = result is not None
+        self.host.get_event_bus().emit(event)
+        return result
+
+    async def _find_peer_impl(self, peer_id: ID) -> PeerInfo | None:
+        """Find a peer with the given ID (no metric emission)."""
         # Check if this is actually our peer ID
         if peer_id == self.host.get_id():
             try:
@@ -155,7 +166,11 @@ class PeerRouting(IPeerRouting):
         return None
 
     async def _query_single_peer_for_closest(
-        self, peer: ID, target_key: bytes, new_peers: list[ID]
+        self,
+        peer: ID,
+        target_key: bytes,
+        new_peers: list[ID],
+        responding_peers: list[ID],
     ) -> None:
         """
         Query a single peer for closest peers and append results to the shared list.
@@ -166,19 +181,25 @@ class PeerRouting(IPeerRouting):
             The target key to find closest peers for
         params: new_peers : list[ID]
             Shared list to append results to
+        params: responding_peers : list[ID]
+            Shared list of peers that returned at least one closer peer
 
         """
         try:
             result = await self._query_peer_for_closest(peer, target_key)
             # Add deduplication to prevent duplicate peers
+            added = 0
             for peer_id in result:
                 if peer_id not in new_peers:
                     new_peers.append(peer_id)
+                    added += 1
+            if added > 0:
+                responding_peers.append(peer)
             logger.debug(
                 "Queried peer %s for closest peers, got %d results (%d unique)",
                 peer,
                 len(result),
-                len([p for p in result if p not in new_peers[: -len(result)]]),
+                added,
             )
         except Exception as e:
             logger.debug(f"Query to peer {peer} failed: {e}")
@@ -222,7 +243,11 @@ class PeerRouting(IPeerRouting):
             # If still not enough, get peers from peerstore
             if len(closest_peers) < count:
                 try:
-                    peerstore_peers = self.host.get_peerstore().peer_ids()
+                    ps = self.host.get_peerstore()
+                    if hasattr(ps, "sample_peer_ids"):
+                        peerstore_peers = ps.sample_peer_ids(limit=count * 3)
+                    else:
+                        peerstore_peers = ps.peer_ids()
                     # Filter out our own ID and already included peers
                     local_id = self.host.get_id()
                     existing_peers = set(closest_peers)
@@ -251,6 +276,14 @@ class PeerRouting(IPeerRouting):
         # Return early if we have no peers to start with
         if not closest_peers:
             logger.debug("No local peers available for network lookup")
+            self._emit_lookup_event(
+                target_key,
+                query_count=0,
+                peers_found=0,
+                start_time=start_time,
+                success=False,
+                peers_responded=[],
+            )
             return []
 
         # Iterative lookup using a semaphore-based sliding window.
@@ -263,12 +296,15 @@ class PeerRouting(IPeerRouting):
         # round we re-sort and may discover closer peers for the next round.
         sem = trio.Semaphore(ALPHA)
         new_peers: list[ID] = []
+        responding_peers: list[ID] = []
         query_count = 0
 
         async def _guarded_query(peer: ID) -> None:
             """Run a single peer query while holding one semaphore slot."""
             try:
-                await self._query_single_peer_for_closest(peer, target_key, new_peers)
+                await self._query_single_peer_for_closest(
+                    peer, target_key, new_peers, responding_peers
+                )
             finally:
                 sem.release()
 
@@ -281,109 +317,150 @@ class PeerRouting(IPeerRouting):
                 )
                 break
 
-            rounds += 1
-            logger.debug(f"Lookup round {rounds}/{MAX_PEER_LOOKUP_ROUNDS}")
+            try:
+                rounds += 1
+                logger.debug(f"Lookup round {rounds}/{MAX_PEER_LOOKUP_ROUNDS}")
 
-            # Admit at most ALPHA peers per round to preserve classic Kademlia
-            # iterative refinement: after each small batch we re-sort with any
-            # newly discovered peers before admitting the next batch.
-            # Exclude self - we can't query ourselves (Kubo does the same)
-            local_id = self.host.get_id()
-            candidates = [
-                p for p in closest_peers if p not in queried_peers and p != local_id
-            ]
-            # Draw the batch at random from the candidate window instead of always
-            # taking the strictly closest ALPHA. Every candidate is already within
-            # the `count` closest peers we know of, so convergence is preserved,
-            # but a Sybil peer sitting at the closest XOR position is no longer
-            # guaranteed a slot in the *first* round and so cannot shape the
-            # lookup path from hop one. It may still be queried later: the BETA
-            # gate below deliberately contacts the closest peers before the
-            # lookup returns. See issue #1384.
-            peers_to_query = _rng.sample(candidates, min(ALPHA, len(candidates)))
-            if not peers_to_query:
-                logger.debug("No more unqueried peers available, ending lookup")
-                break
-
-            new_peers.clear()
-
-            async with trio.open_nursery() as nursery:
-                for peer in peers_to_query:
-                    await sem.acquire()
-                    queried_peers.add(peer)
-                    query_count += 1
-                    nursery.start_soon(_guarded_query, peer)
-
-            # If we got no new peers, check if there are still unqueried
-            # closest peers before terminating
-            if not new_peers:
-                unqueried_in_topk = [
-                    p
-                    for p in closest_peers[:BUCKET_SIZE]
-                    if p not in queried_peers and p != local_id
+                # Admit at most ALPHA peers per round to preserve classic Kademlia
+                # iterative refinement: after each small batch we re-sort with any
+                # newly discovered peers before admitting the next batch.
+                # Exclude self - we can't query ourselves (Kubo does the same)
+                local_id = self.host.get_id()
+                candidates = [
+                    p for p in closest_peers if p not in queried_peers and p != local_id
                 ]
-                if unqueried_in_topk:
-                    logger.debug(
-                        f"No new peers discovered but {len(unqueried_in_topk)} "
-                        "unqueried closest peers remain, continuing"
-                    )
-                    continue
-                logger.debug("No new peers discovered and all closest queried")
-                break
+                # Draw the batch at random from the candidate window instead of
+                # always taking the strictly closest ALPHA. Every candidate is
+                # already within the `count` closest peers we know of, so
+                # convergence is preserved, but a Sybil peer sitting at the
+                # closest XOR position is no longer guaranteed a slot in the
+                # *first* round and so cannot shape the lookup path from hop
+                # one. See issue #1384.
+                peers_to_query = _rng.sample(candidates, min(ALPHA, len(candidates)))
+                if not peers_to_query:
+                    logger.debug("No more unqueried peers available, ending lookup")
+                    break
 
-            # Update our list of closest peers
-            all_candidates = list(dict.fromkeys(closest_peers + new_peers))
-            old_closest_peers = closest_peers[:]
-            closest_peers = sort_peer_ids_by_distance(target_key, all_candidates)[
-                :count
-            ]
-            logger.debug(f"Updated closest peers count: {len(closest_peers)}")
+                new_peers.clear()
 
-            # Check if we made any progress (found closer peers)
-            if closest_peers == old_closest_peers:
-                # Kademlia terminates once the closest known peers have been
-                # contacted. Because admission is randomised, a round can fail
-                # to improve while the closest peers are still unqueried, so
-                # keep going until the BETA closest have been queried. Bounded
-                # by MAX_PEER_LOOKUP_ROUNDS and the 30s deadline above.
-                unqueried_beta = [
-                    p
-                    for p in closest_peers[:BETA]
-                    if p not in queried_peers and p != local_id
+                async with trio.open_nursery() as nursery:
+                    for peer in peers_to_query:
+                        await sem.acquire()
+                        queried_peers.add(peer)
+                        query_count += 1
+                        nursery.start_soon(_guarded_query, peer)
+
+                # If we got no new peers, check if there are still unqueried
+                # closest peers before terminating
+                if not new_peers:
+                    unqueried_in_topk = [
+                        p
+                        for p in closest_peers[:BUCKET_SIZE]
+                        if p not in queried_peers and p != local_id
+                    ]
+                    if unqueried_in_topk:
+                        logger.debug(
+                            f"No new peers discovered but {len(unqueried_in_topk)} "
+                            "unqueried closest peers remain, continuing"
+                        )
+                        continue
+                    logger.debug("No new peers discovered and all closest queried")
+                    break
+
+                # Update our list of closest peers
+                all_candidates = list(dict.fromkeys(closest_peers + new_peers))
+                old_closest_peers = closest_peers[:]
+                closest_peers = sort_peer_ids_by_distance(target_key, all_candidates)[
+                    :count
                 ]
-                if unqueried_beta:
-                    logger.debug(
-                        f"No improvement but {len(unqueried_beta)} of the BETA "
-                        "closest peers are unqueried, continuing"
-                    )
-                    continue
-                logger.debug("No improvement in closest peers, ending lookup")
-                break
+                logger.debug(f"Updated closest peers count: {len(closest_peers)}")
 
-            # Beta resiliency: ensure at least BETA of the closest peers
-            # have been queried before terminating
-            queried_in_closest = sum(
-                1 for p in closest_peers[:BUCKET_SIZE] if p in queried_peers
-            )
-            if queried_in_closest < BETA and len(closest_peers) >= BETA:
-                # Not enough closest peers queried, continue if we have candidates
-                unqueried_closest = [
-                    p
-                    for p in closest_peers[:BUCKET_SIZE]
-                    if p not in queried_peers and p != local_id
-                ]
-                if unqueried_closest:
-                    logger.debug(
-                        f"Only {queried_in_closest}/{BETA} closest peers queried, "
-                        "continuing lookup"
-                    )
-                    continue
+                # Check if we made any progress (found closer peers)
+                if closest_peers == old_closest_peers:
+                    # Kademlia terminates once the closest known peers have been
+                    # contacted. Because admission is randomised, a round can
+                    # fail to improve while the closest peers are still
+                    # unqueried, so keep going until the BETA closest have been
+                    # queried. Bounded by MAX_PEER_LOOKUP_ROUNDS and the 30s
+                    # deadline above.
+                    unqueried_beta = [
+                        p
+                        for p in closest_peers[:BETA]
+                        if p not in queried_peers and p != local_id
+                    ]
+                    if unqueried_beta:
+                        logger.debug(
+                            f"No improvement but {len(unqueried_beta)} of the "
+                            "BETA closest peers are unqueried, continuing"
+                        )
+                        continue
+                    logger.debug("No improvement in closest peers, ending lookup")
+                    break
+
+                # Beta resiliency: ensure at least BETA of the closest peers
+                # have been queried before terminating
+                queried_in_closest = sum(
+                    1 for p in closest_peers[:BUCKET_SIZE] if p in queried_peers
+                )
+                if queried_in_closest < BETA and len(closest_peers) >= BETA:
+                    # Not enough closest peers queried, continue if we have candidates
+                    unqueried_closest = [
+                        p
+                        for p in closest_peers[:BUCKET_SIZE]
+                        if p not in queried_peers and p != local_id
+                    ]
+                    if unqueried_closest:
+                        logger.debug(
+                            f"Only {queried_in_closest}/{BETA} closest peers queried, "
+                            "continuing lookup"
+                        )
+                        continue
+            except Exception as e:
+                logger.debug(f"Lookup round {rounds} error: {e}")
+                self._emit_lookup_event(
+                    target_key,
+                    query_count=query_count,
+                    peers_found=len(closest_peers),
+                    start_time=start_time,
+                    success=False,
+                    peers_responded=[str(p) for p in responding_peers][:10],
+                )
+                raise
 
         logger.info(
             f"Network lookup completed after {rounds} rounds "
             f"({query_count} queries), found {len(closest_peers)} peers"
         )
+        self._emit_lookup_event(
+            target_key,
+            query_count=query_count,
+            peers_found=len(closest_peers),
+            start_time=start_time,
+            success=len(closest_peers) > 0,
+            peers_responded=[str(p) for p in responding_peers][:10],
+        )
         return closest_peers
+
+    def _emit_lookup_event(
+        self,
+        target_key: bytes,
+        *,
+        query_count: int,
+        peers_found: int,
+        start_time: float,
+        success: bool,
+        peers_responded: list[str] | None = None,
+    ) -> None:
+        """Emit a Kad-DHT lookup event on the host's event bus."""
+        event = KadDhtEvent()
+        event.lookup = True
+        event.target = target_key.hex()
+        event.duration_ms = (trio.current_time() - start_time) * 1000
+        event.peers_queried = query_count
+        event.peers_found = peers_found
+        event.peers_responded = peers_responded
+        event.success = success
+        self.host.get_event_bus().emit(event)
 
     async def _query_peer_for_closest(self, peer: ID, target_key: bytes) -> list[ID]:
         """

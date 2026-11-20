@@ -63,6 +63,9 @@ from .common import (
     ALPHA,
     BUCKET_SIZE,
     MAX_DHT_MESSAGE_SIZE,
+    MAX_LOOKUP_CANDIDATES,
+    MAX_LOOKUP_DURATION,
+    MAX_LOOKUP_QUERIES,
     MAX_PROVIDERS_PER_MSG,
     MAX_RECORD_AGE,
     MAX_RECORD_SIZE,
@@ -72,6 +75,7 @@ from .common import (
     parse_time_received,
     protocol_id_for,
 )
+from .events import KadDhtEvent
 from .pb.kademlia_pb2 import (
     Message,
     Record,
@@ -146,17 +150,6 @@ def _encode_key(key: str) -> bytes:
         return bytes.fromhex(key)
     except ValueError:
         return key.encode("utf-8")
-
-
-class KadDhtEvent:
-    peer_id: str
-
-    inbound: bool = False
-    find_node: bool = False
-    get_value: bool = False
-    put_value: bool = False
-    get_providers: bool = False
-    add_provider: bool = False
 
 
 class KadDHT(Service):
@@ -442,6 +435,13 @@ class KadDHT(Service):
                     logger.debug(f"Cleaned up {expired_values} expired values")
 
                 self.provider_store.cleanup_expired()
+
+                # Emit a routing-table snapshot (gauge) so metrics consumers
+                # can track routing-table health over time.
+                rt_event = KadDhtEvent()
+                rt_event.routing_table = True
+                rt_event.count = self.routing_table.size()
+                self.host.get_event_bus().emit(rt_event)
             except Exception as e:
                 logger.error(f"Error in DHT maintenance loop: {e}")
 
@@ -599,7 +599,27 @@ class KadDHT(Service):
             return
 
         async with self._inbound_limiter:
-            await self._do_handle_stream(stream)
+            try:
+                await self._do_handle_stream(stream)
+            except BaseException:
+                # Trio cancellation derives from BaseException, so it bypasses
+                # every cleanup path inside the handler (including the manual
+                # close/reset in its ``else`` branch). The muxed stream is then
+                # still owned by the transport, so release it here.
+                await self._abort_stream(stream)
+                raise
+
+    async def _abort_stream(self, stream: INetStream) -> None:
+        """Reset an inbound stream, shielding teardown from cancellation."""
+        with trio.CancelScope() as scope:
+            scope.shield = True
+            try:
+                await stream.reset()
+            except Exception:
+                try:
+                    await stream.close()
+                except Exception:
+                    pass
 
     def _add_closer_peers_to_response(
         self,
@@ -729,6 +749,7 @@ class KadDHT(Service):
 
                         # Metrics Event
                         event.find_node = True
+                        event.target = target_key.hex()
 
                         # Build response message with protobuf
                         response = Message()
@@ -808,11 +829,16 @@ class KadDHT(Service):
 
                         # Rate limit check
                         if not self._check_provider_rate_limit(peer_id):
+                            rate_event = KadDhtEvent()
+                            rate_event.peer_id = peer_id.pretty()
+                            rate_event.rate_limited = True
+                            self.host.get_event_bus().emit(rate_event)
                             should_reset = True
                             break
 
                         # Metrics Event
                         event.add_provider = True
+                        event.key = key.hex()
 
                         # Cap the number of providers per message
                         provider_count = 0
@@ -912,6 +938,7 @@ class KadDHT(Service):
 
                         # Metrics event
                         event.get_providers = True
+                        event.key = key.hex()
 
                         # Find providers for the key
                         providers = self.provider_store.get_providers(key)
@@ -996,6 +1023,7 @@ class KadDHT(Service):
 
                         # Metrics Event
                         event.get_value = True
+                        event.key = key.hex()
 
                         value_record = self.value_store.get(key)
                         if value_record:
@@ -1119,6 +1147,7 @@ class KadDHT(Service):
                             break
 
                         event.put_value = True
+                        event.key = key.hex()
 
                         try:
                             if not (key and value):
@@ -1183,11 +1212,13 @@ class KadDHT(Service):
                                         f"{key.hex()}, rejecting PUT_VALUE"
                                     )
                                     success = False
+                                self._emit_record_validation(key_str, success)
                             else:
                                 # No existing record, store the new one
                                 self.value_store.put_record(key, cleaned_record)
                                 logger.debug(f"Stored value for key {key.hex()}")
                                 success = True
+                                self._emit_record_validation(key_str, True)
 
                         except Exception as e:
                             logger.warning(
@@ -1232,9 +1263,9 @@ class KadDHT(Service):
                     should_reset = True
                     break
 
-                # Send KAD-DHT event to Metrics
-                if stream.metric_send_channel is not None:
-                    await stream.metric_send_channel.send(event)
+                # Emit Kad-DHT event on the host's event bus (metrics listener
+                # and any other subscribers are notified).
+                self.host.get_event_bus().emit(event)
 
         except (trio.ClosedResourceError, trio.BrokenResourceError) as e:
             # Peer disconnected mid-stream — normal P2P behaviour, not a bug.
@@ -1255,6 +1286,11 @@ class KadDHT(Service):
             # Per spec: On any error in the handler, the stream is reset.
             # Only close gracefully if the handler completed without errors.
             if should_reset:
+                reset_event = KadDhtEvent()
+                reset_event.peer_id = peer_id.pretty()
+                reset_event.stream_reset = True
+                reset_event.reason = "protocol_violation"
+                self.host.get_event_bus().emit(reset_event)
                 try:
                     await stream.reset()
                 except Exception:
@@ -1301,10 +1337,23 @@ class KadDHT(Service):
     async def refresh_routing_table(self) -> None:
         """Refresh the routing table."""
         logger.debug("Refreshing routing table")
+        refresh_start = time.monotonic()
+        peers_discovered: int = 0
+        peers_added: int = 0
         if getattr(self, "rt_refresh_manager", None) is not None:
-            await self.rt_refresh_manager._do_refresh(force=True)  # type: ignore
+            peers_discovered, peers_added = await self.rt_refresh_manager._do_refresh(  # type: ignore[union-attr]
+                force=True
+            )
         else:
             await self.peer_routing.refresh_routing_table()
+
+        refresh_event = KadDhtEvent()
+        refresh_event.refresh = True
+        refresh_event.success = True
+        refresh_event.peers_found = peers_discovered
+        refresh_event.peers_added = peers_added
+        refresh_event.duration_ms = (time.monotonic() - refresh_start) * 1000
+        self.host.get_event_bus().emit(refresh_event)
 
     # Peer routing methods
 
@@ -1331,6 +1380,7 @@ class KadDHT(Service):
 
         """
         logger.debug(f"Storing value for key {key}")
+        put_start = time.monotonic()
 
         # Always validate the key-value pair using the namespaced validator
         # This will raise InvalidRecordType if:
@@ -1345,8 +1395,11 @@ class KadDHT(Service):
         old_value_record = self.value_store.get(key_bytes)
         if old_value_record is not None and old_value_record.value != value:
             index = self.validator.select(key, [value, old_value_record.value])
+            self._emit_record_validation(key, index == 0)
             if index != 0:
                 raise ValueError("Refusing to replace newer value with the older one")
+        else:
+            self._emit_record_validation(key, True)
 
         # 1. Store locally first
         self.value_store.put(key_bytes, value)
@@ -1393,6 +1446,16 @@ class KadDHT(Service):
 
         logger.info(f"Successfully stored value at {stored_count_list[0]} peers")
 
+        put_event = KadDhtEvent()
+        put_event.put_value_out = True
+        put_event.key = key
+        put_event.peers_stored = stored_count_list[0]
+        put_event.success = stored_count_list[0] > 0
+        put_event.value_size_bytes = len(value)
+        put_event.value_preview = self._value_preview(value)
+        put_event.duration_ms = (time.monotonic() - put_start) * 1000
+        self.host.get_event_bus().emit(put_event)
+
     async def get_value(self, key: str, quorum: int = 0) -> bytes | None:
         """
         Retrieve a value from the DHT.
@@ -1411,6 +1474,7 @@ class KadDHT(Service):
 
         """
         logger.debug(f"Getting value for key: {key}")
+        get_start = time.monotonic()
 
         # Validate quorum parameter
         if quorum < 0:
@@ -1423,6 +1487,16 @@ class KadDHT(Service):
         value_record = self.value_store.get(key_bytes)
         if value_record:
             logger.debug("Found value locally")
+            get_event = KadDhtEvent()
+            get_event.get_value_out = True
+            get_event.key = key
+            get_event.value_found = True
+            get_event.success = True
+            get_event.found_locally = True
+            get_event.value_size_bytes = len(value_record.value)
+            get_event.value_preview = self._value_preview(value_record.value)
+            get_event.duration_ms = (time.monotonic() - get_start) * 1000
+            self.host.get_event_bus().emit(get_event)
             return value_record.value
 
         # 2. Get closest peers via network lookup (iterative FIND_NODE)
@@ -1543,6 +1617,7 @@ class KadDHT(Service):
                             cp not in queried_peers
                             and cp not in candidates
                             and cp != self.local_peer_id
+                            and len(candidates) < MAX_LOOKUP_CANDIDATES
                         ):
                             candidates.append(cp)
                     # Re-sort candidates by distance to key (per spec)
@@ -1558,7 +1633,12 @@ class KadDHT(Service):
 
         async with trio.open_nursery() as nursery:
             # Iterative lookup: query peers, add closer peers, continue
-            while candidate_peers_wrapper[0] and not quorum_reached.is_set():
+            while (
+                candidate_peers_wrapper[0]
+                and not quorum_reached.is_set()
+                and len(queried_peers) < MAX_LOOKUP_QUERIES
+                and time.monotonic() - get_start < MAX_LOOKUP_DURATION
+            ):
                 # Take next unqueried peer from candidates
                 while candidate_peers_wrapper[0]:
                     peer = candidate_peers_wrapper[0].pop(0)
@@ -1576,6 +1656,10 @@ class KadDHT(Service):
                 query_scopes.append(scope)
                 nursery.start_soon(run_query, peer, scope)
 
+        if len(queried_peers) >= MAX_LOOKUP_QUERIES:
+            logger.debug(
+                "Value lookup stopped at query cap (%d peers)", MAX_LOOKUP_QUERIES
+            )
         logger.debug(
             f"get_value query complete: {total_responses_list[0]} responses, "
             f"{len(valid_records)} valid records from {len(closest_peers)} peers"
@@ -1659,10 +1743,31 @@ class KadDHT(Service):
             # Store the best record locally (preserve original signature)
             self.value_store.put_record(key_bytes, best_rec)
             logger.info("Successfully retrieved value from network")
+
+            get_event = KadDhtEvent()
+            get_event.get_value_out = True
+            get_event.key = key
+            get_event.value_found = True
+            get_event.success = True
+            get_event.peers_queried = len(queried_peers)
+            get_event.peers_responded = [str(p) for p in peers_best][:10]
+            get_event.value_size_bytes = len(best_value)
+            get_event.value_preview = self._value_preview(best_value)
+            get_event.duration_ms = (time.monotonic() - get_start) * 1000
+            self.host.get_event_bus().emit(get_event)
             return best_value
 
         # 5. Not found
         logger.warning(f"Value not found for key {key}")
+
+        get_event = KadDhtEvent()
+        get_event.get_value_out = True
+        get_event.key = key
+        get_event.value_found = False
+        get_event.success = False
+        get_event.peers_queried = len(queried_peers)
+        get_event.duration_ms = (time.monotonic() - get_start) * 1000
+        self.host.get_event_bus().emit(get_event)
         return None
 
     # Utility methods
@@ -1693,6 +1798,15 @@ class KadDHT(Service):
         Accepts either a CID string or a multihash hex string.
         """
         return await self.provider_store.provide(_encode_key(key))
+
+    def unprovide(self, key: str) -> bool:
+        """
+        Forget a local provider record for *key*.
+
+        Accepts either a CID string or a multihash hex string. Local
+        bookkeeping only; there is no DHT unprovide message.
+        """
+        return self.provider_store.unprovide(_encode_key(key))
 
     async def find_providers(self, key: str, count: int = 20) -> list[PeerInfo]:
         """
@@ -1767,6 +1881,28 @@ class KadDHT(Service):
 
         """
         return self.enable_random_walk
+
+    def _emit_record_validation(self, key: str, success: bool) -> None:
+        """Emit a record-validation metric event for ``key`` in ``namespace``."""
+        event = KadDhtEvent()
+        event.record_validation = True
+        event.key = key
+        if key.startswith("/"):
+            parts = key.strip("/").split("/")
+            event.record_type = parts[0] if parts else "unknown"
+        else:
+            event.record_type = key
+        event.success = success
+        self.host.get_event_bus().emit(event)
+
+    @staticmethod
+    def _value_preview(value: bytes) -> str:
+        """Return a truncated, safe preview of a stored value for debugging."""
+        try:
+            text = value.decode("utf-8")
+        except UnicodeDecodeError:
+            return (value.hex()[:32] + "...") if len(value) > 16 else value.hex()
+        return (text[:32] + "...") if len(text) > 32 else text
 
     def get_diagnostics(self) -> RoutingTableDiagnostics:
         """

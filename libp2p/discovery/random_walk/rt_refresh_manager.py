@@ -161,17 +161,20 @@ class RTRefreshManager:
             if self._running:
                 await self._do_refresh()
 
-    async def _do_refresh(self, force: bool = False) -> None:
+    async def _do_refresh(self, force: bool = False) -> tuple[int, int]:
         """
         Perform routing table refresh operation.
 
         Args:
             force: Whether to force refresh regardless of timing
 
+        Returns:
+            tuple of (total discovered peers, peers added to the routing table).
+
         """
         if self._is_refreshing:
             logger.debug("Routing table refresh already in progress")
-            return
+            return (0, 0)
 
         try:
             self._is_refreshing = True
@@ -181,7 +184,7 @@ class RTRefreshManager:
             if not force:
                 if current_time - self._last_refresh_time < self.refresh_interval:
                     logger.debug("Skipping refresh: interval not elapsed")
-                    return
+                    return (0, 0)
 
             logger.info(f"Starting routing table refresh (force={force})")
             start_time = current_time
@@ -234,6 +237,8 @@ class RTRefreshManager:
                     callback()
                 except Exception as e:
                     logger.warning(f"Refresh callback error: {e}")
+
+            return (len(discovered_peers), added_count)
 
         except Exception as e:
             logger.error(f"Routing table refresh failed: {e}")

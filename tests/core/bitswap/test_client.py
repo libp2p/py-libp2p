@@ -416,7 +416,7 @@ class TestBitswapClientBugFixes:
 
     @pytest.mark.trio
     async def test_broadcast_limit(self):
-        """Test wantlist broadcast is limited to max 20 peers (Bug 6)."""
+        """Test wantlist broadcast semantics match go-libp2p (Bug 6)."""
         mock_host = MagicMock()
         client = BitswapClient(mock_host)
 
@@ -424,7 +424,14 @@ class TestBitswapClientBugFixes:
         mock_connections = {PeerID(f"peer{i}".encode()): MagicMock() for i in range(50)}
         mock_host.get_network().connections = mock_connections
 
-        client._send_wantlist_to_peer = AsyncMock(return_value=True)
+        client._send_wantlist_to_peer = AsyncMock(
+            return_value=True,
+            side_effect=(
+                lambda peer_id, cids: client._wants_sent_to_peer.setdefault(
+                    peer_id, set()
+                ).update(cids)
+            ),
+        )
 
         cid = compute_cid_v1(b"broadcast_data")
         from libp2p.bitswap.cid import parse_cid
@@ -432,4 +439,112 @@ class TestBitswapClientBugFixes:
         cid_obj = parse_cid(cid)
         await client._broadcast_wantlist([cid_obj])
 
+        # Default (max_broadcast_peers=-1): every connected peer receives it
+        assert client._send_wantlist_to_peer.call_count == 50
+        # Per-peer tracking records the wants as sent
+        for peer_id in mock_connections:
+            assert cid_obj in client._wants_sent_to_peer[peer_id]
+        assert cid_obj in client._broadcast_wants
+
+        # Re-broadcast of the same want: no peer is re-sent (dedup)
+        client._send_wantlist_to_peer.reset_mock()
+        await client._broadcast_wantlist([cid_obj])
+        assert client._send_wantlist_to_peer.call_count == 0
+
+    async def test_broadcast_peer_cap_and_rotation(self):
+        """Go-style cap: bounded fan-out, round-robin covers all peers."""
+        mock_host = MagicMock()
+        client = BitswapClient(mock_host, max_broadcast_peers=20)
+
+        mock_connections = {PeerID(f"peer{i}".encode()): MagicMock() for i in range(50)}
+        mock_host.get_network().connections = mock_connections
+
+        client._send_wantlist_to_peer = AsyncMock(
+            return_value=True,
+            side_effect=(
+                lambda peer_id, cids: client._wants_sent_to_peer.setdefault(
+                    peer_id, set()
+                ).update(cids)
+            ),
+        )
+
+        cid = compute_cid_v1(b"broadcast_data")
+        from libp2p.bitswap.cid import parse_cid
+
+        cid_obj = parse_cid(cid)
+        await client._broadcast_wantlist([cid_obj])
         assert client._send_wantlist_to_peer.call_count == 20
+
+        # Second broadcast rotates and covers the next slice
+        client._send_wantlist_to_peer.reset_mock()
+        await client._broadcast_wantlist([cid_obj])
+        assert client._send_wantlist_to_peer.call_count == 20
+
+        # Third broadcast covers the remainder (40..49), skipping already sent
+        client._send_wantlist_to_peer.reset_mock()
+        await client._broadcast_wantlist([cid_obj])
+        assert client._send_wantlist_to_peer.call_count == 10
+
+        # Fourth broadcast has fully wrapped: everything already sent
+        client._send_wantlist_to_peer.reset_mock()
+        await client._broadcast_wantlist([cid_obj])
+        assert client._send_wantlist_to_peer.call_count == 0
+
+    async def test_connected_catch_up_live_broadcast_wants(self):
+        """Newly connected peers receive live broadcast wants immediately."""
+        mock_host = MagicMock()
+        client = BitswapClient(mock_host)
+        client._nursery = MagicMock()
+        client._send_wantlist_to_peer = AsyncMock(return_value=True)
+
+        cid = compute_cid_v1(b"broadcast_data")
+        from libp2p.bitswap.cid import parse_cid
+
+        cid_obj = parse_cid(cid)
+        client._broadcast_wants.add(cid_obj)
+
+        conn = MagicMock()
+        conn.muxed_conn = None
+        conn.peer_id = PeerID(b"freshpeer")
+        await client.connected(mock_host, conn)
+
+        client._nursery.start_soon.assert_called_once()
+        args, _ = client._nursery.start_soon.call_args
+        assert args[0] is client._send_wantlist_to_peer
+        assert args[1] == PeerID(b"freshpeer")
+        assert args[2] == [cid_obj]
+
+    async def test_broadcast_cancel_clears_tracking(self):
+        """Cancelling a broadcast want allows future re-broadcasts."""
+        mock_host = MagicMock()
+        client = BitswapClient(mock_host)
+
+        mock_connections = {PeerID(f"peer{i}".encode()): MagicMock() for i in range(3)}
+        mock_host.get_network().connections = mock_connections
+        mock_host.get_network().get_connections = MagicMock(return_value=[])
+
+        client._send_wantlist_to_peer = AsyncMock(
+            return_value=True,
+            side_effect=(
+                lambda peer_id, cids: client._wants_sent_to_peer.setdefault(
+                    peer_id, set()
+                ).update(cids)
+            ),
+        )
+
+        cid = compute_cid_v1(b"broadcast_data")
+        from libp2p.bitswap.cid import parse_cid
+
+        cid_obj = parse_cid(cid)
+        await client._broadcast_wantlist([cid_obj])
+        assert client._send_wantlist_to_peer.call_count == 3
+
+        await client._broadcast_cancel(cid_obj)
+        assert cid_obj not in client._broadcast_wants
+        for peer_id in mock_connections:
+            assert cid_obj not in client._wants_sent_to_peer[peer_id]
+
+        # A fresh broadcast reaches everyone again
+        client._send_wantlist_to_peer.reset_mock()
+        await client._broadcast_wantlist([cid_obj])
+        assert client._send_wantlist_to_peer.call_count == 3

@@ -388,10 +388,15 @@ class TLSStreamReadWriter(ReadWriteCloser):
             if hasattr(self, "_ssl_socket") and self._ssl_socket is not None:
                 try:
                     self._ssl_socket.unwrap()
-                    logger.debug("TLS close: SSL socket unwrapped")
-                except Exception as e:
-                    logger.debug("TLS close: exception during SSL unwrap: %s", e)
+                except Exception:
+                    pass
         finally:
+            # Explicitly release SSL object to free OpenSSL C-level state
+            # immediately rather than waiting for GC (which may be delayed
+            # by reference cycles or deferred collection).
+            self._ssl_socket = None
+            self.in_bio = None
+            self.out_bio = None
             await self.raw_connection.close()
             self._closed = True
             logger.debug("TLS close: connection closed")
@@ -529,6 +534,7 @@ class TLSReadWriter(EncryptedMsgReadWriter):
         """Close the TLS connection."""
         logger.debug("TLS close: closing connection")
         await self.stream_writer.close()
+        self.stream_writer = None
         logger.debug("TLS close: connection closed")
 
     def get_negotiated_protocol(self) -> str | None:

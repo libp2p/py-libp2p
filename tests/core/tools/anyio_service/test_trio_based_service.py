@@ -651,3 +651,27 @@ async def test_daemon_task_finishes_leaving_children():
 
     with pytest.raises(ExceptionGroup):
         await TrioManager.run_service(ServiceTest())
+
+
+@pytest.mark.trio
+async def test_child_task_discarded_from_parent_on_exit():
+    class ChildTaskTestService(Service):
+        async def child_task(self):
+            await trio.sleep(0.01)
+
+        async def parent_task(self):
+            for _ in range(5):
+                self.manager.run_task(self.child_task)
+                await trio.sleep(0.03)
+
+        async def run(self):
+            self.manager.run_task(self.parent_task)
+            await self.manager.wait_finished()
+
+    service = ChildTaskTestService()
+    async with background_trio_service(service) as manager:
+        await trio.sleep(0.25)
+        for root_task in manager._root_tasks:
+            if hasattr(root_task, "children"):
+                assert len(root_task.children) == 0
+        manager.cancel()

@@ -28,6 +28,8 @@ from libp2p.stream_muxer.yamux.yamux import PROTOCOL_ID as YAMUX_PROTOCOL_ID
 if TYPE_CHECKING:
     from libp2p.network.swarm import Swarm  # noqa: F401
 
+logger = logging.getLogger(__name__)
+
 
 """
 Reference: https://github.com/libp2p/go-libp2p-swarm/blob/
@@ -59,6 +61,7 @@ class SwarmConn(INetConn):
         self.streams = set()
         self.event_closed = trio.Event()
         self.event_started = trio.Event()
+        self._nursery: trio.Nursery | None = None
         # Track connection creation time for pruning
         self._created_at = time.time()
         self._resource_scope = None
@@ -219,56 +222,95 @@ class SwarmConn(INetConn):
 
         # Notify all listeners about the disconnection
         logging.debug(f"Notifying disconnection for peer {self.muxed_conn.peer_id}")
-        await self._notify_disconnected()
+        try:
+            with trio.CancelScope(shield=True):
+                await self._notify_disconnected()
+        except Exception as e:
+            logging.warning(f"Error notifying disconnection: {e}")
+
+        # Cancel stream handler nursery if still active so the lifecycle task exits
+        if self._nursery is not None:
+            self._nursery.cancel_scope.cancel()
+
+        # Cancel manager tasks (swarm_conn.start and muxed_conn.start) if tracked
+        task = getattr(self, "_task", None)
+        if task is not None and hasattr(task, "_cancel_scope"):
+            try:
+                task._cancel_scope.cancel()
+            except Exception:
+                pass
+        muxed_task = getattr(self.muxed_conn, "_task", None)
+        if muxed_task is not None and hasattr(muxed_task, "_cancel_scope"):
+            try:
+                muxed_task._cancel_scope.cancel()
+            except Exception:
+                pass
+
+        # Break cyclic references between muxed_conn and SwarmConn
+        if hasattr(self.muxed_conn, "on_close"):
+            try:
+                delattr(self.muxed_conn, "on_close")
+            except Exception:
+                pass
+        if hasattr(self.muxed_conn, "remove_stream"):
+            try:
+                delattr(self.muxed_conn, "remove_stream")
+            except Exception:
+                pass
 
     async def _handle_new_streams(self) -> None:
         self.event_started.set()
-        async with trio.open_nursery() as nursery:
-            # Also exit the loop once this SwarmConn has been closed — this
-            # lets a duplicate (shared-muxed-conn) wrapper stop promptly
-            # instead of accepting streams into a dead connection.
-            while not self.event_closed.is_set():
-                try:
-                    stream = await self.muxed_conn.accept_stream()
-                except MuxedConnUnavailable as e:
-                    from libp2p.utils.connection_shutdown import (
-                        log_expected_connection_shutdown,
-                    )
+        try:
+            async with trio.open_nursery() as nursery:
+                self._nursery = nursery
+                # Also exit the loop once this SwarmConn has been closed — this
+                # lets a duplicate (shared-muxed-conn) wrapper stop promptly
+                # instead of accepting streams into a dead connection.
+                while not self.event_closed.is_set():
+                    try:
+                        stream = await self.muxed_conn.accept_stream()
+                    except MuxedConnUnavailable as e:
+                        from libp2p.utils.connection_shutdown import (
+                            log_expected_connection_shutdown,
+                        )
 
-                    log_expected_connection_shutdown(
-                        component="SwarmConn.accept_stream",
-                        peer_id=self.muxed_conn.peer_id,
-                        direction="remote",
-                        exc=e,
-                    )
-                    await self.close()
-                    break
-                except Exception as e:
-                    from libp2p.utils.connection_shutdown import (
-                        is_expected_connection_shutdown,
-                        log_expected_connection_shutdown,
-                    )
-
-                    if is_expected_connection_shutdown(e):
                         log_expected_connection_shutdown(
                             component="SwarmConn.accept_stream",
                             peer_id=self.muxed_conn.peer_id,
                             direction="remote",
                             exc=e,
                         )
-                    else:
-                        logging.debug(
-                            f"Connection closed for peer {self.muxed_conn.peer_id}: {e}"
+                        await self.close()
+                        break
+                    except Exception as e:
+                        from libp2p.utils.connection_shutdown import (
+                            is_expected_connection_shutdown,
+                            log_expected_connection_shutdown,
                         )
-                    await self.close()
-                    break
-                # The connection may have been closed while we were waiting
-                # for a stream — drop the stream instead of handling it.
-                if self.event_closed.is_set():
-                    break
-                # Asynchronously handle the accepted stream, to avoid blocking
-                # the next stream.
-                nursery.start_soon(self._handle_muxed_stream, stream)
+
+                        if is_expected_connection_shutdown(e):
+                            log_expected_connection_shutdown(
+                                component="SwarmConn.accept_stream",
+                                peer_id=self.muxed_conn.peer_id,
+                                direction="remote",
+                                exc=e,
+                            )
+                        else:
+                            logging.debug(
+                                f"Connection closed for peer "
+                                f"{self.muxed_conn.peer_id}: {e}"
+                            )
+                        await self.close()
+                        break
+                    # The connection may have been closed while we were waiting
+                    # for a stream — drop the stream instead of handling it.
+                    if self.event_closed.is_set():
+                        break
+                    # Asynchronously handle the accepted stream, to avoid blocking
+                    # the next stream.
+                    nursery.start_soon(self._handle_muxed_stream, stream)
+        finally:
+            self._nursery = None
 
     async def _handle_muxed_stream(self, muxed_stream: IMuxedStream) -> None:
         # Acquire semaphore slot for inbound stream (queues if at capacity)
@@ -302,20 +344,38 @@ class SwarmConn(INetConn):
                     pass
             return
 
-        net_stream = await self._add_stream(muxed_stream)
-        # Tag stream with direction so notify_closed_stream releases resources
-        net_stream._direction = Direction.INBOUND
+        net_stream = await self._add_stream(muxed_stream, Direction.INBOUND)
         try:
             await self.swarm.common_stream_handler(net_stream)
         finally:
+            # A handler owns the stream for the duration of the call. When it
+            # returns or is cancelled without closing, the muxed stream used to
+            # stay registered for the lifetime of the connection: no FIN is
+            # sent, and the transport only reclaims entries that are fully
+            # closed, so every abandoned inbound stream leaked its stream,
+            # buffer and event objects. Finish the stream here, matching
+            # go-libp2p where the handler returning ends the stream. NetStream
+            # close is itself shielded and bounded, and is a no-op when the
+            # handler already closed it.
+            if not net_stream.is_closed:
+                try:
+                    await net_stream.close()
+                except Exception:
+                    logger.debug(
+                        "Failed to release inbound stream after handler exit",
+                        exc_info=True,
+                    )
             # Safety net: ensure stream is removed from connection tracking
             self.remove_stream(net_stream)
             # Release resources via notify_closed_stream (idempotent guard)
             if not net_stream._resource_released:
                 await self.swarm.notify_closed_stream(net_stream)
 
-    async def _add_stream(self, muxed_stream: IMuxedStream) -> NetStream:
+    async def _add_stream(
+        self, muxed_stream: IMuxedStream, direction: Direction = Direction.UNKNOWN
+    ) -> NetStream:
         net_stream = NetStream(muxed_stream, self, self._metric_send_channel)
+        net_stream._direction = direction
         # Set Stream state to OPEN if the event has already started.
         # This is to ensure that the new streams created after connection has started
         # are immediately set to OPEN state.
@@ -323,12 +383,20 @@ class SwarmConn(INetConn):
             await net_stream.set_state(StreamState.OPEN)
         self.streams.add(net_stream)
         await self.swarm.notify_opened_stream(net_stream)
+        # QUIC can terminate asynchronously, without an application read/reset.
+        # Register after the opened notification so listeners observe lifecycle
+        # events in order. The setter also handles termination during that await.
+        set_close_callback = getattr(type(muxed_stream), "set_close_callback", None)
+        if set_close_callback is not None:
+            await set_close_callback(muxed_stream, net_stream.remove)
         return net_stream
 
     async def _notify_disconnected(self) -> None:
         await self.swarm.notify_disconnected(self)
 
     async def start(self) -> None:
+        if self.event_closed.is_set():
+            return
         streams_open = self.get_streams()
         for stream in streams_open:
             """Set the state of the stream to OPEN."""
@@ -337,7 +405,7 @@ class SwarmConn(INetConn):
 
     async def new_stream(self) -> NetStream:
         muxed_stream = await self.muxed_conn.open_stream()
-        return await self._add_stream(muxed_stream)
+        return await self._add_stream(muxed_stream, Direction.OUTBOUND)
 
     def get_streams(self) -> tuple[NetStream, ...]:
         return tuple(self.streams)

@@ -49,6 +49,7 @@ class MuxerMultistream:
 
     _selector: "GenericMultistreamSelector[TMuxerClass]"
     negotiate_timeout: int
+    last_selected_protocol: str | None
 
     def __init__(
         self,
@@ -57,6 +58,7 @@ class MuxerMultistream:
     ) -> None:
         self._selector = GenericMultistreamSelector()
         self.negotiate_timeout = negotiate_timeout
+        self.last_selected_protocol = None
         for protocol, transport in muxer_transports_by_protocol.items():
             self.add_transport(protocol, transport)
 
@@ -133,6 +135,7 @@ class MuxerMultistream:
         protocol, transport_class = await self._selector.select(
             conn, conn.is_initiator, self.negotiate_timeout
         )
+        self.last_selected_protocol = protocol
         logger.debug("MuxerMultistream new_conn: negotiated protocol %s", protocol)
         if protocol == PROTOCOL_ID:
             async with trio.open_nursery():

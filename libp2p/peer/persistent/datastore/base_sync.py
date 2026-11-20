@@ -86,6 +86,28 @@ class IDatastoreSync(ABC):
         """
         pass
 
+    def query_keys(
+        self, prefix: bytes = b"", limit: int | None = None, random_order: bool = False
+    ) -> Iterator[bytes]:
+        """
+        Query only keys (omitting value blobs) with optional prefix, random
+        ordering, and limit.
+
+        Default implementation wraps query(prefix).
+        """
+        keys: Iterator[bytes] = (k for k, _ in self.query(prefix))
+        if random_order:
+            import random
+
+            keys_list = list(keys)
+            random.shuffle(keys_list)
+            keys = iter(keys_list)
+        if limit is not None:
+            import itertools
+
+            return itertools.islice(keys, limit)
+        return keys
+
     @abstractmethod
     def close(self) -> None:
         """

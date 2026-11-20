@@ -600,6 +600,14 @@ class ResourceManager:
         with self._lock:
             self._protocol_peer_stream_limits[protocol] = max(0, int(max_streams))
 
+    @staticmethod
+    def _decrement_scoped_counter(counts: dict[Any, int], key: Any) -> None:
+        count = counts.get(key, 0)
+        if count <= 1:
+            counts.pop(key, None)
+        else:
+            counts[key] = count - 1
+
     def acquire_scoped_stream(
         self,
         peer_id: str,
@@ -635,8 +643,8 @@ class ResourceManager:
                         self.release_stream(peer_id, direction)
                         # roll back any service total increment
                         if service in self._service_stream_counts:
-                            self._service_stream_counts[service] = max(
-                                0, self._service_stream_counts[service] - 1
+                            self._decrement_scoped_counter(
+                                self._service_stream_counts, service
                             )
                         self._record_blocked_resource(
                             "stream", scope=f"service-peer:{service}"
@@ -656,14 +664,14 @@ class ResourceManager:
                             service is not None
                             and service in self._service_stream_counts
                         ):
-                            self._service_stream_counts[service] = max(
-                                0, self._service_stream_counts[service] - 1
+                            self._decrement_scoped_counter(
+                                self._service_stream_counts, service
                             )
                         if service is not None:
                             key = (service, peer_id)
                             if key in self._service_peer_stream_counts:
-                                self._service_peer_stream_counts[key] = max(
-                                    0, self._service_peer_stream_counts[key] - 1
+                                self._decrement_scoped_counter(
+                                    self._service_peer_stream_counts, key
                                 )
                         self._record_blocked_resource(
                             "stream", scope=f"protocol:{protocol}"
@@ -682,18 +690,18 @@ class ResourceManager:
                             service is not None
                             and service in self._service_stream_counts
                         ):
-                            self._service_stream_counts[service] = max(
-                                0, self._service_stream_counts[service] - 1
+                            self._decrement_scoped_counter(
+                                self._service_stream_counts, service
                             )
                         if service is not None:
                             skey = (service, peer_id)
                             if skey in self._service_peer_stream_counts:
-                                self._service_peer_stream_counts[skey] = max(
-                                    0, self._service_peer_stream_counts[skey] - 1
+                                self._decrement_scoped_counter(
+                                    self._service_peer_stream_counts, skey
                                 )
                         if protocol in self._protocol_stream_counts:
-                            self._protocol_stream_counts[protocol] = max(
-                                0, self._protocol_stream_counts[protocol] - 1
+                            self._decrement_scoped_counter(
+                                self._protocol_stream_counts, protocol
                             )
                         self._record_blocked_resource(
                             "stream", scope=f"protocol-peer:{protocol}"
@@ -714,23 +722,21 @@ class ResourceManager:
             # decrement scoped counters first, then global
             if service is not None:
                 if service in self._service_stream_counts:
-                    self._service_stream_counts[service] = max(
-                        0, self._service_stream_counts[service] - 1
-                    )
+                    self._decrement_scoped_counter(self._service_stream_counts, service)
                 key = (service, peer_id)
                 if key in self._service_peer_stream_counts:
-                    self._service_peer_stream_counts[key] = max(
-                        0, self._service_peer_stream_counts[key] - 1
+                    self._decrement_scoped_counter(
+                        self._service_peer_stream_counts, key
                     )
             if protocol is not None:
                 if protocol in self._protocol_stream_counts:
-                    self._protocol_stream_counts[protocol] = max(
-                        0, self._protocol_stream_counts[protocol] - 1
+                    self._decrement_scoped_counter(
+                        self._protocol_stream_counts, protocol
                     )
                 pkey = (protocol, peer_id)
                 if pkey in self._protocol_peer_stream_counts:
-                    self._protocol_peer_stream_counts[pkey] = max(
-                        0, self._protocol_peer_stream_counts[pkey] - 1
+                    self._decrement_scoped_counter(
+                        self._protocol_peer_stream_counts, pkey
                     )
 
             self.release_stream(peer_id, direction)

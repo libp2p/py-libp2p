@@ -37,5 +37,16 @@ MAX_CONCURRENT_REQUESTS = 100
 # Default wantlist size
 DEFAULT_WANTLIST_SIZE = 256
 
+# Per-peer queue bounds. A peer that stops reading, or that was never
+# reachable in the first place, must not be able to grow these without limit.
+MAX_PENDING_WANTS_PER_PEER = 1024
+MAX_PENDING_BLOCKS_PER_PEER = 256
+MAX_PENDING_BLOCK_BYTES_PER_PEER = 8 * 1024 * 1024
+
+# Maximum inbound wantlist entries retained for a single connected peer.
+# Entries are removed by cancel messages, a full wantlist, or disconnect;
+# this cap protects against a peer that never cancels anything.
+MAX_PEER_WANTLIST_ENTRIES = 4096
+
 # CID version defaults
 DEFAULT_CID_VERSION = 0  # CIDv0 for v1.0.0 compatibility

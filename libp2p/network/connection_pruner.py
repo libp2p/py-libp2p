@@ -291,16 +291,45 @@ class ConnectionPruner:
                 continue
 
             # 1. Skip connections that currently have active multiplexed streams
-            # (never interrupt live traffic)
+            # (never interrupt live traffic). However, connections with only
+            # orphaned streams (no activity for 5+ minutes) can be pruned.
             try:
                 streams = connection.get_streams()
                 if streams and len(streams) > 0:
-                    logger.debug(
-                        "Skipping connection to %s - has %d active streams",
-                        conn_peer_id,
-                        len(streams),
-                    )
-                    continue
+                    # Check if streams are actually active or just orphaned
+                    ORPHANED_THRESHOLD = 300  # 5 minutes
+                    current_time = time.time()
+                    active_streams = 0
+                    for stream in streams:
+                        timeline = getattr(stream, "_timeline", None)
+                        if timeline is not None:
+                            last_activity = getattr(timeline, "last_activity", None)
+                            if last_activity is not None:
+                                age = current_time - last_activity
+                                if age < ORPHANED_THRESHOLD:
+                                    active_streams += 1
+                            else:
+                                # No activity tracking, treat as active
+                                active_streams += 1
+                        else:
+                            # No timeline, treat as active
+                            active_streams += 1
+
+                    if active_streams > 0:
+                        logger.debug(
+                            "Skipping connection to %s - has %d active streams "
+                            "(of %d total)",
+                            conn_peer_id,
+                            active_streams,
+                            len(streams),
+                        )
+                        continue
+                    else:
+                        logger.debug(
+                            "Connection to %s has %d orphaned streams, allowing prune",
+                            conn_peer_id,
+                            len(streams),
+                        )
             except Exception:
                 pass
 

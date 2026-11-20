@@ -218,6 +218,12 @@ class TagStore:
                     value = tag_info.tags.pop(tag)
                     tag_info.value -= value
                     logger.debug(f"Untagged peer {peer_id}, removed {tag}")
+                if (
+                    not tag_info.tags
+                    and not tag_info.conns
+                    and not self._protected.get(peer_id)
+                ):
+                    self._tags.pop(peer_id, None)
 
     def upsert_tag(
         self,
@@ -361,6 +367,9 @@ class TagStore:
                 self._protected[peer_id].discard(tag)
                 if not self._protected[peer_id]:
                     del self._protected[peer_id]
+                    info = self._tags.get(peer_id)
+                    if info is not None and not info.tags and not info.conns:
+                        self._tags.pop(peer_id, None)
                     logger.debug(f"Peer {peer_id} is no longer protected")
                     return False
                 logger.debug(

@@ -1,6 +1,7 @@
 import logging
 import socket
 import time
+from typing import TYPE_CHECKING
 
 from zeroconf import (
     ServiceBrowser,
@@ -10,9 +11,13 @@ from zeroconf import (
 )
 
 from libp2p.abc import IPeerStore, Multiaddr
+from libp2p.discovery.events.events import DiscoveryEvent
 from libp2p.discovery.events.peerDiscovery import peerDiscovery
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
+
+if TYPE_CHECKING:
+    from libp2p.events import EventBus
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +36,7 @@ class PeerListener(ServiceListener):
         ttl: int = 120,
         retry_attempts: int = 3,
         retry_base_delay: float = 1.0,
+        event_bus: "EventBus | None" = None,
     ) -> None:
         self.peerstore = peerstore
         self.zeroconf = zeroconf
@@ -38,6 +44,7 @@ class PeerListener(ServiceListener):
         self.service_name = service_name
         self.ttl = ttl
         self.retry_attempts = retry_attempts
+        self.event_bus = event_bus
         self.retry_base_delay = retry_base_delay
 
         # Track discovered services with timestamps for cleanup
@@ -72,6 +79,13 @@ class PeerListener(ServiceListener):
             self.discovered_services[name] = (peer_info.peer_id, time.time())
             self.peerstore.add_addrs(peer_info.peer_id, peer_info.addrs, self.ttl)
             peerDiscovery.emit_peer_discovered(peer_info)
+            if self.event_bus is not None:
+                event = DiscoveryEvent()
+                event.peer_id = str(peer_info.peer_id)
+                event.peer_discovered = True
+                event.source = "mdns"
+                event.addr_count = len(peer_info.addrs)
+                self.event_bus.emit(event)
             logger.debug(f"Discovered Peer: {peer_info.peer_id}")
 
     def remove_service(self, zc: Zeroconf, type_: str, name: str) -> None:
@@ -84,6 +98,12 @@ class PeerListener(ServiceListener):
         if name in self.discovered_services:
             peer_id, _ = self.discovered_services.pop(name)
             self.peerstore.clear_addrs(peer_id)
+            if self.event_bus is not None:
+                event = DiscoveryEvent()
+                event.peer_id = str(peer_id)
+                event.peer_lost = True
+                event.source = "mdns"
+                self.event_bus.emit(event)
             logger.debug(f"Removed Peer: {peer_id}")
 
         # Also clean from meta query

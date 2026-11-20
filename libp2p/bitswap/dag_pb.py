@@ -385,9 +385,11 @@ def balanced_layout(
     # Each level entry: (cid_bytes, block_bytes, file_data_size, cumulative_block_size)
     # cumulative_block_size = len(this block) + sum(children's cumulative sizes)
     # block_bytes may be None for leaves (memory optimization) — only used
-    # in single-leaf case
+    # in single-leaf case. For raw-leaf blocks (block_bytes is None) the leaf's
+    # own block size equals the raw chunk size (fsize), matching go-ipfs's
+    # balanced.Layout where each link Size is the child block's cumulative size.
     level: list[tuple[bytes, bytes | None, int, int]] = [
-        (cid, blk, fsize, len(blk) if blk is not None else 0)
+        (cid, blk, fsize, len(blk) if blk is not None else fsize)
         for cid, blk, fsize in leaves
     ]
 

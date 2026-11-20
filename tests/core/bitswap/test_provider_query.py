@@ -354,17 +354,20 @@ class TestBitswapClientProviderQueryIntegration:
         pqm = ProviderQueryManager(dht)
         client = self._make_client(mock_host, pqm)
 
-        # Patch _request_block so we can inspect the peer_id it receives
-        captured: dict[str, object] = {}
+        # Track every peer that _send_wantlist_to_peer is called with.
+        # _request_block may also call _broadcast_wantlist on the same iteration
+        # (rebroadcast fires on first pass); use a list rather than a single
+        # captured value so the broadcast can't silently overwrite the send.
+        sends_to_peer: list[object] = []
 
         async def _fake_send(peer: PeerID, cids: list[CIDObject]) -> bool:
-            captured["peer_id"] = peer
+            sends_to_peer.append(peer)
             await client.add_block(cid, block_data)
             return True
 
         async def _fake_broadcast(cids: list[CIDObject]) -> None:
-            captured["peer_id"] = None
-            await client.add_block(cid, block_data)
+            # broadcast is fine — we just don't want it to hide the send
+            pass
 
         client._send_wantlist_to_peer = _fake_send  # type: ignore[assignment]
         client._broadcast_wantlist = _fake_broadcast  # type: ignore[assignment]
@@ -372,7 +375,10 @@ class TestBitswapClientProviderQueryIntegration:
         result = await client.new_session().get_block(cid)
 
         assert result == block_data
-        assert captured["peer_id"] == discovered_peer
+        # The discovered peer must have been targeted via a direct send
+        assert discovered_peer in sends_to_peer, (
+            f"Expected direct send to {discovered_peer}, got sends={sends_to_peer}"
+        )
 
     @pytest.mark.trio
     async def test_get_block_falls_back_to_broadcast_when_no_providers(
@@ -389,15 +395,17 @@ class TestBitswapClientProviderQueryIntegration:
         block_data = b"broadcast block"
         cid = parse_cid(compute_cid_v0(block_data))
 
-        captured: dict[str, object] = {}
+        sends_to_peer: list[object] = []
+        broadcast_called = False
 
         async def _fake_send(peer: PeerID, cids: list[CIDObject]) -> bool:
-            captured["peer_id"] = peer
+            sends_to_peer.append(peer)
             await client.add_block(cid, block_data)
             return True
 
         async def _fake_broadcast(cids: list[CIDObject]) -> None:
-            captured["peer_id"] = None
+            nonlocal broadcast_called
+            broadcast_called = True
             await client.add_block(cid, block_data)
 
         client._send_wantlist_to_peer = _fake_send  # type: ignore[assignment]
@@ -406,7 +414,11 @@ class TestBitswapClientProviderQueryIntegration:
         result = await client.new_session().get_block(cid)
 
         assert result == block_data
-        assert captured["peer_id"] is None  # broadcast
+        # No provider found → no direct send, only broadcast fallback
+        assert len(sends_to_peer) == 0, (
+            f"Expected no direct sends, got {sends_to_peer}"
+        )
+        assert broadcast_called, "Expected broadcast fallback to be called"
 
     @pytest.mark.trio
     async def test_explicit_peer_id_skips_pqm(self, mock_host: Mock) -> None:
@@ -418,16 +430,15 @@ class TestBitswapClientProviderQueryIntegration:
         block_data = b"explicit peer block"
         cid = parse_cid(compute_cid_v0(block_data))
 
-        captured: dict[str, object] = {}
+        sends_to_peer: list[object] = []
 
         async def _fake_send(peer: PeerID, cids: list[CIDObject]) -> bool:
-            captured["peer_id"] = peer
+            sends_to_peer.append(peer)
             await client.add_block(cid, block_data)
             return True
 
         async def _fake_broadcast(cids: list[CIDObject]) -> None:
-            captured["peer_id"] = None
-            await client.add_block(cid, block_data)
+            pass
 
         client._send_wantlist_to_peer = _fake_send  # type: ignore[assignment]
         client._broadcast_wantlist = _fake_broadcast  # type: ignore[assignment]
@@ -436,8 +447,10 @@ class TestBitswapClientProviderQueryIntegration:
 
         # DHT must NOT have been called
         dht.provider_store.get_providers.assert_not_called()
-        # The explicit peer_id must be passed through unchanged
-        assert captured["peer_id"] == PEER_A
+        # The explicit peer_id must be targeted via a direct send
+        assert PEER_A in sends_to_peer, (
+            f"Expected direct send to PEER_A, got {sends_to_peer}"
+        )
 
     @pytest.mark.trio
     async def test_pqm_error_falls_back_gracefully(self, mock_host: Mock) -> None:

@@ -5,6 +5,7 @@ Uses zeroconf for mDNS broadcast/listen. Async operations use trio.
 """
 
 import logging
+from typing import TYPE_CHECKING
 
 import trio
 from zeroconf import (
@@ -25,6 +26,9 @@ from .listener import (
 from .utils import (
     stringGen,
 )
+
+if TYPE_CHECKING:
+    from libp2p.events import EventBus
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +64,7 @@ class MDNSDiscovery:
         retry_base_delay: float = 1.0,
         cleanup_interval: int = 60,
         host: IHost | None = None,
+        event_bus: "EventBus | None" = None,
     ):
         self.peer_id = str(swarm.get_peer_id())
         self.port = port
@@ -74,6 +79,7 @@ class MDNSDiscovery:
         self.service_name = f"{stringGen(63)}.{self.service_type}"
         self.peerstore = swarm.peerstore
         self.swarm = swarm
+        self.event_bus = event_bus
 
         self.broadcaster = PeerBroadcaster(
             zeroconf=self.zeroconf,
@@ -92,6 +98,7 @@ class MDNSDiscovery:
             ttl=self.ttl,
             retry_attempts=self.retry_attempts,
             retry_base_delay=self.retry_base_delay,
+            event_bus=self.event_bus,
         )
 
         self._cleanup_cancel_scope: trio.CancelScope | None = None
@@ -150,6 +157,7 @@ def create_mdns_discovery(
     retry_base_delay: float = 1.0,
     cleanup_interval: int = 60,
     host: IHost | None = None,
+    event_bus: "EventBus | None" = None,
 ) -> MDNSDiscovery:
     """
     Factory function to create MDNSDiscovery with common options.
@@ -164,6 +172,7 @@ def create_mdns_discovery(
         retry_base_delay: Base delay between retries in seconds
         cleanup_interval: Interval between stale entry cleanup runs
         host: The host instance for getting transport addresses
+        event_bus: The host's event bus for emitting discovery metric events
 
     Returns:
         Configured MDNSDiscovery instance
@@ -183,4 +192,5 @@ def create_mdns_discovery(
         retry_base_delay=retry_base_delay,
         cleanup_interval=cleanup_interval,
         host=host,
+        event_bus=event_bus,
     )

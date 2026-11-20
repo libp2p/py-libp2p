@@ -101,6 +101,26 @@ class BaseNoiseMsgReadWriter(EncryptedMsgReadWriter):
             return self.read_writer.read_write_closer.get_remote_address()
         return None
 
+    def get_connection_type(self):
+        # Delegate to the underlying connection if possible
+        if hasattr(self.read_writer, "read_write_closer") and hasattr(
+            self.read_writer.read_write_closer,
+            "get_connection_type",
+        ):
+            return self.read_writer.read_write_closer.get_connection_type()
+        from libp2p.abc import ConnectionType
+
+        return ConnectionType.UNKNOWN
+
+    def get_transport_addresses(self):
+        # Delegate to the underlying connection if possible
+        if hasattr(self.read_writer, "read_write_closer") and hasattr(
+            self.read_writer.read_write_closer,
+            "get_transport_addresses",
+        ):
+            return self.read_writer.read_write_closer.get_transport_addresses()
+        return []
+
 
 class NoiseHandshakeReadWriter(BaseNoiseMsgReadWriter):
     def encrypt(self, data: bytes) -> bytes:

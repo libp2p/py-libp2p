@@ -29,7 +29,6 @@ import trio
 import libp2p
 from libp2p.abc import (
     IHost,
-    IMuxedConn,
     INetConn,
     INetStream,
     INetwork,
@@ -52,6 +51,7 @@ from libp2p.discovery.mdns.mdns import (
     create_mdns_discovery,
 )
 from libp2p.discovery.upnp.upnp import UpnpManager
+from libp2p.events import EventBus
 from libp2p.host.defaults import (
     get_default_protocols,
 )
@@ -77,6 +77,7 @@ from libp2p.identity.identify_push.identify_push import (
 from libp2p.identity.update import (
     update_peerstore_from_identify,
 )
+from libp2p.metrics.identity import IdentityEvent
 from libp2p.peer.id import (
     ID,
 )
@@ -257,6 +258,7 @@ class BasicHost(IHost):
         negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
         resource_manager: ResourceManager | None = None,
         metric_recv_channel: trio.MemoryReceiveChannel[Any] | None = None,
+        event_bus: EventBus | None = None,
         *,
         bootstrap_allow_ipv6: bool = False,
         bootstrap_dns_timeout: float = 10.0,
@@ -304,8 +306,15 @@ class BasicHost(IHost):
             ``announce_addrs`` / ``addrs_factory``.
         """
         self._network = network
+        if not hasattr(self._network, "host"):
+            setattr(self._network, "host", self)
         self._network.set_stream_handler(self._swarm_stream_handler)
         self.peerstore = self._network.peerstore
+
+        # Event bus (INotifee-style listener fan-out). Created unconditionally
+        # — with zero listeners, emit() is a no-op, so it is near-free even
+        # when metrics are disabled.
+        self._event_bus = event_bus if event_bus is not None else EventBus()
 
         # Coordinate negotiate_timeout with transport config if available
         # For QUIC transports, use the config value to ensure consistency
@@ -332,7 +341,9 @@ class BasicHost(IHost):
         self.multiselect_client = MultiselectClient()
         self.mDNS = None
         if enable_mDNS:
-            self.mDNS = create_mdns_discovery(network, host=self)
+            self.mDNS = create_mdns_discovery(
+                network, host=self, event_bus=self._event_bus
+            )
 
         # Initialize bootstrap discovery container. Keep attribute defined so
         # we can avoid hasattr checks elsewhere.
@@ -344,6 +355,7 @@ class BasicHost(IHost):
                 allow_ipv6=bootstrap_allow_ipv6,
                 dns_resolution_timeout=bootstrap_dns_timeout,
                 dns_max_retries=bootstrap_dns_max_retries,
+                event_bus=self._event_bus,
             )
 
         # Address announcement configuration (#1268 / #1311)
@@ -393,6 +405,10 @@ class BasicHost(IHost):
 
         # Metrics
         self.metric_recv_channel = metric_recv_channel
+
+    def get_event_bus(self) -> EventBus:
+        """Return the host's event bus (INotifee-style listener fan-out)."""
+        return self._event_bus
 
     def get_id(self) -> ID:
         """
@@ -938,7 +954,13 @@ class BasicHost(IHost):
                     peer_id,
                 )
 
-        net_stream = await self._network.new_stream(peer_id)
+        try:
+            net_stream = await self._network.new_stream(peer_id)
+        except BaseException:
+            # Admission may time out or be cancelled before a stream exists.
+            if semaphore_acquired and semaphore_to_use is not None:
+                semaphore_to_use.release()
+            raise
 
         # Perform protocol muxing to determine protocol to use
         # Use ConnectionConfig timeout if available (outbound stream negotiation)
@@ -1266,6 +1288,12 @@ class BasicHost(IHost):
             stream = await self.new_stream(peer_id, [IdentifyID])
         except Exception as exc:
             logger.debug("Identify[%s]: failed to open stream: %s", reason, exc)
+            event = IdentityEvent()
+            event.identify = True
+            event.direction = "outbound"
+            event.peer_id = str(peer_id)
+            event.success = False
+            self.get_event_bus().emit(event)
             return
 
         try:
@@ -1279,6 +1307,12 @@ class BasicHost(IHost):
                     data = await stream.read()
             if _id_cs.cancelled_caught:
                 logger.debug("Identify[%s]: read timed out for %s", reason, peer_id)
+                event = IdentityEvent()
+                event.identify = True
+                event.direction = "outbound"
+                event.peer_id = str(peer_id)
+                event.success = False
+                self.get_event_bus().emit(event)
                 try:
                     await stream.reset()
                 except Exception:
@@ -1365,8 +1399,20 @@ class BasicHost(IHost):
                 len(identify_msg.protocols),
                 peer_id,
             )
+            event = IdentityEvent()
+            event.identify = True
+            event.direction = "outbound"
+            event.peer_id = str(peer_id)
+            event.success = True
+            self.get_event_bus().emit(event)
         except Exception as exc:
             logger.debug("Identify[%s]: error reading response: %s", reason, exc)
+            event = IdentityEvent()
+            event.identify = True
+            event.direction = "outbound"
+            event.peer_id = str(peer_id)
+            event.success = False
+            self.get_event_bus().emit(event)
             try:
                 await stream.reset()
             except Exception:
@@ -1549,6 +1595,12 @@ class BasicHost(IHost):
             await net_stream.reset()
             return
         net_stream.set_protocol(protocol)
+        logger.info(
+            "INBOUND_STREAM: peer=%s protocol=%s transport=%s",
+            net_stream.muxed_conn.peer_id,
+            protocol,
+            getattr(net_stream.muxed_conn, "_transport_type", "unknown"),
+        )
         if handler is None:
             logger.debug(
                 "no handler for protocol %s, closing stream from peer %s",
@@ -1601,7 +1653,7 @@ class BasicHost(IHost):
 
     async def upgrade_inbound_connection(
         self, raw_conn: IRawConnection, maddr: multiaddr.Multiaddr
-    ) -> IMuxedConn:
+    ) -> INetConn:
         """
         Upgrade a raw inbound connection using the underlying network.
 

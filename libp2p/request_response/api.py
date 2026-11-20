@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 import logging
+import time
 from typing import Generic, TypeVar, cast
 
 import trio
@@ -12,6 +13,7 @@ from libp2p.custom_types import TProtocol
 from libp2p.host.exceptions import StreamFailure
 from libp2p.io.exceptions import IncompleteReadError, MessageTooLarge
 from libp2p.io.msgio import VarIntLengthMsgReadWriter
+from libp2p.metrics.request_response import RequestResponseEvent
 from libp2p.network.stream.exceptions import StreamEOF, StreamError, StreamReset
 from libp2p.peer.id import ID
 from libp2p.protocol_muxer.exceptions import (
@@ -103,6 +105,22 @@ class RequestResponse:
         self._handlers.pop(protocol_id, None)
         self.host.remove_stream_handler(protocol_id)
 
+    def _emit_request_event(
+        self,
+        protocol_ids: Sequence[TProtocol],
+        direction: str,
+        success: bool,
+        start_time: float | None = None,
+    ) -> None:
+        event = RequestResponseEvent()
+        event.request = True
+        event.protocol = str(protocol_ids[0]) if protocol_ids else "unknown"
+        event.direction = direction
+        event.success = success
+        if start_time is not None:
+            event.duration_ms = (time.monotonic() - start_time) * 1000
+        self.host.get_event_bus().emit(event)
+
     async def send_request(
         self,
         peer_id: ID,
@@ -123,6 +141,7 @@ class RequestResponse:
         )
 
         stream: INetStream | None = None
+        start_time = time.monotonic()
         try:
             with trio.fail_after(effective_config.timeout):
                 stream = await self.host.new_stream(peer_id, protocol_ids)
@@ -135,29 +154,36 @@ class RequestResponse:
                 response = self._decode_response(codec, response_payload)
         except trio.TooSlowError as error:
             await self._safe_reset(stream)
+            self._emit_request_event(protocol_ids, "outbound", False, start_time)
             raise RequestTimeoutError(
                 f"request timed out after {effective_config.timeout} seconds"
             ) from error
         except MessageTooLargeError:
             await self._safe_reset(stream)
+            self._emit_request_event(protocol_ids, "outbound", False, start_time)
             raise
         except StreamFailure as error:
+            self._emit_request_event(protocol_ids, "outbound", False, start_time)
             raise self._map_stream_failure(error) from error
         except RequestResponseError:
             await self._safe_reset(stream)
+            self._emit_request_event(protocol_ids, "outbound", False, start_time)
             raise
         except (IncompleteReadError, StreamEOF, StreamError, StreamReset) as error:
             await self._safe_reset(stream)
+            self._emit_request_event(protocol_ids, "outbound", False, start_time)
             raise RequestTransportError(
                 "request/response exchange failed while reading or writing the stream"
             ) from error
         except Exception as error:
             await self._safe_reset(stream)
+            self._emit_request_event(protocol_ids, "outbound", False, start_time)
             raise RequestTransportError(
                 "request/response exchange failed due to an unexpected transport error"
             ) from error
         else:
             await self._safe_close(stream)
+            self._emit_request_event(protocol_ids, "outbound", True, start_time)
             return response
 
     def _build_stream_handler(
@@ -196,6 +222,7 @@ class RequestResponse:
             peer_id=stream.muxed_conn.peer_id,
             protocol_id=protocol_id,
         )
+        start_time = time.monotonic()
         try:
             with trio.fail_after(registration.config.timeout):
                 request_payload = await self._read_message(
@@ -223,6 +250,7 @@ class RequestResponse:
                 context.peer_id,
             )
             await self._safe_reset(stream)
+            self._emit_request_event([protocol_id], "inbound", False, start_time)
         except RequestResponseError as error:
             logger.warning(
                 "request_response handler rejected protocol %s from peer %s: %s",
@@ -231,6 +259,7 @@ class RequestResponse:
                 error,
             )
             await self._safe_reset(stream)
+            self._emit_request_event([protocol_id], "inbound", False, start_time)
         except (IncompleteReadError, StreamEOF, StreamError, StreamReset) as error:
             logger.warning(
                 "request_response stream error for protocol %s from peer %s: %s",
@@ -239,6 +268,7 @@ class RequestResponse:
                 error,
             )
             await self._safe_reset(stream)
+            self._emit_request_event([protocol_id], "inbound", False, start_time)
         except Exception:
             logger.exception(
                 (
@@ -249,8 +279,10 @@ class RequestResponse:
                 context.peer_id,
             )
             await self._safe_reset(stream)
+            self._emit_request_event([protocol_id], "inbound", False, start_time)
         else:
             await self._safe_close(stream)
+            self._emit_request_event([protocol_id], "inbound", True, start_time)
 
     async def _read_message(self, stream: INetStream, max_msg_size: int) -> bytes:
         reader = VarIntLengthMsgReadWriter(stream, max_msg_size=max_msg_size)

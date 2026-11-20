@@ -317,13 +317,20 @@ MAX_CONCURRENT_VALIDATORS = 10
 
 
 class GossipsubEvent:
-    peer_id: str
+    peer_id: str | None = None
 
+    # Inbound
     publish: bool = False
     subopts: bool = False
     control: bool = False
-
     message_size: int | None = None
+
+    # Outbound / lifecycle
+    publish_out: bool = False
+    subscription_change: bool = False
+    topic: str | None = None
+    action: str | None = None
+    peers_sent: int | None = None
 
 
 class Pubsub(Service, IPubsub):
@@ -509,12 +516,27 @@ class Pubsub(Service, IPubsub):
             await self.manager.wait_finished()
         finally:
             self._clear_subscription_state()
+            self._stop_caches()
 
     def _clear_subscription_state(self) -> None:
         """Release remote subscription tracking state on service shutdown."""
         self.peer_topics.clear()
         self._peer_subscription_count.clear()
         self._replayed_recent_topics.clear()
+
+    def _stop_caches(self) -> None:
+        """
+        Stop the seen-message sweeper and drop cached state on shutdown.
+
+        The sweeper owns a background thread that keeps the cache (and the
+        message IDs in it) alive for the life of the process.  Without this
+        every Pubsub instance ever created leaves a daemon thread plus its
+        cache behind after the host is closed.
+        """
+        self.seen_messages.stop()
+        self.seen_messages.cache.clear()
+        self.validation_cache.cache.clear()
+        self.validation_cache.access_order.clear()
 
     @property
     def my_id(self) -> ID:
@@ -622,8 +644,7 @@ class Pubsub(Service, IPubsub):
                     )
                     await self.router.handle_rpc(rpc_incoming, peer_id)
 
-                if stream.metric_send_channel is not None:
-                    await stream.metric_send_channel.send(event)
+                self.host.get_event_bus().emit(event)
 
         except MessageTooLarge as error:
             logger.warning(
@@ -807,8 +828,15 @@ class Pubsub(Service, IPubsub):
         if peer_id in self.peers:
             return
         event = self._peer_added_events.setdefault(peer_id, trio.Event())
-        with trio.fail_after(timeout):
-            await event.wait()
+        try:
+            with trio.fail_after(timeout):
+                await event.wait()
+        finally:
+            if (
+                event.statistics().tasks_waiting == 0
+                and self._peer_added_events.get(peer_id) is event
+            ):
+                self._peer_added_events.pop(peer_id, None)
 
     async def wait_for_subscription(
         self, peer_id: ID, topic_id: str, timeout: float = 5.0
@@ -840,8 +868,15 @@ class Pubsub(Service, IPubsub):
             return
         key = (peer_id, topic_id)
         event = self._subscription_events.setdefault(key, trio.Event())
-        with trio.fail_after(timeout):
-            await event.wait()
+        try:
+            with trio.fail_after(timeout):
+                await event.wait()
+        finally:
+            if (
+                event.statistics().tasks_waiting == 0
+                and self._subscription_events.get(key) is event
+            ):
+                self._subscription_events.pop(key, None)
 
     async def wait_for_mesh(
         self, peer_id: ID, topic_id: str, timeout: float = 5.0
@@ -1420,6 +1455,14 @@ class Pubsub(Service, IPubsub):
         # Tell router we are joining this topic
         await self.router.join(topic_id)
 
+        # Emit subscription-change metric event
+        event = GossipsubEvent()
+        event.peer_id = self.my_id.pretty()
+        event.subscription_change = True
+        event.topic = topic_id
+        event.action = "subscribe"
+        self.host.get_event_bus().emit(event)
+
         # Return the subscription for messages on this topic
         return subscription
 
@@ -1449,6 +1492,14 @@ class Pubsub(Service, IPubsub):
 
         # Tell router we are leaving this topic
         await self.router.leave(topic_id)
+
+        # Emit subscription-change metric event
+        event = GossipsubEvent()
+        event.peer_id = self.my_id.pretty()
+        event.subscription_change = True
+        event.topic = topic_id
+        event.action = "unsubscribe"
+        self.host.get_event_bus().emit(event)
 
     async def message_all_peers(
         self, raw_msg: bytes, announce: rpc_pb2.RPC.SubOpts | None = None
@@ -1600,6 +1651,15 @@ class Pubsub(Service, IPubsub):
 
         logger.debug("successfully published message %s", msg)
 
+        # Emit publish (outbound) metric event
+        event = GossipsubEvent()
+        event.peer_id = self.my_id.pretty()
+        event.publish_out = True
+        event.topic = ",".join(topic_ids)
+        event.message_size = len(msg.data)
+        event.peers_sent = len(self.peers)
+        self.host.get_event_bus().emit(event)
+
     async def validate_msg(
         self,
         msg_forwarder: ID,
@@ -1732,7 +1792,18 @@ class Pubsub(Service, IPubsub):
         try:
             scorer = getattr(self.router, "scorer", None)
             if scorer is not None:
-                if not scorer.allow_publish(msg_forwarder, list(msg.topicIDs)):
+                # Score only topics we actually subscribe to.  The message
+                # passed the subscription gate because at least one topic
+                # matched, but a peer may attach arbitrary extra topic IDs;
+                # scoring them burns CPU and used to retain scorer state.
+                scoring_topics = [
+                    topic
+                    for topic in msg.topicIDs
+                    if topic in self.subscribed_topics_receive
+                ]
+                if scoring_topics and not scorer.allow_publish(
+                    msg_forwarder, scoring_topics
+                ):
                     logger.debug(
                         "Rejecting message from %s by publish score gate", msg_forwarder
                     )
@@ -1758,7 +1829,8 @@ class Pubsub(Service, IPubsub):
                 scorer = getattr(self.router, "scorer", None)
                 if scorer is not None:
                     for topic in msg.topicIDs:
-                        scorer.on_invalid_message(msg_forwarder, topic)
+                        if topic in self.subscribed_topics_receive:
+                            scorer.on_invalid_message(msg_forwarder, topic)
             except Exception:
                 pass
             logger.debug(
@@ -1778,7 +1850,8 @@ class Pubsub(Service, IPubsub):
             scorer = getattr(self.router, "scorer", None)
             if scorer is not None:
                 for topic in msg.topicIDs:
-                    scorer.on_first_delivery(msg_forwarder, topic)
+                    if topic in self.subscribed_topics_receive:
+                        scorer.on_first_delivery(msg_forwarder, topic)
         except Exception:
             pass
 

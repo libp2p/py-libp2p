@@ -147,6 +147,44 @@ class PeerScorer:
         for peer in list(self.equivocation_penalties.keys()):
             self.equivocation_penalties[peer] *= self.params.p5_behavior_penalty_decay
 
+        # Topic-scoped counters decay toward zero but were otherwise kept
+        # until the peer disconnected.  Long-lived peers can join and leave
+        # many topics over time (the application auto-joins and auto-leaves
+        # topics), so prune entries once their score contribution is
+        # negligible.  This also bounds the cost of each heartbeat scan.
+        self._prune_decayed_state()
+
+    def _prune_decayed_state(self) -> None:
+        """Drop topic and peer counters whose score contribution is negligible."""
+        epsilon = 1e-12
+        for name in (
+            "time_in_mesh",
+            "first_message_deliveries",
+            "mesh_message_deliveries",
+            "invalid_messages",
+        ):
+            metrics = getattr(self, name)
+            for peer in list(metrics):
+                peer_metrics = metrics[peer]
+                for topic, value in list(peer_metrics.items()):
+                    if abs(value) <= epsilon:
+                        del peer_metrics[topic]
+                if not peer_metrics:
+                    del metrics[peer]
+
+        for name in (
+            "behavior_penalty",
+            "app_specific_scores",
+            "graft_flood_penalties",
+            "iwant_spam_penalties",
+            "ihave_spam_penalties",
+            "equivocation_penalties",
+        ):
+            metrics = getattr(self, name)
+            for peer, value in list(metrics.items()):
+                if abs(value) <= epsilon:
+                    del metrics[peer]
+
     def on_join_mesh(self, peer: ID, topic: str) -> None:
         # Start counting time in mesh for the peer
         self.time_in_mesh[peer][topic] += 1.0
@@ -225,12 +263,8 @@ class PeerScorer:
         :param peer: The peer ID
         :param ip_str: The IP address as a string
         """
-        # Remove peer from old IP if it exists
-        if peer in self.ip_by_peer:
-            old_ip = self.ip_by_peer[peer]
-            self.peer_ips[old_ip].discard(peer)
-            if not self.peer_ips[old_ip]:
-                del self.peer_ips[old_ip]
+        # Release both IP and subnet ownership before replacing the address.
+        self.remove_peer_ip(peer)
 
         # Add peer to new IP
         self.peer_ips[ip_str].add(peer)
@@ -302,21 +336,41 @@ class PeerScorer:
             return None
 
     # ---- Scoring ----
+    @staticmethod
+    def _topic_metric(
+        metrics: DefaultDict[ID, DefaultDict[str, float]], peer: ID, topic: str
+    ) -> float:
+        """
+        Read a topic metric without creating a defaultdict entry.
+
+        Scoring runs on topic IDs supplied by remote messages. Indexing a
+        defaultdict here used to retain four entries for every arbitrary topic
+        ID a peer attached to a publish message, even when the gate rejected
+        the message. Lookups must therefore never mutate the maps.
+        """
+        peer_metrics = metrics.get(peer)
+        if peer_metrics is None:
+            return 0.0
+        return peer_metrics.get(topic, 0.0)
+
     def topic_score(self, peer: ID, topic: str) -> float:
         p = self.params
         s = 0.0
         s += p.p1_time_in_mesh.weight * min(
-            self.time_in_mesh[peer][topic], p.p1_time_in_mesh.cap
+            self._topic_metric(self.time_in_mesh, peer, topic),
+            p.p1_time_in_mesh.cap,
         )
         s += p.p2_first_message_deliveries.weight * min(
-            self.first_message_deliveries[peer][topic],
+            self._topic_metric(self.first_message_deliveries, peer, topic),
             p.p2_first_message_deliveries.cap,
         )
         s += p.p3_mesh_message_deliveries.weight * min(
-            self.mesh_message_deliveries[peer][topic], p.p3_mesh_message_deliveries.cap
+            self._topic_metric(self.mesh_message_deliveries, peer, topic),
+            p.p3_mesh_message_deliveries.cap,
         )
         s -= p.p4_invalid_messages.weight * min(
-            self.invalid_messages[peer][topic], p.p4_invalid_messages.cap
+            self._topic_metric(self.invalid_messages, peer, topic),
+            p.p4_invalid_messages.cap,
         )
         return s
 
@@ -368,11 +422,11 @@ class PeerScorer:
 
         # Behavior penalty activates beyond threshold
         total_behavior_penalty = (
-            self.behavior_penalty[peer]
-            + self.graft_flood_penalties[peer]
-            + self.iwant_spam_penalties[peer]
-            + self.ihave_spam_penalties[peer]
-            + self.equivocation_penalties[peer]
+            self.behavior_penalty.get(peer, 0.0)
+            + self.graft_flood_penalties.get(peer, 0.0)
+            + self.iwant_spam_penalties.get(peer, 0.0)
+            + self.ihave_spam_penalties.get(peer, 0.0)
+            + self.equivocation_penalties.get(peer, 0.0)
         )
 
         if total_behavior_penalty > self.params.p5_behavior_penalty_threshold:
@@ -383,7 +437,10 @@ class PeerScorer:
         # P6: Application-specific scoring
         if self.params.app_specific_score_fn is not None:
             self.update_app_specific_score(peer)
-            score += self.app_specific_scores[peer] * self.params.p6_appl_slack_weight
+            score += (
+                self.app_specific_scores.get(peer, 0.0)
+                * self.params.p6_appl_slack_weight
+            )
 
         # P7: IP colocation penalty
         ip_penalty = self.ip_colocation_penalty(peer)
@@ -412,10 +469,10 @@ class PeerScorer:
             topic_score = self.topic_score(peer, topic)
 
             # Apply behavior penalty if applicable
-            if self.behavior_penalty[peer] > self.params.p5_behavior_penalty_threshold:
+            behavior_penalty = self.behavior_penalty.get(peer, 0.0)
+            if behavior_penalty > self.params.p5_behavior_penalty_threshold:
                 topic_score -= (
-                    self.behavior_penalty[peer]
-                    - self.params.p5_behavior_penalty_threshold
+                    behavior_penalty - self.params.p5_behavior_penalty_threshold
                 ) * self.params.p5_behavior_penalty_weight
 
             # Check against the threshold
@@ -444,10 +501,10 @@ class PeerScorer:
             topic_score = self.topic_score(peer, topic)
 
             # Apply behavior penalty if applicable
-            if self.behavior_penalty[peer] > self.params.p5_behavior_penalty_threshold:
+            behavior_penalty = self.behavior_penalty.get(peer, 0.0)
+            if behavior_penalty > self.params.p5_behavior_penalty_threshold:
                 topic_score -= (
-                    self.behavior_penalty[peer]
-                    - self.params.p5_behavior_penalty_threshold
+                    behavior_penalty - self.params.p5_behavior_penalty_threshold
                 ) * self.params.p5_behavior_penalty_weight
 
             # Check against the threshold
@@ -496,16 +553,20 @@ class PeerScorer:
         :return: Dictionary containing all score components and total score
         """
         return {
-            "time_in_mesh": self.time_in_mesh[peer][topic],
-            "first_deliveries": self.first_message_deliveries[peer][topic],
-            "mesh_deliveries": self.mesh_message_deliveries[peer][topic],
-            "invalid_messages": self.invalid_messages[peer][topic],
-            "behavior_penalty": self.behavior_penalty[peer],
-            "graft_flood_penalty": self.graft_flood_penalties[peer],
-            "iwant_spam_penalty": self.iwant_spam_penalties[peer],
-            "ihave_spam_penalty": self.ihave_spam_penalties[peer],
-            "equivocation_penalty": self.equivocation_penalties[peer],
-            "app_specific_score": self.app_specific_scores[peer],
+            "time_in_mesh": self._topic_metric(self.time_in_mesh, peer, topic),
+            "first_deliveries": self._topic_metric(
+                self.first_message_deliveries, peer, topic
+            ),
+            "mesh_deliveries": self._topic_metric(
+                self.mesh_message_deliveries, peer, topic
+            ),
+            "invalid_messages": self._topic_metric(self.invalid_messages, peer, topic),
+            "behavior_penalty": self.behavior_penalty.get(peer, 0.0),
+            "graft_flood_penalty": self.graft_flood_penalties.get(peer, 0.0),
+            "iwant_spam_penalty": self.iwant_spam_penalties.get(peer, 0.0),
+            "ihave_spam_penalty": self.ihave_spam_penalties.get(peer, 0.0),
+            "equivocation_penalty": self.equivocation_penalties.get(peer, 0.0),
+            "app_specific_score": self.app_specific_scores.get(peer, 0.0),
             "ip_colocation_penalty": self.ip_colocation_penalty(peer),
             "peer_ip": self.ip_by_peer.get(peer, "unknown"),
             "total_score": self.score(peer, [topic]),

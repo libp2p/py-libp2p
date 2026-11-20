@@ -179,3 +179,30 @@ async def test_prefer_circuit_addr_on_relayed_connection():
 
     host.get_network.return_value.connections = {}
     assert _prefer_circuit_addr(host, peer_id, fallback) == fallback
+
+
+@pytest.mark.trio
+async def test_identify_reply_does_not_wait_for_requester_data(security_protocol):
+    """
+    The responder must reply immediately: the requester never writes.
+
+    Regression test for an inbound handler that read from the stream before
+    replying.  No data ever arrives, so every exchange blocked for the full
+    5 s read timeout, pinning one stream and handler task per pending
+    identify (and delaying all peerstore updates).
+    """
+    async with host_pair_factory(security_protocol=security_protocol) as (
+        host_a,
+        host_b,
+    ):
+        await wait_for_host_addrs(host_a)
+        stream = await host_b.new_stream(host_a.get_id(), (ID,))
+        try:
+            start = trio.current_time()
+            response = await stream.read()
+            elapsed = trio.current_time() - start
+        finally:
+            await stream.close()
+
+        assert response
+        assert elapsed < 2.0, f"identify reply took {elapsed:.2f}s"

@@ -51,8 +51,11 @@ class SecurityMultistream(ABC):
 
     _selector: "GenericMultistreamSelector[ISecureTransport]"
 
+    last_selected_protocol: TProtocol | None
+
     def __init__(self, secure_transports_by_protocol: TSecurityOptions) -> None:
         self._selector = GenericMultistreamSelector()
+        self.last_selected_protocol = None
 
         for protocol, transport in secure_transports_by_protocol.items():
             self.add_transport(protocol, transport)
@@ -135,5 +138,13 @@ class SecurityMultistream(ABC):
         :param is_initiator: true if we are the initiator, false otherwise
         :return: selected secure transport
         """
-        _, transport = await self.select_transport_and_protocol(conn, is_initiator)
+        try:
+            protocol, transport = await self.select_transport_and_protocol(
+                conn, is_initiator
+            )
+        except (MultiselectError, MultiselectClientError):
+            self.last_selected_protocol = None
+            raise
+        # Keep the fork's negotiated-protocol tracking (used by metrics).
+        self.last_selected_protocol = protocol
         return transport

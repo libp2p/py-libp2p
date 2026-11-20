@@ -252,7 +252,11 @@ class RelayDiscovery(Service):
 
             if not callable(proto_getter):
                 return None
-            if peer_id not in peerstore.peer_ids():
+            has_peer = getattr(peerstore, "has_peer", None)
+            if callable(has_peer):
+                if not has_peer(peer_id):
+                    return None
+            elif peer_id not in peerstore.peer_ids():
                 return None
             try:
                 # Try to get protocols

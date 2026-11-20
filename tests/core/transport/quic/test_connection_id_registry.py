@@ -935,3 +935,108 @@ async def test_reset_stats(registry, mock_connection):
         stats_after["established_connections"]
         == stats_before["established_connections"]
     )
+
+
+@pytest.mark.trio
+async def test_linked_initial_dcid_eviction_and_purge(
+    registry, mock_pending_connection
+):
+    """Test evicting pending connection purges linked initial DCID and buffers."""
+    host_cid = b"host_cid_1"
+    init_dcid = b"init_dcid_1"
+    addr = ("127.0.0.1", 12345)
+
+    mock_pending_connection._events = [1, 2, 3]
+    mock_pending_connection._streams = {1: Mock()}
+
+    await registry.register_pending(
+        host_cid, mock_pending_connection, addr, sequence=0, initial_dcid=init_dcid
+    )
+    await registry.register_initial_connection_id(
+        init_dcid, mock_pending_connection, addr, sequence=0, host_cid=host_cid
+    )
+
+    # Both CIDs should route to mock_pending_connection
+    _, p1, is_p1 = await registry.find_by_connection_id(host_cid)
+    assert is_p1 and p1 is mock_pending_connection
+
+    _, p2, is_p2 = await registry.find_by_connection_id(init_dcid, is_initial=True)
+    assert is_p2 and p2 is mock_pending_connection
+
+    # Removing pending connection should clean up initial connection id as well
+    await registry.remove_pending_connection(host_cid)
+    _, p1_after, _ = await registry.find_by_connection_id(host_cid)
+    assert p1_after is None
+    _, p2_after, _ = await registry.find_by_connection_id(init_dcid, is_initial=True)
+    assert p2_after is None
+
+    # Buffers should be cleared
+    assert len(mock_pending_connection._events) == 0
+    assert len(mock_pending_connection._streams) == 0
+
+
+@pytest.mark.trio
+async def test_cleanup_stale_pending_purges_both_cids(
+    registry, mock_pending_connection
+):
+    """Test cleanup_stale_pending cleans both host CID and initial DCID."""
+    host_cid = b"host_cid_stale"
+    init_dcid = b"init_dcid_stale"
+    addr = ("127.0.0.1", 12345)
+
+    mock_pending_connection._events = [1, 2]
+
+    await registry.register_pending(
+        host_cid, mock_pending_connection, addr, sequence=0, initial_dcid=init_dcid
+    )
+    await registry.register_initial_connection_id(
+        init_dcid, mock_pending_connection, addr, sequence=0, host_cid=host_cid
+    )
+
+    # Set creation time to 20 seconds ago
+    registry._pending_created_at[host_cid] -= 20.0
+    registry._pending_created_at[init_dcid] -= 20.0
+
+    stale_cids = await registry.cleanup_stale_pending(max_age=15.0)
+    assert host_cid in stale_cids
+    assert init_dcid in stale_cids
+
+    assert len(mock_pending_connection._events) == 0
+    assert len(await registry.get_all_pending_cids()) == 0
+    assert len(await registry.get_all_initial_cids()) == 0
+
+
+@pytest.mark.trio
+async def test_unregister_pending_connection_clears_every_mapping(
+    registry, mock_connection, mock_pending_connection
+):
+    """
+    Ending a handshaking connection must purge all of its registry state.
+
+    Such a connection has no promoted CID yet, so it is invisible to the
+    connection-keyed cleanup. Its initial-CID link pair, address mapping and
+    sequence counter would otherwise stay in the registry for the lifetime of
+    the listener, growing with every aborted handshake.
+    """
+    host_cid = b"host_cid_pending"
+    initial_dcid = b"initial_dcid_pending"
+    addr = ("127.0.0.1", 41234)
+
+    await registry.register_pending(
+        host_cid, mock_pending_connection, addr, sequence=0, initial_dcid=initial_dcid
+    )
+    await registry.register_initial_connection_id(
+        initial_dcid, mock_pending_connection, addr, sequence=0, host_cid=host_cid
+    )
+    mock_connection._quic = mock_pending_connection
+
+    await registry.unregister_connection_object(mock_connection)
+
+    assert len(await registry.get_all_pending_cids()) == 0
+    assert len(await registry.get_all_initial_cids()) == 0
+    assert not registry._host_cid_to_initial_dcid
+    assert not registry._initial_dcid_to_host_cid
+    assert addr not in registry._addr_to_connection_id
+    assert not registry._connection_id_to_addr
+    assert not registry._connection_id_sequences
+    assert not registry._connection_sequence_counters

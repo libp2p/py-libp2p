@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import (
     Sequence,
 )
+from typing import TYPE_CHECKING
 
 import multiaddr
 
@@ -21,6 +22,9 @@ from libp2p.peer.peerinfo import (
     PeerInfo,
 )
 from libp2p.rcmgr import ResourceManager
+
+if TYPE_CHECKING:
+    from libp2p.events import EventBus
 
 
 # RoutedHost is a p2p Host that includes a routing system.
@@ -42,6 +46,7 @@ class RoutedHost(BasicHost):
         enable_upnp: bool = False,
         bootstrap: list[str] | None = None,
         resource_manager: ResourceManager | None = None,
+        event_bus: EventBus | None = None,
         *,
         bootstrap_allow_ipv6: bool = False,
         bootstrap_dns_timeout: float = 10.0,
@@ -76,6 +81,7 @@ class RoutedHost(BasicHost):
             enable_upnp=enable_upnp,
             bootstrap=bootstrap,
             resource_manager=resource_manager,
+            event_bus=event_bus,
             bootstrap_allow_ipv6=bootstrap_allow_ipv6,
             bootstrap_dns_timeout=bootstrap_dns_timeout,
             bootstrap_dns_max_retries=bootstrap_dns_max_retries,

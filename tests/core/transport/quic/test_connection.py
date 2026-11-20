@@ -4,10 +4,13 @@ Tests all new features including advanced stream management, resource management
 error handling, and concurrent operations.
 """
 
+import logging
+import time
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-from aioquic.quic.events import ConnectionIdIssued
+from aioquic.quic.events import ConnectionIdIssued, StreamDataReceived
 from multiaddr.multiaddr import Multiaddr
 import trio
 
@@ -46,6 +49,7 @@ class TestQUICConnection:
     def mock_quic_connection(self):
         """Create mock aioquic QuicConnection."""
         mock = Mock()
+        mock._remote_max_streams_bidi = 100
         mock.next_event.return_value = None
         mock.datagrams_to_send.return_value = []
         mock.get_timer.return_value = None
@@ -754,3 +758,339 @@ async def test_connection_id_issued_notifies_listener():
     # Verify listener was notified and registered the new CID
     conn_found, _, _ = await mock_listener._registry.find_by_connection_id(new_cid)
     assert conn_found is conn
+
+
+def test_abandon_quic_stream_stops_and_resets_an_unwrapped_stream() -> None:
+    """
+    A stream without a wrapper must be released explicitly.
+
+    aioquic only discards a stream once both halves finish, and the send half
+    finishes only when its FIN or RESET is acknowledged. Ignored events (late
+    FIN, duplicate reset, refused inbound stream) create exactly that state, so
+    the abandoned stream has to be stopped and reset or it stays in
+    ``_quic._streams`` for the lifetime of the connection.
+    """
+    calls: list[tuple[str, int, int]] = []
+    quic = Mock()
+    quic._streams = {4: Mock()}
+    quic.stop_stream.side_effect = lambda sid, code: calls.append(("stop", sid, code))
+    quic.reset_stream.side_effect = lambda sid, code: calls.append(("reset", sid, code))
+    conn = Mock(spec=QUICConnection)
+    conn._quic = quic
+
+    QUICConnection._abandon_quic_stream(conn, 4)
+
+    assert calls == [("stop", 4, 0), ("reset", 4, 0)]
+
+
+def test_abandon_quic_stream_is_a_noop_once_aioquic_discarded_it() -> None:
+    """No frames are queued for a stream aioquic no longer tracks."""
+    quic = Mock()
+    quic._streams = {}
+    conn = Mock(spec=QUICConnection)
+    conn._quic = quic
+
+    QUICConnection._abandon_quic_stream(conn, 4)
+
+    quic.stop_stream.assert_not_called()
+    quic.reset_stream.assert_not_called()
+
+
+def test_abandon_quic_stream_survives_unidirectional_streams() -> None:
+    """Peer-initiated unidirectional streams cannot be reset; still stop them."""
+    quic = Mock()
+    quic._streams = {3: Mock()}
+    quic.reset_stream.side_effect = ValueError("cannot reset")
+    conn = Mock(spec=QUICConnection)
+    conn._quic = quic
+
+    QUICConnection._abandon_quic_stream(conn, 3)
+
+    quic.stop_stream.assert_called_once_with(3, 0)
+    quic.reset_stream.assert_called_once_with(3, 0)
+
+
+def _unfinished_quic_stream(**sender_fields: object) -> SimpleNamespace:
+    defaults: dict[str, object] = {
+        "is_finished": False,
+        "_buffer_fin": None,
+        "_reset_error_code": None,
+    }
+    defaults.update(sender_fields)
+    sender = SimpleNamespace(**defaults)
+    receiver = SimpleNamespace(is_finished=False)
+    return SimpleNamespace(sender=sender, receiver=receiver, is_finished=False)
+
+
+def test_remove_stream_finishes_a_stream_whose_send_half_was_never_closed() -> None:
+    """
+    A wrapper can disappear before its QUIC send half was FINed or reset.
+
+    aioquic only discards a stream once both halves finish, so removing the
+    wrapper without closing that half leaks the stream for the lifetime of the
+    connection (the dominant leak shape on the production node: 143k streams
+    with no FIN, no reset and no pending frame).
+    """
+    quic_stream = _unfinished_quic_stream()
+    quic = Mock()
+    quic._streams = {4: quic_stream}
+    quic._streams_queue = []
+    conn = Mock(spec=QUICConnection)
+    conn._quic = quic
+    conn._abandoned_streams = {}
+
+    QUICConnection._release_unfinished_quic_stream(conn, 4)
+
+    quic.send_stream_data.assert_called_once_with(4, b"", end_stream=True)
+    quic.stop_stream.assert_called_once_with(4, 0)
+    assert quic._streams_queue == [quic_stream]
+    assert 4 in conn._abandoned_streams
+
+
+def test_remove_stream_does_not_fin_a_stream_that_was_already_reset() -> None:
+    """A reset send half is already terminal; only the receive half is stopped."""
+    quic_stream = _unfinished_quic_stream(_reset_error_code=0)
+    quic = Mock()
+    quic._streams = {4: quic_stream}
+    quic._streams_queue = []
+    conn = Mock(spec=QUICConnection)
+    conn._quic = quic
+    conn._abandoned_streams = {}
+
+    QUICConnection._release_unfinished_quic_stream(conn, 4)
+
+    quic.send_stream_data.assert_not_called()
+    quic.stop_stream.assert_called_once_with(4, 0)
+
+
+@pytest.mark.trio
+async def test_cleanup_abandoned_quic_streams_discards_stale_streams() -> None:
+    """A stream no peer ever answered is handed to aioquic's discard path."""
+    quic_stream = _unfinished_quic_stream()
+    quic = Mock()
+    quic._streams = {8: quic_stream}
+    quic._streams_queue = []
+    conn = Mock(spec=QUICConnection)
+    conn._quic = quic
+    conn._streams = {}
+    conn._abandoned_streams = {8: time.monotonic() - 300.0}
+    conn._remote_peer_id = "peer"
+
+    await QUICConnection._cleanup_abandoned_quic_streams(conn)
+
+    assert quic_stream.sender.is_finished is True
+    assert quic_stream.receiver.is_finished is True
+    assert quic._streams_queue == [quic_stream]
+    assert conn._abandoned_streams == {}
+
+
+@pytest.mark.trio
+async def test_cleanup_abandoned_quic_streams_waits_for_the_grace_period() -> None:
+    """A just-closed stream still has time to be answered by a healthy peer."""
+    quic_stream = _unfinished_quic_stream()
+    quic = Mock()
+    quic._streams = {8: quic_stream}
+    quic._streams_queue = []
+    conn = Mock(spec=QUICConnection)
+    conn._quic = quic
+    conn._streams = {}
+    conn._abandoned_streams = {8: time.monotonic()}
+    conn._remote_peer_id = "peer"
+
+    await QUICConnection._cleanup_abandoned_quic_streams(conn)
+
+    assert quic_stream.sender.is_finished is False
+    assert quic_stream.receiver.is_finished is False
+    assert 8 in conn._abandoned_streams
+
+
+class _BlockedStream:
+    """A blocked-direction entry with aioquic's derived ``is_finished``."""
+
+    def __init__(self, stream_id: int, finished: bool = False) -> None:
+        self.stream_id = stream_id
+        self.sender = SimpleNamespace(is_finished=finished)
+        self.receiver = SimpleNamespace(is_finished=finished)
+
+    @property
+    def is_finished(self) -> bool:
+        return self.sender.is_finished and self.receiver.is_finished
+
+
+def _blocked_quic(streams: dict, blocked_bidi: list, blocked_uni: list):
+    quic = Mock()
+    quic._streams = streams
+    quic._streams_queue = []
+    quic._streams_blocked_bidi = blocked_bidi
+    quic._streams_blocked_uni = blocked_uni
+    return quic
+
+
+def _blocked_conn(quic, streams: dict, abandoned: dict):
+    """A stand-in for QUICConnection whose helper methods really run."""
+    conn = Mock(spec=QUICConnection)
+    conn._quic = quic
+    conn._streams = streams
+    conn._abandoned_streams = abandoned
+    conn._remote_peer_id = "peer"
+    conn._prune_finished_blocked_streams = lambda: (
+        QUICConnection._prune_finished_blocked_streams(conn)
+    )
+    return conn
+
+
+@pytest.mark.trio
+async def test_cleanup_prunes_finished_blocked_streams_and_keeps_live_ones() -> None:
+    """
+    Aioquic leaves finished streams in the blocked-direction lists.
+
+    ``_unblock_streams`` only edits those lists when the peer grants credit, so
+    a connection whose credit never advances keeps every timed-out attempt for
+    its whole life. Pruning must drop exactly the terminal entries and keep the
+    live ones, in order, for a legitimate credit wait.
+    """
+    finished = _BlockedStream(4, finished=True)
+    live = _BlockedStream(8)
+    quic = _blocked_quic({8: live}, [finished, live], [_BlockedStream(2, True)])
+    conn = _blocked_conn(quic, {}, {})
+
+    await QUICConnection._cleanup_abandoned_quic_streams(conn)
+
+    assert quic._streams_blocked_bidi == [live]
+    assert quic._streams_blocked_uni == []
+
+
+@pytest.mark.trio
+async def test_cleanup_prunes_blocked_streams_when_native_registry_is_empty() -> None:
+    """The blocked lists must be pruned even with no native stream left."""
+    quic = _blocked_quic({}, [_BlockedStream(4, True)], [])
+    conn = _blocked_conn(quic, {}, {})
+
+    await QUICConnection._cleanup_abandoned_quic_streams(conn)
+
+    assert quic._streams_blocked_bidi == []
+
+
+@pytest.mark.trio
+async def test_cleanup_releases_an_abandoned_stream_from_the_blocked_list() -> None:
+    """Discarding an abandoned stream must also release its blocked entry."""
+    quic_stream = _BlockedStream(8)
+    quic = _blocked_quic({8: quic_stream}, [quic_stream], [])
+    conn = _blocked_conn(quic, {}, {8: time.monotonic() - 300.0})
+
+    await QUICConnection._cleanup_abandoned_quic_streams(conn)
+
+    assert quic_stream.is_finished is True
+    assert quic._streams_blocked_bidi == []
+
+
+@pytest.mark.trio
+async def test_connection_termination_survives_removed_on_close_hook(caplog) -> None:
+    """
+    SwarmConnection deletes ``on_close`` when it tears itself down.
+
+    A late ConnectionTerminated event then hit the attribute directly and
+    logged ERROR ('QUICConnection' object has no attribute 'on_close') instead
+    of finishing cleanup. Teardown must treat a missing hook as "no hook".
+    """
+    conn = Mock(spec=QUICConnection)
+    conn._streams = {}
+    conn._stream_cache = {}
+    conn._abandoned_streams = {}
+    conn._closed_event = trio.Event()
+    conn._stream_accept_event = trio.Event()
+    conn._socket = None
+    conn._owns_socket = False
+    conn._task_cancel_scopes = []
+    conn._cancel_scope = None
+    conn._notify_parent_of_termination = AsyncMock()
+    del conn.on_close
+
+    with caplog.at_level(logging.ERROR):
+        await QUICConnection._handle_connection_terminated(
+            conn, SimpleNamespace(reason_phrase="done", error_code=0)
+        )
+
+    assert conn._closed is True
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
+
+
+@pytest.mark.trio
+async def test_transmit_returns_quietly_once_teardown_cleared_quic() -> None:
+    """
+    Teardown nulls ``_quic`` while transmit-capable tasks may still run.
+
+    Regression: ``_transmit()`` only checked the socket, so it raised
+    ``AttributeError: 'NoneType' object has no attribute 'datagrams_to_send'``,
+    which the caller reported as a connection error (582 times in 55 minutes
+    on the production node) and which skipped sending the closing packets.
+    """
+    conn = Mock(spec=QUICConnection)
+    conn._socket = Mock()
+    conn._quic = None
+
+    await QUICConnection._transmit(conn)
+
+    conn._handle_connection_error.assert_not_called()
+
+
+@pytest.mark.trio
+async def test_handle_connection_error_ignores_error_after_close(caplog) -> None:
+    """A task racing close() must not log ERROR or try to close again."""
+    conn = Mock(spec=QUICConnection)
+    conn._closed = True
+    conn.close = AsyncMock()
+
+    with caplog.at_level(logging.ERROR):
+        await QUICConnection._handle_connection_error(conn, RuntimeError("boom"))
+
+    conn.close.assert_not_awaited()
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
+
+
+@pytest.mark.trio
+async def test_handle_connection_error_still_closes_an_open_connection(caplog) -> None:
+    """Real connection errors must keep logging and tearing the connection down."""
+    conn = Mock(spec=QUICConnection)
+    conn._closed = False
+    conn.close = AsyncMock()
+
+    with caplog.at_level(logging.ERROR):
+        await QUICConnection._handle_connection_error(conn, RuntimeError("boom"))
+
+    conn.close.assert_awaited_once()
+    assert any(r.levelno >= logging.ERROR for r in caplog.records)
+
+
+@pytest.mark.trio
+async def test_refused_inbound_stream_is_released_in_aioquic() -> None:
+    """
+    Refusing an inbound stream at the limit must release it in aioquic.
+
+    The peer keeps its side open, so resetting only our send half leaves the
+    receive half unfinished and aioquic can never discard the stream. It has no
+    wrapper either, so nothing else will ever close it.
+    """
+    mock_quic = Mock()
+    mock_quic._streams = {0: Mock()}
+    mock_quic.configuration = Mock(is_client=False)
+    peer_id = ID.from_pubkey(create_new_key_pair().private_key.get_public_key())
+    server = QUICConnection(
+        quic_connection=mock_quic,
+        remote_addr=("127.0.0.1", 4001),
+        remote_peer_id=peer_id,
+        local_peer_id=peer_id,
+        is_initiator=False,
+        maddr=Multiaddr("/ip4/127.0.0.1/udp/4001/quic"),
+        transport=Mock(_config=QUICTransportConfig()),
+    )
+    server._started = True
+    server._inbound_stream_count = server.MAX_INCOMING_STREAMS
+
+    await server._handle_stream_data_batch(
+        [StreamDataReceived(data=b"request", end_stream=False, stream_id=0)]
+    )
+
+    assert 0 not in server._streams
+    mock_quic.stop_stream.assert_called_once_with(0, 0)
+    mock_quic.reset_stream.assert_called_once_with(0, 0)

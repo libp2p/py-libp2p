@@ -64,11 +64,22 @@ class DummyNetStream:
 StreamHandler = Callable[[DummyNetStream], Awaitable[None]]
 
 
+class _DummyEventBus:
+    """No-op event bus stub so DummyHost absorbs get_event_bus().emit() calls."""
+
+    def emit(self, event: object) -> None:  # noqa: ARG002
+        pass
+
+
 class DummyHost:
     def __init__(self, stream: DummyNetStream | Exception | None = None) -> None:
         self.stream = stream
         self.handlers: dict[TProtocol, StreamHandler] = {}
         self.new_stream_calls: list[tuple[object, tuple[TProtocol, ...]]] = []
+        self._event_bus = _DummyEventBus()
+
+    def get_event_bus(self) -> _DummyEventBus:
+        return self._event_bus
 
     async def new_stream(
         self, peer_id: object, protocol_ids: list[TProtocol] | tuple[TProtocol, ...]

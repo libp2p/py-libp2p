@@ -28,6 +28,7 @@ from libp2p.custom_types import (
     THandler,
 )
 from libp2p.kad_dht.kad_dht import DHTMode, KadDHT
+from libp2p.metrics.relay import RelayEvent
 from libp2p.network.connection.raw_connection import (
     RawConnection,
 )
@@ -345,6 +346,11 @@ class CircuitV2Transport(ITransport):
                     )
                     # Record circuit opened
                     self.performance_tracker.record_circuit_opened(relay_peer_id)
+                    hop_event = RelayEvent()
+                    hop_event.hop_connect = True
+                    hop_event.side = "client"
+                    hop_event.success = True
+                    self.host.get_event_bus().emit(hop_event)
                     # Store multiaddrs for future use
                     self._store_multiaddrs(dest_info, relay_peer_id)
                     # conn is already a TrackedRawConnection from _dial_via_circuit_addr
@@ -352,6 +358,11 @@ class CircuitV2Transport(ITransport):
                 logger.debug("Dial via %s returned None", ma)
             except Exception as e:
                 logger.debug("Stored circuit addr failed (%s): %s", ma, e)
+                hop_event = RelayEvent()
+                hop_event.hop_connect = True
+                hop_event.side = "client"
+                hop_event.success = False
+                self.host.get_event_bus().emit(hop_event)
                 # Record failure in performance tracker
                 try:
                     relay_peer_id = self._extract_relay_id_from_ma(ma)
@@ -458,6 +469,12 @@ class CircuitV2Transport(ITransport):
             # Record circuit opened
             self.performance_tracker.record_circuit_opened(relay_peer_id)
 
+            hop_event = RelayEvent()
+            hop_event.hop_connect = True
+            hop_event.side = "client"
+            hop_event.success = True
+            self.host.get_event_bus().emit(hop_event)
+
             # Store multiaddrs for future use
             self._store_multiaddrs(dest_info, relay_peer_id)
 
@@ -486,6 +503,11 @@ class CircuitV2Transport(ITransport):
                 latency_ms=latency_ms,
                 success=False,
             )
+            hop_event = RelayEvent()
+            hop_event.hop_connect = True
+            hop_event.side = "client"
+            hop_event.success = False
+            self.host.get_event_bus().emit(hop_event)
             await relay_stream.close()
             raise ConnectionError(f"Failed to establish relay connection: {str(e)}")
 
@@ -862,6 +884,12 @@ class CircuitV2Transport(ITransport):
                     relay_peer_id,
                     status_code,
                 )
+                reserve_event = RelayEvent()
+                reserve_event.reservation = True
+                reserve_event.side = "client"
+                reserve_event.action = "failed"
+                reserve_event.peer_id = str(relay_peer_id)
+                self.host.get_event_bus().emit(reserve_event)
                 return False
 
             self._reservations[relay_peer_id] = expires
@@ -874,10 +902,22 @@ class CircuitV2Transport(ITransport):
             ttl = max(0, expires - int(time.time()))
             logger.info("Reserved peer %s (ttl=%ss)", relay_peer_id, ttl)
 
+            reserve_event = RelayEvent()
+            reserve_event.reservation = True
+            reserve_event.side = "client"
+            reserve_event.action = "granted"
+            reserve_event.peer_id = str(relay_peer_id)
+            self.host.get_event_bus().emit(reserve_event)
+
             return True
 
         except Exception as e:
             logger.error("Error making reservation: %s", str(e))
+            reserve_event = RelayEvent()
+            reserve_event.reservation = True
+            reserve_event.side = "client"
+            reserve_event.action = "failed"
+            self.host.get_event_bus().emit(reserve_event)
             return False
 
     async def _refresh_reservations_worker(self) -> None:
@@ -895,6 +935,12 @@ class CircuitV2Transport(ITransport):
                 # Remove expired reservations
                 for relay_peer_id in expired:
                     logger.info("Reservation expired for peer %s", relay_peer_id)
+                    expire_event = RelayEvent()
+                    expire_event.reservation = True
+                    expire_event.side = "client"
+                    expire_event.action = "expired"
+                    expire_event.peer_id = str(relay_peer_id)
+                    self.host.get_event_bus().emit(expire_event)
                     del self._reservations[relay_peer_id]
                     self._reservation_proofs.pop(relay_peer_id, None)
 

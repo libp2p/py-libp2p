@@ -41,6 +41,7 @@ from libp2p.custom_types import (
     TProtocol,
     ValidatorFn,
 )
+from libp2p.events.bus import EventBus
 from libp2p.io.abc import (
     Closer,
     ReadWriteCloser,
@@ -2363,6 +2364,22 @@ class IHost(ABC):
     def get_metrics_recv_channel(self) -> trio.MemoryReceiveChannel[Any] | None:
         """
         Returns the recving end of the channel, used for metric events
+        """
+
+    @abstractmethod
+    def get_event_bus(self) -> "EventBus":
+        """
+        Return the host's event bus (INotifee-style listener fan-out).
+
+        Modules emit typed events on the bus whenever something happens;
+        any number of listeners can register to be notified (the Prometheus
+        metrics exporter being one).
+
+        Returns
+        -------
+        EventBus
+            The host's event bus instance.
+
         """
 
     @abstractmethod
