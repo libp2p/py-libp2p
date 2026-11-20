@@ -3,6 +3,90 @@ Release Notes
 
 .. towncrier release notes start
 
+py-libp2p v0.8.2 (2026-11-21)
+-----------------------------
+
+Bugfixes
+~~~~~~~~
+
+- Close Gossipsub example hosts during cancellation so normal and churn demos release their TCP sockets on exit. (`#1139 <https://github.com/libp2p/py-libp2p/issues/1139>`__)
+- The WebSocket transport now dials ``/tls/sni/<name>/ws`` addresses: the socket connects to the host before ``/tls``, and ``<name>`` is the TLS server name and the ``Host`` header of the WebSocket upgrade, on direct and SOCKS proxy dials, as in go-libp2p and js-libp2p. Such an address used to fail in ``can_dial`` with ``AttributeError: 'Protocol' object has no attribute 'value'``, and the dial path ignored the name, so a peer behind a TLS-terminating proxy that routes by name (a CDN edge, a tunnel) could not be reached by an address plus a name. (`#1551 <https://github.com/libp2p/py-libp2p/issues/1551>`__)
+- A yamux stream the peer reset now reports ``MuxedStreamReset`` to a bounded
+  ``read(n)``, not ``MuxedStreamEOF``. A remote RST drops the stream's
+  bookkeeping as soon as its receive buffer is drained, after which
+  ``read_stream()`` could no longer tell a reset stream from a closed one, while
+  the unbounded ``read()`` path still reported the reset correctly. A caller
+  reading a body with no declared length -- HTTP/1.1 without ``Content-Length``,
+  server-sent events -- has nothing but that exception to tell a message that was
+  cut off from one that finished, and was told the message finished. Which bytes
+  are delivered is unchanged: a remote reset still takes precedence over data
+  already buffered. (`#1559 <https://github.com/libp2p/py-libp2p/issues/1559>`__)
+- ``KadDHT``'s ``protocol_prefix`` now decides the protocol the DHT speaks and answers
+  on. It was accepted, documented and stored, but every outbound stream and the
+  inbound stream handler used the hardcoded ``/ipfs/kad/1.0.0``, so a DHT built for
+  another network could never reach its own peers; the prefix's only effect was to
+  make ``validate_config`` skip its checks. The id is now derived once with
+  ``protocol_id_for(prefix)`` and threaded through ``RoutingTable``, ``PeerRouting``,
+  ``ValueStore`` and ``ProviderStore``, which also fixes the routing table's
+  server-mode check -- on a ``/mesh`` DHT it admitted peers advertising only
+  ``/ipfs/kad/1.0.0`` and rejected peers speaking ``/mesh/kad/1.0.0``. A ``KadDHT``
+  built without a prefix is unchanged. (`#1562 <https://github.com/libp2p/py-libp2p/issues/1562>`__)
+- Dials now honour ``ConnectionConfig.dial_timeout`` (default 10s). Before, only the AutoConnector used it, so ``host.connect`` to an address that never answers waited for the OS connect timeout, which is minutes. (`#1567 <https://github.com/libp2p/py-libp2p/issues/1567>`__)
+- Require ``certifi >= 2026.10.19``, the first release that removes the compromised
+  eMudhra/emSign CA certificates while keeping the unaffected emSign roots for
+  compatibility, so installing or upgrading py-libp2p replaces a vulnerable CA
+  bundle. Users must also upgrade the installer itself:
+  ``pip >= 26.2.2`` (pip always loads its own bundled certifi in addition to the
+  system store, so older versions keep trusting the compromised certificates even
+  when the OS trust store is up to date) and ``uv >= 0.13.4``. CI, the developer
+  setup script and the interop Docker images now enforce these floors — as minimum
+  versions, not pins — and the Docker images install uv from the official installer
+  instead of the base image's pip and refresh ``ca-certificates``. See the
+  `Python announcement <https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576>`__
+  for the full advisory and the affected ``sigstore``, ``conda`` and ``pixi``
+  versions. (`#1571 <https://github.com/libp2p/py-libp2p/issues/1571>`__)
+- Fixed nim-libp2p interop CI by migrating the Nim echo server to the v2 ``Rng`` API and pinning nim-libp2p so the echo binary builds again. (`#1573 <https://github.com/libp2p/py-libp2p/issues/1573>`__)
+- ``/dns6/localhost`` and other ``*.localhost`` names are no longer treated as needing public IPv6, so they can be dialed on hosts with no global IPv6 address. (`#1585 <https://github.com/libp2p/py-libp2p/issues/1585>`__)
+- Add exit for hanged up ``examples/echo/echo``, ``examples/identify/identify``, ``examples/request_response/request_response_demo`` and ``examples/ping/ping`` by introducing ``nursery.cancel_scope.cancel()`` at the end of client branch. (`#1586 <https://github.com/libp2p/py-libp2p/issues/1586>`__)
+- Apply the nim-libp2p Identify response shim only while the interop ping harness
+  runs, instead of at ``ping_test`` import time, so collecting helper unit tests
+  no longer clears Identify fields for unrelated DHT tests under pytest-xdist. (`#1588 <https://github.com/libp2p/py-libp2p/issues/1588>`__)
+- Prevent eviction of local host identity from the peerstore when exceeding max_peers, register host listen addresses into the peerstore on startup, prevent socket and file descriptor leaks on cancelled dials across QUIC and TCP, implement per-address quadratic dial backoff and dial concurrency limiting, and allow Happy Eyeballs to dial all top candidate addresses without discarding peers with identical transport types. (`#1592 <https://github.com/libp2p/py-libp2p/issues/1592>`__)
+- Skip the WebTransport stream-type workaround on aioquic 1.8, which records WebTransport streams itself and removed the private ``_get_or_create_stream`` it relied on. (`#1597 <https://github.com/libp2p/py-libp2p/issues/1597>`__)
+- Bound multistream-select message reads to 64 KiB to prevent pre-authentication
+  memory exhaustion from oversized varint length prefixes during protocol negotiation (`GHSA-hmjq-g7pp-rw3x <https://github.com/libp2p/py-libp2p/security/advisories/GHSA-hmjq-g7pp-rw3x>`__).
+- QUIC: reject peer certificates whose libp2p TLS extension carries an invalid
+  proof-of-possession signature. ``PublicKey.verify()`` returns ``False`` rather than
+  raising, and the result was ignored, so a peer could claim any peer ID
+  (`GHSA-hrfr-7729-443m <https://github.com/libp2p/py-libp2p/security/advisories/GHSA-hrfr-7729-443m>`__).
+
+
+Improved Documentation
+~~~~~~~~~~~~~~~~~~~~~~
+
+- Added runnable Gossipsub version demos (v1.0–v2.0) and a multi-version comparison example under ``examples/pubsub/gossipsub/``. (`#1130 <https://github.com/libp2p/py-libp2p/issues/1130>`__)
+- Refresh WebRTC-Direct v1/v2 dial guidance now that libp2p/specs#715 has merged: the dialer default stays at v1 for wider-network compatibility, and v2 remains opt-in rather than flipping automatically with the spec. (`#1601 <https://github.com/libp2p/py-libp2p/issues/1601>`__)
+
+
+Features
+~~~~~~~~
+
+- Randomise per-round candidate selection in the Kademlia DHT lookup
+  (``find_closest_peers_network``). Each round now draws its ALPHA queries at
+  random from the closest-peer window instead of always taking the strictly
+  closest ALPHA, so a peer that mines an ID next to the target key is no longer
+  guaranteed a slot in the first round and cannot shape the lookup path from the
+  first hop. The ``BETA`` closest peers are still contacted before the lookup
+  returns, so randomised admission cannot end a lookup while the nearest peers
+  are unqueried. (`#1384 <https://github.com/libp2p/py-libp2p/issues/1384>`__)
+
+
+Miscellaneous Changes
+~~~~~~~~~~~~~~~~~~~~~
+
+- `#1577 <https://github.com/libp2p/py-libp2p/issues/1577>`__, `#1582 <https://github.com/libp2p/py-libp2p/issues/1582>`__, `#1583 <https://github.com/libp2p/py-libp2p/issues/1583>`__, `#1587 <https://github.com/libp2p/py-libp2p/issues/1587>`__, `#1602 <https://github.com/libp2p/py-libp2p/issues/1602>`__
+
+
 py-libp2p v0.8.1 (2026-10-23)
 -----------------------------
 
