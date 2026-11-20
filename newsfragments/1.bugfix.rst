@@ -1,2 +1,0 @@
-Bound multistream-select message reads to 64 KiB to prevent pre-authentication
-memory exhaustion from oversized varint length prefixes during protocol negotiation.
