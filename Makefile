@@ -125,14 +125,14 @@ check-docs: build-docs validate-newsfragments
 
 build-docs:
 	sphinx-apidoc -o docs/ . "*conftest*" tests/ "examples/pubsub/gossipsub*"
-	$(MAKE) -C docs clean
-	$(MAKE) -C docs html
-	$(MAKE) -C docs doctest
+	"$(MAKE)" -C docs clean
+	"$(MAKE)" -C docs html
+	"$(MAKE)" -C docs doctest
 
 check-docs-ci: build-docs build-docs-ci validate-newsfragments
 
 build-docs-ci:
-	$(MAKE) -C docs epub
+	"$(MAKE)" -C docs epub
 
 # release commands
 

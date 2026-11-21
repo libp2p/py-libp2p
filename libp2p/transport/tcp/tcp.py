@@ -55,10 +55,12 @@ def _set_reuse_flags(sock: trio.socket.SocketType) -> None:
         sock.setsockopt(stdlib_socket.SOL_SOCKET, stdlib_socket.SO_REUSEADDR, 1)
     except OSError:
         pass
-    try:
-        sock.setsockopt(stdlib_socket.SOL_SOCKET, stdlib_socket.SO_REUSEPORT, 1)
-    except (AttributeError, OSError):
-        pass
+    so_reuseport = getattr(stdlib_socket, "SO_REUSEPORT", None)
+    if so_reuseport is not None:
+        try:
+            sock.setsockopt(stdlib_socket.SOL_SOCKET, so_reuseport, 1)
+        except OSError:
+            pass
 
 
 async def _open_reuseport_listeners(

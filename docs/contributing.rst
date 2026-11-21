@@ -381,9 +381,13 @@ Notes
 - WSL users can run ``scripts/setup_dev.sh`` inside Linux and use ``make``
   as on Linux.
 - Ensure all tools (Python, Git, CMake) are on ``PATH``.
-- If tools resolve to the Microsoft Store ``python`` / ``python3`` stubs,
-  disable those App execution aliases or rely on the ``.venv`` interpreter
-  after ``setup_dev.ps1``.
+- If tools resolve to the Microsoft Store ``python`` / ``python3`` stubs (causing
+  errors such as ``Python was not found; ... disable this shortcut from Settings``
+  when running linters or typecheckers like ``pyrefly``), disable those App execution
+  aliases in Windows:
+  Open **Settings** > **Apps** > **Advanced app settings** > **App execution aliases**,
+  and toggle **OFF** both ``App Installer`` entries for ``python.exe`` and ``python3.exe``,
+  or rely on the ``.venv`` interpreter after ``setup_dev.ps1``.
 
 Requirements
 ^^^^^^^^^^^^

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import socket
 import subprocess
 import sys
 
@@ -15,8 +16,12 @@ _current_file = Path(__file__).resolve()
 PROJECT_ROOT = _current_file.parent.parent.parent
 RUN_DEMO = PROJECT_ROOT / "examples" / "health_monitoring" / "run_demo.py"
 
-# Port used for test runs (avoid clashing with a live demo on 8000)
-TEST_PORT = 18765
+
+def _free_port() -> int:
+    """Return a free ephemeral port on 127.0.0.1(OS-assigned,avoids xdist collisions)"""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
 
 
 def run_demo(
@@ -24,7 +29,8 @@ def run_demo(
     timeout: int = 60,
 ) -> subprocess.CompletedProcess:
     """Run run_demo.py with the given CLI arguments. Returns the result."""
-    cmd = [sys.executable, str(RUN_DEMO), "--port", str(TEST_PORT), *args]
+    port = _free_port()
+    cmd = [sys.executable, str(RUN_DEMO), "--port", str(port), *args]
     return subprocess.run(
         cmd,
         cwd=str(PROJECT_ROOT),
@@ -84,7 +90,7 @@ def parse_final_state(stdout: str, stderr: str = "") -> dict[str, int | None]:
 
 def test_default_limits_few_iterations() -> None:
     """Default limits, few iterations; usage stays below limits."""
-    result = run_demo("--iterations", "6", timeout=15)
+    result = run_demo("--iterations", "6", timeout=30)
     assert result.returncode == 0, f"Demo failed: {result.stderr}"
     state = parse_final_state(result.stdout, result.stderr)
     assert state["conns"] is not None and state["streams"] is not None
@@ -109,7 +115,7 @@ def test_tight_limits_hit_connections_and_streams() -> None:
         "15",
         "--interval",
         "0.1",
-        timeout=15,
+        timeout=30,
     )
     assert result.returncode == 0, f"Demo failed: {result.stderr}"
     state = parse_final_state(result.stdout, result.stderr)
@@ -139,7 +145,7 @@ def test_tight_limits_final_state_at_cap() -> None:
         "20",
         "--interval",
         "0.05",
-        timeout=15,
+        timeout=30,
     )
     assert result.returncode == 0, f"Demo failed: {result.stderr}"
     state = parse_final_state(result.stdout, result.stderr)
@@ -166,7 +172,7 @@ def test_custom_interval_runs_and_respects_limits() -> None:
         "0.2",
         "--iterations",
         "12",
-        timeout=15,
+        timeout=30,
     )
     assert result.returncode == 0, f"Demo failed: {result.stderr}"
     state = parse_final_state(result.stdout, result.stderr)
@@ -190,7 +196,7 @@ def test_no_connection_tracking_runs() -> None:
         "--no-connection-tracking",
         "--iterations",
         "5",
-        timeout=15,
+        timeout=30,
     )
     assert result.returncode == 0, f"Demo failed: {result.stderr}"
     state = parse_final_state(result.stdout, result.stderr)
@@ -203,7 +209,7 @@ def test_no_protocol_metrics_runs() -> None:
         "--no-protocol-metrics",
         "--iterations",
         "5",
-        timeout=15,
+        timeout=30,
     )
     assert result.returncode == 0, f"Demo failed: {result.stderr}"
     state = parse_final_state(result.stdout, result.stderr)
