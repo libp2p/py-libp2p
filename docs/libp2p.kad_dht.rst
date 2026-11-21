@@ -20,6 +20,14 @@ libp2p.kad\_dht.kad\_dht module
    :undoc-members:
    :show-inheritance:
 
+libp2p.kad\_dht.lookup module
+-----------------------------
+
+.. automodule:: libp2p.kad_dht.lookup
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 libp2p.kad\_dht.peer\_routing module
 ------------------------------------
 
