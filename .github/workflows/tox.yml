@@ -18,7 +18,7 @@ jobs:
     strategy:
       matrix:
         python: ["3.10", "3.11", "3.12", "3.13"]
-        toxenv: [core, demos, interop, lint, utils, wheel]
+        toxenv: [core, demos, interop, lint, utils, wheel, pq]
         include:
           - python: "3.10"
             toxenv: docs

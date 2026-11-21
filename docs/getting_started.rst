@@ -49,6 +49,50 @@ For most applications, we recommend using the Noise protocol for encryption:
 .. literalinclude:: ../examples/doc-examples/example_encryption_noise.py
    :language: python
 
+Post-quantum Noise (experimental)
+"""""""""""""""""""""""""""""""""
+
+py-libp2p also ships an **experimental** hybrid post-quantum handshake,
+``Noise_XXhfs_25519+MLKEM768_ChaChaPoly_SHA256``, which mixes an ML-KEM-768 key
+encapsulation into the Noise ``XX`` handshake. The session keys depend on both
+the X25519 and the ML-KEM-768 shared secrets, so a recorded session stays
+confidential as long as either one holds. Identity and authentication are
+unchanged and remain classical.
+
+It is experimental because the wire format is not final. The protocol ID,
+``/noise-mlkem768-hfs/0.2.0``, is provisional until
+`libp2p/specs#727 <https://github.com/libp2p/specs/pull/727>`_ settles it, and
+may change in a release that is not wire compatible with this one. Both peers
+must run it; it does not interoperate with ``/noise``.
+
+Install the ``pq`` extra, which brings the native ML-KEM-768 backend from
+``cryptography``:
+
+.. code-block:: bash
+
+    pip install 'libp2p[pq]'
+
+The extra needs ``cryptography`` 48.0.0 or later. ``pyOpenSSL`` 25.3.0 and
+older require ``cryptography`` below 47, so upgrade ``pyOpenSSL`` to 26 or later
+if your environment has it. Without a usable ``cryptography`` backend,
+py-libp2p falls back to the pure-Python ``kyber-py`` backend and logs a warning,
+because ``kyber-py`` is not constant time.
+
+Add it ahead of classical Noise to prefer it and fall back:
+
+.. literalinclude:: ../examples/doc-examples/example_encryption_pq_noise.py
+   :language: python
+
+Security protocol negotiation is not authenticated, so an on-path attacker can
+strip ``/noise-mlkem768-hfs/0.2.0`` and leave both peers on classical ``/noise``
+without either noticing. Where the post-quantum property is required, configure
+only the post-quantum transport, so that ``/noise`` is neither offered nor
+accepted. Both ``TransportPQ`` and the classical Noise ``Transport`` also take
+an optional ``transcript_binding`` (``TranscriptBindingConfig``), off by
+default. A downgraded session runs the classical handshake, so detecting one
+needs the binding enabled on the classical transport as well, on both peers;
+see ``libp2p.security.noise.transcript_binding`` in the API reference.
+
 If you need to use SECIO (for compatibility with older libp2p implementations):
 
 .. literalinclude:: ../examples/doc-examples/example_encryption_secio.py
