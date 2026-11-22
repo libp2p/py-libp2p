@@ -1386,6 +1386,142 @@ async def test_yamux_oversized_data_frame_closes_connection(yamux_pair):
 
 
 @pytest.mark.trio
+async def test_yamux_recv_window_exceeded_closes_connection(yamux_pair):
+    """
+    DATA that exceeds the stream receive window is a protocol error.
+
+    Regression for GHSA-xx4q-fj82-qjp5: previously the receiver logged a
+    warning, clamped recv_window to 0, and kept buffering, allowing
+    unbounded memory growth across frames.
+    """
+    client_yamux, server_yamux = yamux_pair
+    client_stream = await client_yamux.open_stream()
+    server_stream = await server_yamux.accept_stream()
+
+    await client_stream.write(b"healthy")
+    assert await server_stream.read(7) == b"healthy"
+
+    # Shrink the server window, then announce more DATA than remains.
+    # Omit the body: the session must GO_AWAY before allocating it.
+    server_stream.recv_window = 16
+    frame = struct.pack(
+        YAMUX_HEADER_FORMAT,
+        0,
+        TYPE_DATA,
+        0,
+        client_stream.stream_id,
+        17,
+    )
+    await client_yamux.secured_conn.write(frame)
+
+    with trio.move_on_after(5) as scope:
+        await server_yamux.event_shutting_down.wait()
+    assert not scope.cancelled_caught, "receiver hung on recv_window violation"
+    assert server_yamux.event_shutting_down.is_set()
+
+    # GO_AWAY(protocol error) should shut the peer down as well.
+    with trio.move_on_after(5) as scope:
+        await client_yamux.event_shutting_down.wait()
+    assert not scope.cancelled_caught, "sender did not observe session teardown"
+    assert client_yamux.event_shutting_down.is_set()
+
+
+@pytest.mark.trio
+async def test_yamux_recv_window_exact_size_still_accepted(yamux_pair):
+    """A DATA frame that exactly fills recv_window must still be delivered."""
+    client_yamux, server_yamux = yamux_pair
+    client_stream = await client_yamux.open_stream()
+    server_stream = await server_yamux.accept_stream()
+
+    payload = b"x" * 32
+    server_stream.recv_window = len(payload)
+    frame = struct.pack(
+        YAMUX_HEADER_FORMAT,
+        0,
+        TYPE_DATA,
+        0,
+        client_stream.stream_id,
+        len(payload),
+    )
+    await client_yamux.secured_conn.write(frame + payload)
+
+    with trio.fail_after(5):
+        assert await server_stream.read(len(payload)) == payload
+    assert not server_yamux.event_shutting_down.is_set()
+
+
+@pytest.mark.trio
+async def test_yamux_syn_data_exceeds_initial_window_closes(yamux_pair):
+    """SYN+DATA larger than the initial receive window tears the session down."""
+    client_yamux, server_yamux = yamux_pair
+
+    # Initiator uses odd stream IDs; pick one that is not yet open.
+    stream_id = 99
+    length = DEFAULT_WINDOW_SIZE + 1
+    frame = struct.pack(
+        YAMUX_HEADER_FORMAT,
+        0,
+        TYPE_DATA,
+        FLAG_SYN,
+        stream_id,
+        length,
+    )
+    await client_yamux.secured_conn.write(frame)
+
+    with trio.move_on_after(5) as scope:
+        await server_yamux.event_shutting_down.wait()
+    assert not scope.cancelled_caught, "receiver hung on SYN recv_window violation"
+    assert server_yamux.event_shutting_down.is_set()
+
+
+@pytest.mark.trio
+async def test_yamux_second_frame_after_window_exhausted_closes(yamux_pair):
+    """
+    After the receive window is exhausted, a further DATA frame must not be
+    buffered; the session must terminate instead of clamping and continuing.
+    """
+    client_yamux, server_yamux = yamux_pair
+    client_stream = await client_yamux.open_stream()
+    server_stream = await server_yamux.accept_stream()
+
+    server_stream.recv_window = 32
+    first = b"a" * 32
+    first_hdr = struct.pack(
+        YAMUX_HEADER_FORMAT,
+        0,
+        TYPE_DATA,
+        0,
+        client_stream.stream_id,
+        len(first),
+    )
+    await client_yamux.secured_conn.write(first_hdr + first)
+
+    with trio.fail_after(5):
+        assert await server_stream.read(32) == first
+
+    # Window is exhausted (or nearly so after auto window updates from read).
+    # Force it to zero so the next frame is unambiguously over budget.
+    server_stream.recv_window = 0
+    second_hdr = struct.pack(
+        YAMUX_HEADER_FORMAT,
+        0,
+        TYPE_DATA,
+        0,
+        client_stream.stream_id,
+        1,
+    )
+    await client_yamux.secured_conn.write(second_hdr)
+
+    with trio.move_on_after(5) as scope:
+        await server_yamux.event_shutting_down.wait()
+    assert not scope.cancelled_caught, "receiver hung after window exhaustion"
+    assert server_yamux.event_shutting_down.is_set()
+    # Teardown clears buffers; ensure we did not keep a residual stream buffer
+    # entry for continued accumulation.
+    assert client_stream.stream_id not in server_yamux.stream_buffers
+
+
+@pytest.mark.trio
 async def test_yamux_withheld_data_body_times_out(yamux_pair, monkeypatch):
     """A DATA body that is announced but never delivered must time out."""
     monkeypatch.setenv("PY_YAMUX_DATA_READ_TIMEOUT", "0.5")
