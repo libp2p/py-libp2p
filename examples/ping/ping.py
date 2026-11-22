@@ -86,9 +86,16 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
             for addr in transport_addrs:
                 print(f"{addr}")
 
+            peer_id = host.get_id().to_string()
+            if transport == "ws":
+                optimal_addr_with_peer = f"/ip4/127.0.0.1/tcp/{port}/ws/p2p/{peer_id}"
+            else:
+                optimal_addr = get_optimal_binding_address(port)
+                optimal_addr_with_peer = f"{optimal_addr}/p2p/{peer_id}"
+
             print(
                 "\nRun this from the same folder in another console:\n\n"
-                f"ping-demo -d {get_optimal_binding_address(port)}"
+                f"ping-demo -d {optimal_addr_with_peer}"
                 f" -psk {psk} -t {transport}\n"
             )
             print("Waiting for incoming connection...")

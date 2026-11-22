@@ -1,0 +1,1 @@
+Fixes ping command to give correct complete instruction to run ping-demo while also handle ws case
