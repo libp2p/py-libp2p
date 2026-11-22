@@ -163,7 +163,7 @@ async def setup_relay_node(port: int, seed: int | None = None) -> None:
             # Create and register the transport
             CircuitV2Transport(host, protocol, relay_config)
             logger.info(
-                "Circuit relay transport initialized | ",
+                "Circuit relay transport initialized | "
                 "enable_hop=%r enable_stop=%r enable_client=%r",
                 relay_config.enable_hop,
                 relay_config.enable_stop,
@@ -240,7 +240,7 @@ async def setup_destination_node(
             # Create and initialize transport
             transport = CircuitV2Transport(host, protocol, relay_config)
             logger.info(
-                "Circuit relay transport initialized | ",
+                "Circuit relay transport initialized | "
                 "enable_hop=%r enable_stop=%r enable_client=%r",
                 relay_config.enable_hop,
                 relay_config.enable_stop,
@@ -289,6 +289,10 @@ async def setup_destination_node(
                         )
                         await host.connect(relay_info)
                         logger.info(f"Connected to relay {relay_info.peer_id}")
+                        # Discovery only scans for relays at start-up and then
+                        # every DEFAULT_DISCOVERY_INTERVAL (300s), so scan now
+                        # to make the reservation sources need to reach us.
+                        await discovery.discover_relays()
                         try:
                             connected = host.is_peer_connected(relay_info.peer_id)  # type: ignore[attr-defined]
                             logger.debug("[DEST] relay connected? %s", connected)
@@ -298,12 +302,14 @@ async def setup_destination_node(
                         logger.exception("[DEST] Failed to connect to relay: %s", e)
                         return
 
-        print("\nDestination node is running with peer ID:")
-        print(f"{peer_id}")
-        print("\nPress Ctrl+C to exit\n")
+                print("\nDestination node is running with peer ID:")
+                print(f"{peer_id}")
+                print("\nPress Ctrl+C to exit\n")
 
-        # Keep the node running
-        await trio.sleep_forever()
+                # Keep the node running, inside the protocol and discovery
+                # services: leaving them removes the STOP handler and stops
+                # discovery.
+                await trio.sleep_forever()
 
 
 async def setup_source_node(
@@ -373,7 +379,7 @@ async def setup_source_node(
             # Create and initialize transport
             transport = CircuitV2Transport(host, protocol, relay_config)
             logger.info(
-                "Circuit relay transport initialized | ",
+                "Circuit relay transport initialized | "
                 "enable_hop=%r enable_stop=%r enable_client=%r",
                 relay_config.enable_hop,
                 relay_config.enable_stop,
@@ -448,7 +454,8 @@ async def setup_source_node(
                     # The destination peer should be reachable through a
                     # p2p-circuit address
                     circuit_addr = multiaddr.Multiaddr(
-                        f"{relay_info.addrs[0]}/p2p-circuit/p2p/{dest_peer_id}"
+                        f"{relay_info.addrs[0]}/p2p/{relay_info.peer_id}"
+                        f"/p2p-circuit/p2p/{dest_peer_id}"
                     )
                     dest_peer_info = PeerInfo(dest_peer_id, [circuit_addr])
                     logger.info(f"This is the dest peer info: {dest_peer_info}")
