@@ -46,11 +46,6 @@ jobs:
           # patched release, so CI keeps picking up fixes without a manual bump.
           version: ">=0.13.4"
 
-      - name: Install GMP headers
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgmp-dev
-
       - name: Install Nim for interop testing
         if: matrix.toxenv == 'interop'
         run: |
