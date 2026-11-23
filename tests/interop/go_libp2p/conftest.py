@@ -5,14 +5,14 @@ Builds small go-libp2p harnesses once (guarded by a file lock so xdist workers
 don't race) and skips the whole module when the Go toolchain is unavailable.
 """
 
-try:
-    import fcntl
-except ImportError:
-    fcntl = None  # type: ignore[assignment]
 import logging
 from pathlib import Path
 import shutil
 import subprocess
+import sys
+
+if sys.platform != "win32":
+    import fcntl
 
 import pytest
 
@@ -33,24 +33,24 @@ def _go_available() -> bool:
 
 def _build_harness(bin_path: Path, setup_script: Path, lock_name: str) -> bool:
     """Build a harness under a lock. Returns True if the binary exists."""
-    if fcntl is None:
-        return False
-    lock = Path(__file__).parent / lock_name
-    with open(lock, "w") as f:
-        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-        if bin_path.exists() and bin_path.stat().st_size > 0:
-            return True
-        try:
-            subprocess.run(["bash", str(setup_script)], check=True, timeout=600)
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
-            logger.warning("go harness build failed: %s", e)
-            return False
-    return bin_path.exists() and bin_path.stat().st_size > 0
+    if sys.platform != "win32":
+        lock = Path(__file__).parent / lock_name
+        with open(lock, "w") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            if bin_path.exists() and bin_path.stat().st_size > 0:
+                return True
+            try:
+                subprocess.run(["bash", str(setup_script)], check=True, timeout=600)
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+                logger.warning("go harness build failed: %s", e)
+                return False
+        return bin_path.exists() and bin_path.stat().st_size > 0
+    return False
 
 
 @pytest.fixture(scope="session")
 def go_harness() -> Path:
-    if fcntl is None:
+    if sys.platform == "win32":
         pytest.skip("fcntl is not available (Unix-only interop harness)")
     if not _go_available():
         pytest.skip("go toolchain not available")
@@ -61,7 +61,7 @@ def go_harness() -> Path:
 
 @pytest.fixture(scope="session")
 def go_webtransport_harness() -> Path:
-    if fcntl is None:
+    if sys.platform == "win32":
         pytest.skip("fcntl is not available (Unix-only interop harness)")
     if not _go_available():
         pytest.skip("go toolchain not available")
