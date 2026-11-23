@@ -6,6 +6,7 @@ import time
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from multiaddr import Multiaddr
 import varint
 
 from libp2p.crypto.ed25519 import create_new_key_pair
@@ -44,7 +45,10 @@ def sample_peer_id():
 @pytest.fixture
 def sample_addrs():
     """Sample addresses for testing."""
-    return [b"/ip4/127.0.0.1/tcp/8000", b"/ip4/192.168.1.1/tcp/8000"]
+    return [
+        Multiaddr("/ip4/127.0.0.1/tcp/8000").to_bytes(),
+        Multiaddr("/ip4/192.168.1.1/tcp/8000").to_bytes(),
+    ]
 
 
 class TestRegistrationRecord:
@@ -368,7 +372,9 @@ class TestRendezvousService:
         message.type = Message.MessageType.REGISTER
         message.register.ns = "test-namespace"
         message.register.peer.id = sample_peer_id.to_bytes()
-        message.register.peer.addrs.append(b"/ip4/127.0.0.1/tcp/8000")
+        message.register.peer.addrs.append(
+            Multiaddr("/ip4/127.0.0.1/tcp/8000").to_bytes()
+        )
         message.register.ttl = 3600
 
         # Mock stream reads - varint bytes one at a time, then message, then EOF

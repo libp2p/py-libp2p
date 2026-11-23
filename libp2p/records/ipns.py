@@ -337,7 +337,10 @@ class IPNSValidator(Validator):
             mh = multihash.decode(name_bytes)
 
             if mh.func == IDENTITY_MULTIHASH_CODE:
-                return unmarshal_public_key(mh.digest)
+                # pyrefly cannot see py-multihash's namedtuple fields.
+                return unmarshal_public_key(
+                    mh.digest  # pyrefly: ignore [missing-attribute]
+                )
             else:
                 raise InvalidRecordType(
                     f"Public key not inlined in name (multihash code: {mh.func})"
