@@ -107,6 +107,7 @@ async def test_stuck_connection_close_still_releases_listener(
             port = int(port_str)
             await hub.connect(PeerInfo(peer.get_id(), peer.get_addrs()))
             (conn,) = network.connections[peer.get_id()]
+            real_close = conn.close
 
             async def hang() -> None:
                 await trio.sleep_forever()
@@ -124,6 +125,10 @@ async def test_stuck_connection_close_still_releases_listener(
         with socket.socket() as probe:
             assert probe.connect_ex(("127.0.0.1", port)) != 0
 
+        # The teardown abandoned this connection on purpose; release its
+        # socket here rather than leave it to the garbage collector.
+        with trio.fail_after(10):
+            await real_close()
         stop.set()
 
 
@@ -175,5 +180,86 @@ async def test_connection_registered_during_teardown_is_closed() -> None:
             "a connection registered during teardown was dropped without closing it"
         )
         assert network.connections == {}
+
+        stop.set()
+
+
+@pytest.mark.trio
+async def test_connection_readmitted_during_listener_close_is_closed() -> None:
+    """
+    Closing listeners and transports awaits too, after the first drain has
+    emptied the table. Anything that lands there meanwhile must still be closed
+    before the final clear(), not dropped with its socket open (#1584).
+    """
+    stop = trio.Event()
+    ready = trio.Event()
+    late = new_host(key_pair=create_new_key_pair())
+
+    async def serve() -> None:
+        async with late.run([LISTEN]):
+            ready.set()
+            await stop.wait()
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(serve)
+        await ready.wait()
+
+        hub = new_host(key_pair=create_new_key_pair())
+        network = hub.get_network()
+
+        async with hub.run([LISTEN]):
+            await hub.connect(PeerInfo(late.get_id(), late.get_addrs()))
+            (late_conn,) = network.connections[late.get_id()]
+            # Out of the table for the first drain, back in while the
+            # listener closes.
+            del network.connections[late.get_id()]
+            (listener,) = network.listeners.values()
+            real_close = listener.close
+
+            async def close_then_readmit() -> None:
+                network.connections[late.get_id()] = [late_conn]
+                await real_close()
+
+            listener.close = close_then_readmit  # type: ignore[method-assign]
+
+        assert late_conn.is_closed, (
+            "a connection that landed during listener close was dropped unclosed"
+        )
+        assert network.connections == {}
+
+        stop.set()
+
+
+@pytest.mark.trio
+async def test_swarm_refuses_connections_once_closing() -> None:
+    """
+    Once teardown has begun, add_conn must refuse a new connection and close
+    it, so a dial that lands late cannot register after the table is drained.
+    """
+    stop = trio.Event()
+    ready = trio.Event()
+    late = new_host(key_pair=create_new_key_pair())
+
+    async def serve() -> None:
+        async with late.run([LISTEN]):
+            ready.set()
+            await stop.wait()
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(serve)
+        await ready.wait()
+
+        hub = new_host(key_pair=create_new_key_pair())
+        network = hub.get_network()
+        async with hub.run([LISTEN]):
+            network._closing = True  # type: ignore[attr-defined]
+            with pytest.raises(Exception):
+                await hub.connect(PeerInfo(late.get_id(), late.get_addrs()))
+            assert late.get_id() not in network.connections
+
+            hub_id = hub.get_id()
+            with trio.fail_after(10):
+                while hub_id in late.get_network().connections:
+                    await trio.sleep(0.05)
 
         stop.set()

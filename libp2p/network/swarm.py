@@ -472,6 +472,9 @@ class Swarm(Service, INetworkService):
                 # host.run() left connections and listeners open (#1584).
                 # Bounded so a peer that never finishes closing cannot hang
                 # shutdown.
+                # From here on add_conn refuses new connections and disconnects
+                # no longer trigger auto-connect dials, as in Swarm.close().
+                self._closing = True
                 with trio.move_on_after(SHUTDOWN_CLEANUP_TIMEOUT) as cleanup_scope:
                     cleanup_scope.shield = True
                     # Stop connection management components
@@ -511,18 +514,26 @@ class Swarm(Service, INetworkService):
                     # clearing the map would drop such a connection unclosed and
                     # leak its socket, so drain instead -- take what is there,
                     # close it, then look again. The enclosing scope bounds it.
-                    while self.connections:
-                        batch = [
-                            (peer_id, conn)
-                            for peer_id, conns in list(self.connections.items())
-                            for conn in list(conns)
-                        ]
-                        for peer_id, _conn in batch:
-                            self.connections.pop(peer_id, None)
-                        async with trio.open_nursery() as close_nursery:
-                            for peer_id, conn in batch:
-                                close_nursery.start_soon(_close_conn, peer_id, conn)
+                    async def drain_connections() -> None:
+                        while self.connections:
+                            batch = [
+                                (peer_id, conn)
+                                for peer_id, conns in list(self.connections.items())
+                                for conn in list(conns)
+                            ]
+                            for peer_id, _conn in batch:
+                                self.connections.pop(peer_id, None)
+                            if not batch:  # only empty lists were left
+                                break
+                            async with trio.open_nursery() as close_nursery:
+                                for peer_id, conn in batch:
+                                    close_nursery.start_soon(_close_conn, peer_id, conn)
+
+                    await drain_connections()
                     await close_listeners_and_transports()
+                    # Closing listeners and transports awaits too; drain again
+                    # so nothing that landed meanwhile is dropped by clear().
+                    await drain_connections()
 
                 # Whatever happened above, this swarm no longer owns these
                 # connections; clear them even if the bound fired mid-close so
@@ -547,6 +558,9 @@ class Swarm(Service, INetworkService):
                             "shutdown exceeded %.1fs",
                             SHUTDOWN_RETRY_TIMEOUT,
                         )
+                # Same policy as connections: an abandoned listener close leaves
+                # no entry behind.
+                self.listeners.clear()
 
                 # Cancel the background nursery (transport / auto-connector).
                 nursery.cancel_scope.cancel()
@@ -2805,6 +2819,15 @@ class Swarm(Service, INetworkService):
             logger.debug("Swarm::add_conn | starting swarm connection")
             self.manager.run_task(swarm_conn.start)
             await swarm_conn.event_started.wait()
+
+            # Refuse once the swarm is shutting down: its teardown has already
+            # drained the table, so a connection registered now would be
+            # dropped by the final clear() without being closed (#1584). No
+            # await sits between this check and the append below, so a dial
+            # landing mid-teardown cannot slip in. The handler below closes
+            # swarm_conn.
+            if self._closing:
+                raise SwarmException("Swarm is closing; connection refused")
 
             # Add to connections dict with deduplication
             peer_id = muxed_conn.peer_id
