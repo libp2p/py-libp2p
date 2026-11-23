@@ -5,11 +5,14 @@ Installs the pinned js-libp2p harness dependencies once (guarded by a file
 lock so xdist workers don't race) and skips when Node.js is unavailable.
 """
 
-import fcntl
 import logging
 from pathlib import Path
 import shutil
 import subprocess
+import sys
+
+if sys.platform != "win32":
+    import fcntl
 
 import pytest
 
@@ -23,7 +26,8 @@ def _install_harness() -> bool:
     marker = _WEBRTC_DIR / "node_modules" / "@libp2p" / "webrtc" / "package.json"
     lock = Path(__file__).parent / ".setup_webrtc_lock"
     with open(lock, "w") as f:
-        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        if sys.platform != "win32":
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
         if marker.exists():
             return True
         try:

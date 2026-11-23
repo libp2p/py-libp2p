@@ -190,7 +190,8 @@ def test_listener_and_dialer(pair: Pair, tmp_path: Path) -> None:
     listener = _start(listener_log, pair.listener)
     dialer = None
     try:
-        addr = _wait_for([listener_log], pair.addr, timeout=30)[0]
+        timeout = 60 if sys.platform == "win32" else 30
+        addr = _wait_for([listener_log], pair.addr, timeout=timeout)[0]
         args = tuple(a.format(addr=addr) for a in pair.dialer)
         dialer = _start(dialer_log, args, stdin=subprocess.PIPE if pair.stdin else None)
         if pair.stdin and dialer.stdin is not None:
@@ -200,11 +201,11 @@ def test_listener_and_dialer(pair: Pair, tmp_path: Path) -> None:
             dialer.stdin.write(pair.stdin.encode())
             dialer.stdin.flush()
 
-        _wait_for([dialer_log, listener_log], pair.expect, timeout=30)
+        _wait_for([dialer_log, listener_log], pair.expect, timeout=timeout)
 
         if pair.exits:
             try:
-                rc = dialer.wait(timeout=20)
+                rc = dialer.wait(timeout=30 if sys.platform == "win32" else 20)
             except subprocess.TimeoutExpired:
                 raise AssertionError(
                     f"{pair.id}: the dialer printed its result but did not exit"

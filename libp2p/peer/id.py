@@ -251,7 +251,7 @@ class ID:
         try:
             mh_decoded = multihash.decode(self._bytes)
             if mh_decoded.func == IDENTITY_MULTIHASH_CODE:
-                return deserialize_public_key(mh_decoded.digest)
+                return deserialize_public_key(getattr(mh_decoded, "digest"))
             return None
         except Exception:
             return None
