@@ -1,1 +1,1 @@
-Fixes make commands for clean, fix, lint, typecheck, test, docs and pr in windows system, every cmd now exits with code 0.
+Fix Makefile targets (clean, fix, lint, typecheck, test, docs, pr) and developer tooling on native Windows.

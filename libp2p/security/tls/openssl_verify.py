@@ -58,6 +58,7 @@ def _load_libssl() -> ctypes.CDLL:
                 dll_dir / "ssleay32.dll",
                 Path("libssl-3.dll"),
                 Path("libssl-1_1.dll"),
+                Path("ssleay32.dll"),
             ]
             for candidate in candidates:
                 if not candidate.is_file():

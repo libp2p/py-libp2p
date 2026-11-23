@@ -18,10 +18,13 @@ RUN_DEMO = PROJECT_ROOT / "examples" / "health_monitoring" / "run_demo.py"
 
 
 def _free_port() -> int:
-    """Return a free ephemeral port on 127.0.0.1(OS-assigned,avoids xdist collisions)"""
+    """Return OS-assigned ephemeral port on 127.0.0.1 to avoid xdist collisions."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+DEMO_TIMEOUT = 30 if sys.platform == "win32" else 15
 
 
 def run_demo(
@@ -90,7 +93,7 @@ def parse_final_state(stdout: str, stderr: str = "") -> dict[str, int | None]:
 
 def test_default_limits_few_iterations() -> None:
     """Default limits, few iterations; usage stays below limits."""
-    result = run_demo("--iterations", "6", timeout=30)
+    result = run_demo("--iterations", "6", timeout=DEMO_TIMEOUT)
     assert result.returncode == 0, f"Demo failed: {result.stderr}"
     state = parse_final_state(result.stdout, result.stderr)
     assert state["conns"] is not None and state["streams"] is not None
@@ -115,7 +118,7 @@ def test_tight_limits_hit_connections_and_streams() -> None:
         "15",
         "--interval",
         "0.1",
-        timeout=30,
+        timeout=DEMO_TIMEOUT,
     )
     assert result.returncode == 0, f"Demo failed: {result.stderr}"
     state = parse_final_state(result.stdout, result.stderr)
@@ -145,7 +148,7 @@ def test_tight_limits_final_state_at_cap() -> None:
         "20",
         "--interval",
         "0.05",
-        timeout=30,
+        timeout=DEMO_TIMEOUT,
     )
     assert result.returncode == 0, f"Demo failed: {result.stderr}"
     state = parse_final_state(result.stdout, result.stderr)
@@ -172,7 +175,7 @@ def test_custom_interval_runs_and_respects_limits() -> None:
         "0.2",
         "--iterations",
         "12",
-        timeout=30,
+        timeout=DEMO_TIMEOUT,
     )
     assert result.returncode == 0, f"Demo failed: {result.stderr}"
     state = parse_final_state(result.stdout, result.stderr)
@@ -196,7 +199,7 @@ def test_no_connection_tracking_runs() -> None:
         "--no-connection-tracking",
         "--iterations",
         "5",
-        timeout=30,
+        timeout=DEMO_TIMEOUT,
     )
     assert result.returncode == 0, f"Demo failed: {result.stderr}"
     state = parse_final_state(result.stdout, result.stderr)
@@ -209,7 +212,7 @@ def test_no_protocol_metrics_runs() -> None:
         "--no-protocol-metrics",
         "--iterations",
         "5",
-        timeout=30,
+        timeout=DEMO_TIMEOUT,
     )
     assert result.returncode == 0, f"Demo failed: {result.stderr}"
     state = parse_final_state(result.stdout, result.stderr)
