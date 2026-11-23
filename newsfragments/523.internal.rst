@@ -1,0 +1,1 @@
+Run the example programs themselves in the ``demos`` test environment (listener, dialer and printed result, as a user runs them), so a broken example script now fails CI.
