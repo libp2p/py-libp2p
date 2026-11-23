@@ -8,12 +8,27 @@ from libp2p.crypto.keys import (
 )
 
 if sys.platform != "win32":
+    import inspect
+    from typing import Any
+
     from fastecdsa import (
         curve as curve_types,
         keys,
         point,
     )
     from fastecdsa.encoding.sec1 import SEC1Encoder
+
+    _SEC1_ENCODER: Any
+    if "self" in inspect.signature(SEC1Encoder.encode_public_key).parameters:
+        _SEC1_ENCODER = SEC1Encoder()
+    else:
+        _SEC1_ENCODER = SEC1Encoder
+
+    _PEM_ENCODER: Any
+    try:
+        from fastecdsa.encoding.pem import PEMEncoder as _PEM_ENCODER
+    except ImportError:
+        _PEM_ENCODER = None
 else:
     from coincurve import (
         PrivateKey as CPrivateKey,
@@ -51,12 +66,12 @@ if sys.platform != "win32":
             self.curve = curve
 
         def to_bytes(self) -> bytes:
-            return SEC1Encoder.encode_public_key(self.impl, compressed=False)
+            return _SEC1_ENCODER.encode_public_key(self.impl, compressed=False)
 
         @classmethod
         def from_bytes(cls, data: bytes, curve: str) -> "ECCPublicKey":
             curve_type = infer_local_type(curve)
-            public_key_impl = SEC1Encoder.decode_public_key(data, curve_type)
+            public_key_impl = _SEC1_ENCODER.decode_public_key(data, curve_type)
             return cls(public_key_impl, curve_type)
 
         def get_type(self) -> KeyType:
@@ -77,10 +92,17 @@ if sys.platform != "win32":
             return cls(private_key_impl, curve_type)
 
         def to_bytes(self) -> bytes:
-            key_str = keys.export_key(self.impl, self.curve, encoder=keys.PEMEncoder)
-            if key_str is None:
-                raise Exception("Key not found")
-            return key_str.encode()
+            export_key = getattr(keys, "export_key", None)
+            if export_key is not None:
+                key_str = export_key(
+                    self.impl, self.curve, encoder=getattr(keys, "PEMEncoder")
+                )
+                if key_str is None:
+                    raise Exception("Key not found")
+                return key_str.encode()
+            if _PEM_ENCODER is None:
+                raise RuntimeError("fastecdsa PEMEncoder is unavailable")
+            return _PEM_ENCODER().encode_private_key(self.impl, self.curve)
 
         def get_type(self) -> KeyType:
             return KeyType.ECC_P256

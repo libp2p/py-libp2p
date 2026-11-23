@@ -1,0 +1,1 @@
+Allow ``fastecdsa>=2.3.2,<5`` on non-Windows platforms and update ECC key wrappers for 3.x/4.x API compatibility so prebuilt 4.0.0 wheels can be used without ``libgmp`` headers.
