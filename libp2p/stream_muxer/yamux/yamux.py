@@ -1191,6 +1191,29 @@ class Yamux(IMuxedConn):
         with trio.fail_after(_yamux_data_read_timeout()):
             return await read_exactly(self.secured_conn, length)
 
+    async def _go_away_protocol_error(self, reason: str) -> None:
+        """
+        Treat a session-level protocol violation like go-yamux:
+        send GO_AWAY(protocol error) and tear down the connection.
+        """
+        logger.error(
+            "Yamux protocol error for peer %s: %s",
+            self.peer_id,
+            reason,
+        )
+        await self.close(GO_AWAY_PROTOCOL_ERROR)
+
+    def _recv_window_for(self, stream_id: int) -> int | None:
+        """
+        Return the stream's receive window, or None if the stream is unknown.
+
+        Caller must hold ``streams_lock``.
+        """
+        stream = self.streams.get(stream_id)
+        if stream is None:
+            return None
+        return stream.recv_window
+
     async def handle_incoming(self) -> None:
         logger.debug(f"Yamux handle_incoming() started for peer {self.peer_id}")
         while not self.event_shutting_down.is_set():
@@ -1285,6 +1308,17 @@ class Yamux(IMuxedConn):
                     await self._cleanup_on_error()
                     break
                 if (typ == TYPE_DATA or typ == TYPE_WINDOW_UPDATE) and flags & FLAG_SYN:
+                    # New streams start at DEFAULT_WINDOW_SIZE. Reject before
+                    # allocating / buffering when SYN+DATA exceeds that window
+                    # (GHSA-xx4q-fj82-qjp5 / go-yamux ErrRecvWindowExceeded).
+                    if typ == TYPE_DATA and length > DEFAULT_WINDOW_SIZE:
+                        await self._go_away_protocol_error(
+                            f"SYN DATA length={length} exceeds initial "
+                            f"recv_window={DEFAULT_WINDOW_SIZE} on stream "
+                            f"{stream_id}"
+                        )
+                        break
+
                     syn_payload: bytes = b""
                     syn_payload_err: IncompleteReadError | None = None
                     if typ == TYPE_DATA and length > 0:
@@ -1320,15 +1354,9 @@ class Yamux(IMuxedConn):
                                     f"{stream_id}: window={length}"
                                 )
                             elif typ == TYPE_DATA and length > 0:
+                                # Pre-checked against DEFAULT_WINDOW_SIZE above.
                                 self.stream_buffers[stream_id].extend(syn_payload)
                                 stream.recv_window -= len(syn_payload)
-                                if stream.recv_window < 0:
-                                    logger.warning(
-                                        f"Stream {stream_id}: peer exceeded "
-                                        f"receive window by "
-                                        f"{-stream.recv_window} bytes"
-                                    )
-                                    stream.recv_window = 0
                                 self.stream_events[stream_id].set()
                                 logger.debug(
                                     f"Read {length} bytes with SYN "
@@ -1404,6 +1432,19 @@ class Yamux(IMuxedConn):
                 elif (
                     typ == TYPE_DATA or typ == TYPE_WINDOW_UPDATE
                 ) and flags & FLAG_ACK:
+                    # Enforce receive window before accepting ACK+DATA body
+                    # (GHSA-xx4q-fj82-qjp5 / go-yamux ErrRecvWindowExceeded).
+                    if typ == TYPE_DATA and length > 0:
+                        async with self.streams_lock:
+                            ack_recv_window = self._recv_window_for(stream_id)
+                        if ack_recv_window is not None and length > ack_recv_window:
+                            await self._go_away_protocol_error(
+                                f"ACK DATA length={length} exceeds "
+                                f"recv_window={ack_recv_window} on stream "
+                                f"{stream_id}"
+                            )
+                            break
+
                     ack_payload: bytes = b""
                     ack_payload_err: IncompleteReadError | None = None
                     if typ == TYPE_DATA and length > 0:
@@ -1436,18 +1477,9 @@ class Yamux(IMuxedConn):
                                     if stream_id in self.stream_events:
                                         self.stream_events[stream_id].set()
                                 else:
+                                    # Pre-checked against recv_window above.
                                     self.stream_buffers[stream_id].extend(ack_payload)
-                                    self.streams[stream_id].recv_window -= len(
-                                        ack_payload
-                                    )
-                                    if self.streams[stream_id].recv_window < 0:
-                                        logger.warning(
-                                            f"Stream {stream_id}: peer exceeded "
-                                            f"receive window by "
-                                            f"{-self.streams[stream_id].recv_window}"
-                                            f" bytes"
-                                        )
-                                        self.streams[stream_id].recv_window = 0
+                                    stream.recv_window -= len(ack_payload)
                                     self.stream_events[stream_id].set()
                                     logger.debug(
                                         f"Received ACK with {length} bytes "
@@ -1511,6 +1543,21 @@ class Yamux(IMuxedConn):
                             f"{length} for peer {self.peer_id}, rtt={self._rtt:.4f}s"
                         )
                 elif typ == TYPE_DATA:
+                    # Enforce receive window before reading / buffering the
+                    # body. Previously a negative window was only logged and
+                    # clamped to zero, allowing unbounded buffer growth
+                    # (GHSA-xx4q-fj82-qjp5). Match go-yamux: treat as a
+                    # protocol error and terminate the session.
+                    if length > 0:
+                        async with self.streams_lock:
+                            data_recv_window = self._recv_window_for(stream_id)
+                        if data_recv_window is not None and length > data_recv_window:
+                            await self._go_away_protocol_error(
+                                f"DATA length={length} exceeds "
+                                f"recv_window={data_recv_window} on stream "
+                                f"{stream_id}"
+                            )
+                            break
                     try:
                         logger.debug(
                             f"Yamux handle_incoming() reading {length} bytes "
@@ -1549,45 +1596,54 @@ class Yamux(IMuxedConn):
                             f"Yamux handle_incoming() received {data_len} bytes "
                             f"data for stream {stream_id}, peer {self.peer_id}"
                         )
+                        recv_window_exceeded = False
+                        exceeded_recv_window = 0
                         async with self.streams_lock:
                             if stream_id in self.streams:
-                                self.stream_buffers[stream_id].extend(data)
-                                self.streams[stream_id].recv_window -= len(data)
-                                if self.streams[stream_id].recv_window < 0:
-                                    logger.warning(
-                                        f"Stream {stream_id}: peer exceeded "
-                                        f"receive window by "
-                                        f"{-self.streams[stream_id].recv_window}"
-                                        f" bytes"
-                                    )
-                                    self.streams[stream_id].recv_window = 0
-                                # Always set event, even if no data
-                                # in case FIN/RST is set
-                                self.stream_events[stream_id].set()
-
-                                if flags & FLAG_FIN:
-                                    logger.debug(
-                                        f"Received FIN for stream {self.peer_id}:"
-                                        f"{stream_id}, marking recv_closed"
-                                    )
-                                    self.streams[stream_id].recv_closed = True
-                                    if self.streams[stream_id].send_closed:
-                                        self.streams[stream_id].closed = True
-
-                                if flags & FLAG_RST:
-                                    logger.debug(
-                                        f"Resetting stream {stream_id} for peer"
-                                        f"{self.peer_id} (RST on DATA)"
-                                    )
-                                    self.streams[stream_id].closed = True
-                                    self.streams[stream_id].reset_received = True
-                                    # Wake up reader
+                                stream = self.streams[stream_id]
+                                # Defensive re-check under lock. Do not buffer
+                                # on violation (go-yamux ErrRecvWindowExceeded).
+                                if data_len > stream.recv_window:
+                                    recv_window_exceeded = True
+                                    exceeded_recv_window = stream.recv_window
+                                else:
+                                    self.stream_buffers[stream_id].extend(data)
+                                    stream.recv_window -= data_len
+                                    # Always set event, even if no data
+                                    # in case FIN/RST is set
                                     self.stream_events[stream_id].set()
 
-                                if self.streams[stream_id].closed:
-                                    self._finalize_stream_locked(
-                                        self.streams[stream_id], fully_closed=True
-                                    )
+                                    if flags & FLAG_FIN:
+                                        logger.debug(
+                                            f"Received FIN for stream {self.peer_id}:"
+                                            f"{stream_id}, marking recv_closed"
+                                        )
+                                        stream.recv_closed = True
+                                        if stream.send_closed:
+                                            stream.closed = True
+
+                                    if flags & FLAG_RST:
+                                        logger.debug(
+                                            f"Resetting stream {stream_id} for peer"
+                                            f"{self.peer_id} (RST on DATA)"
+                                        )
+                                        stream.closed = True
+                                        stream.reset_received = True
+                                        # Wake up reader
+                                        self.stream_events[stream_id].set()
+
+                                    if stream.closed:
+                                        self._finalize_stream_locked(
+                                            stream, fully_closed=True
+                                        )
+
+                        if recv_window_exceeded:
+                            await self._go_away_protocol_error(
+                                f"DATA length={data_len} exceeds "
+                                f"recv_window={exceeded_recv_window} "
+                                f"on stream {stream_id}"
+                            )
+                            break
 
                     except trio.TooSlowError:
                         raise
