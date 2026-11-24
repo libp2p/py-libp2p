@@ -1,4 +1,5 @@
-"""Tests for the INotifee-style event bus (``libp2p/events``).
+"""
+Tests for the INotifee-style event bus (``libp2p/events``).
 
 Covers listener registration/fan-out, per-listener exception isolation
 (the same guarantee the Swarm INotifee fan-out gives), thread-safety for
@@ -68,7 +69,8 @@ def test_remove_listener_stops_delivery() -> None:
 
 
 def test_listener_isolation_raising_listener_does_not_block_others() -> None:
-    """A raising listener must never propagate into the emitter or block others.
+    """
+    A raising listener must never propagate into the emitter or block others.
 
     This mirrors ``Swarm._notify`` (INotifee) semantics.
     """

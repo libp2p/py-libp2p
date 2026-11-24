@@ -9,9 +9,11 @@ prometheus registry so it appears on the shared ``/metrics`` endpoint
 served by :class:`libp2p.metrics.metrics.Metrics`.
 """
 
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
-from prometheus_client.core import Collector, GaugeMetricFamily
+from prometheus_client.core import GaugeMetricFamily
+from prometheus_client.registry import Collector
 
 _BLOCK_RESOURCES = ("connections", "memory", "streams")
 

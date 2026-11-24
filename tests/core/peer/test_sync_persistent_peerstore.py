@@ -554,7 +554,10 @@ def test_sync_peerstore_caps_addresses_loaded_from_datastore(tmp_path):
 
     datastore = SQLiteDatastoreSync(path=tmp_path / "legacy_addrs.db")
     pid = ID(b"legacy-addresses")
-    addrs = [Multiaddr(f"/ip4/10.0.0.1/tcp/{1000 + i}") for i in range(200)]
+    addrs = [
+        Multiaddr(f"/ip4/10.0.0.1/tcp/{1000 + i}")
+        for i in range(MAX_ADDRS_PER_PEER + 200)
+    ]
     datastore.put(b"addr:" + pid.to_bytes(), serialize_addresses(addrs))
 
     store = SyncPersistentPeerStore(datastore)

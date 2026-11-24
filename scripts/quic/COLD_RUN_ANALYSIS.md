@@ -214,9 +214,7 @@ await client_host.connect(info)
 # WARM-UP: Open a few streams to ensure server is ready
 warmup_count = 3
 for i in range(warmup_count):
-    warmup_stream = await client_host.new_stream(
-        info.peer_id, [PING_PROTOCOL_ID]
-    )
+    warmup_stream = await client_host.new_stream(info.peer_id, [PING_PROTOCOL_ID])
     await warmup_stream.write(b"\x01" * PING_LENGTH)
     await warmup_stream.read(PING_LENGTH)
     await warmup_stream.close()

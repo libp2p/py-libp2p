@@ -98,12 +98,14 @@ async def test_large_scale_fanout():
             # Wait until at least 90% of peers receive the message
             min_received = int(num_peers * 0.9)
             await wait_for(
-                lambda: sum(
-                    1
-                    for msgs in received_messages
-                    if any(msg.data == message_data for msg in msgs)
-                )
-                >= min_received,
+                lambda: (
+                    sum(
+                        1
+                        for msgs in received_messages
+                        if any(msg.data == message_data for msg in msgs)
+                    )
+                    >= min_received
+                ),
                 timeout=10.0,
                 fail_msg=(
                     f"Fewer than {min_received}/{num_peers} peers received "
@@ -230,19 +232,21 @@ async def test_simulated_partition():
             await pubsubs[2].publish(topic_group2, message_group2)
 
             await wait_for(
-                lambda: all(
-                    any(
-                        msg.data == message_group1
-                        for msg in received_messages[topic_group1][i]
+                lambda: (
+                    all(
+                        any(
+                            msg.data == message_group1
+                            for msg in received_messages[topic_group1][i]
+                        )
+                        for i in range(2)
                     )
-                    for i in range(2)
-                )
-                and all(
-                    any(
-                        msg.data == message_group2
-                        for msg in received_messages[topic_group2][i]
+                    and all(
+                        any(
+                            msg.data == message_group2
+                            for msg in received_messages[topic_group2][i]
+                        )
+                        for i in range(2, 4)
                     )
-                    for i in range(2, 4)
                 ),
                 timeout=10.0,
                 fail_msg="Partitioned group messages did not arrive",
@@ -384,12 +388,14 @@ async def test_mesh_stability():
 
             # Wait until at least 75% of peers receive the message
             await wait_for(
-                lambda: sum(
-                    1
-                    for msgs in received_messages
-                    if any(msg.data == message_data for msg in msgs)
-                )
-                >= 3,
+                lambda: (
+                    sum(
+                        1
+                        for msgs in received_messages
+                        if any(msg.data == message_data for msg in msgs)
+                    )
+                    >= 3
+                ),
                 timeout=10.0,
                 fail_msg="Fewer than 3 peers received message after topology change",
             )

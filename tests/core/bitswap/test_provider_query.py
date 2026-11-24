@@ -415,9 +415,7 @@ class TestBitswapClientProviderQueryIntegration:
 
         assert result == block_data
         # No provider found → no direct send, only broadcast fallback
-        assert len(sends_to_peer) == 0, (
-            f"Expected no direct sends, got {sends_to_peer}"
-        )
+        assert len(sends_to_peer) == 0, f"Expected no direct sends, got {sends_to_peer}"
         assert broadcast_called, "Expected broadcast fallback to be called"
 
     @pytest.mark.trio

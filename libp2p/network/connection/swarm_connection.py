@@ -357,7 +357,10 @@ class SwarmConn(INetConn):
             # go-libp2p where the handler returning ends the stream. NetStream
             # close is itself shielded and bounded, and is a no-op when the
             # handler already closed it.
-            if not net_stream.is_closed:
+            if (
+                not getattr(net_stream, "_keep_open", False)
+                and not net_stream.is_closed
+            ):
                 try:
                     await net_stream.close()
                 except Exception:

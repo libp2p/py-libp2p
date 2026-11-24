@@ -19,22 +19,22 @@ class GossipsubMetrics:
         self.received = Counter(
             "gossipsub_received_total",
             "Messages successfully received",
-            )
+        )
 
         self.publish = Counter(
             "gossipsub_publish_total",
             "Messages to be published",
-            )
+        )
 
         self.subopts = Counter(
             "gossipsub_subopts_total",
             "Messages notifying peer subscriptions",
-            )
+        )
 
         self.control = Counter(
             "gossipsub_control_total",
             "Received control messages",
-            )
+        )
 
         self.msg_size = Histogram(
             "gossipsub_message_bytes",
@@ -45,7 +45,7 @@ class GossipsubMetrics:
         self.publish_out = Counter(
             "gossipsub_publish_out_total",
             "Messages published by this node",
-            )
+        )
 
         self.publish_out_bytes = Histogram(
             "gossipsub_publish_out_bytes",

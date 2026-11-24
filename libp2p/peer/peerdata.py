@@ -35,7 +35,7 @@ address list grows for the lifetime of the process, and the persisted
 address blob grows with it.  Keeping the most recently seen addresses is
 what dialing needs; older ones are stale by definition.
 """
-MAX_ADDRS_PER_PEER = 32
+MAX_ADDRS_PER_PEER = 1000
 
 
 class PeerData(IPeerData):

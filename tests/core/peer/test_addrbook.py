@@ -144,7 +144,10 @@ def test_add_addrs_is_capped_per_peer():
     from libp2p.peer.peerdata import MAX_ADDRS_PER_PEER, PeerData
 
     data = PeerData()
-    addrs = [Multiaddr(f"/ip4/10.0.0.1/tcp/{1000 + i}") for i in range(200)]
+    addrs = [
+        Multiaddr(f"/ip4/10.0.0.1/tcp/{1000 + i}")
+        for i in range(MAX_ADDRS_PER_PEER + 200)
+    ]
     for addr in addrs:
         data.add_addrs([addr])
 

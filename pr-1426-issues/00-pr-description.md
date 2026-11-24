@@ -7,6 +7,7 @@ This PR fixes the issues documented in **#1425** (Kademlia DHT), **#1450** (Bits
 ### Kademlia DHT (`libp2p/kad_dht/`) — closes #1425
 
 **Critical**
+
 - `timeReceived` now uses RFC3339Nano format per spec (was Unix epoch float), with backward-compatible parsing of both formats.
 - `clean_record()` strips `timeReceived` from incoming records to prevent timestamp forgery.
 - PUT_VALUE stream is reset on validation/storage failure per spec ("on any error, the stream is reset") instead of closed gracefully.
@@ -14,12 +15,14 @@ This PR fixes the issues documented in **#1425** (Kademlia DHT), **#1450** (Bits
 - Value store LRU eviction at 50K entries (`MAX_VALUE_STORE_SIZE`) to prevent OOM.
 
 **Spec compliance**
+
 - ADD_PROVIDER: receiver echoes the request per spec; key length capped at 80 bytes; per-peer rate limit (10 msgs / 10s window); max 20 provider records per message.
 - FIND_NODE key validated as a valid multihash.
 - GET_VALUE: 128-byte max key size; records signature-validated before serving; closer-peer addresses stored in the peerbook.
 - Connection type now reports dynamically (CONNECTED / CAN_CONNECT / NOT_CONNECTED) instead of always CONNECTED.
 
 **Provider system**
+
 - Iterative provider discovery using closer peers from responses (was single-shot).
 - Provider records republished every 22 hours per spec.
 - Providers per key capped at k=20.
@@ -27,12 +30,14 @@ This PR fixes the issues documented in **#1425** (Kademlia DHT), **#1450** (Bits
 - JSON persistence for `ProviderStore` via `persist_dir`.
 
 **Value store**
+
 - Value records republished every 22 hours.
 - LRU eviction (50K) prevents OOM.
 - JSON persistence for `ValueStore` via `persist_dir`.
 - Closer-peer addresses stored in peerbook when processing GET_VALUE responses.
 
 **Peer routing**
+
 - Iterative lookup continues while unqueried closest peers remain (was terminating early).
 - BETA=3 resiliency: at least 3 closest peers queried before termination.
 - Total query timeout (10s per peer) prevents hangs on unresponsive peers.
@@ -40,12 +45,14 @@ This PR fixes the issues documented in **#1425** (Kademlia DHT), **#1450** (Bits
 - Candidates re-sorted by distance after discovering closer peers.
 
 **Security**
+
 - IP diversity filtering: max 2 peers per globally-routable subnet per bucket (eclipse-attack protection, issue #1383).
 - Max varint protection: all varint reads use `read_varint_prefixed_bytes_limited` (10-byte prefix cap).
 - KAD handlers only registered in server mode.
 - Inbound concurrency limiter (max 12 concurrent handlers).
 
 **Bug fixes**
+
 - ADD_PROVIDER sender is fire-and-forget: Kubo never sends an echo response, so waiting for one blocked every announcement for the query timeout (this was the root cause of `dht/provide` timing out against the public network). The receiver still echoes per spec.
 - Sliding-window ADD_PROVIDER sends (semaphore, ALPHA in flight) so a slow peer no longer stalls the whole batch.
 - Default namespace validators (`pk`, `ipns`) now registered via `apply_fallbacks()` in `KadDHT.__init__` — IPNS records were previously accepted without validation.
@@ -61,6 +68,7 @@ This PR fixes the issues documented in **#1425** (Kademlia DHT), **#1450** (Bits
 - Routing-table refresh uses a random key within the bucket's XOR range.
 
 **Cleanup**
+
 - Removed dead code: `_propagate_to_closest_peers()`, `is_cid_like_key`, `is_reserved_or_private_addr`, `PEER_REFRESH_INTERVAL`, `_rt_refresh_nursery`, `should_republish()`, `PROVIDER_ADDRESS_TTL`, `gen_random_peer_id_with_cpl()`, `get_active_cpls()`, `_get_providers_from_peer()` wrapper.
 - Deduplicated response building (`_add_closer_peers_to_response()`) and key encoding (`_encode_key()`).
 

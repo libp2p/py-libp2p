@@ -1,13 +1,13 @@
-"""Tests for the event-bus-backed metrics pipeline.
+"""
+Tests for the event-bus-backed metrics pipeline.
 
 Covers the new per-module collectors (bitswap, discovery, outbound DHT,
 outbound pubsub), the ``MetricsListener`` type dispatch and
 ``Metrics.attach`` wiring.
 """
 
-from prometheus_client import REGISTRY
 import pytest
-import trio
+from prometheus_client import REGISTRY
 
 from libp2p.bitswap.events import BitswapEvent
 from libp2p.discovery.events.events import DiscoveryEvent
@@ -80,7 +80,13 @@ def test_kad_dht_metrics_records_outbound_events() -> None:
     metrics = Metrics()
 
     cases = [
-        {"lookup": True, "success": True, "duration_ms": 42.0, "peers_queried": 4, "peers_found": 3},
+        {
+            "lookup": True,
+            "success": True,
+            "duration_ms": 42.0,
+            "peers_queried": 4,
+            "peers_found": 3,
+        },
         {"provide": True, "success": True, "peers_announced": 5},
         {"find_providers": True, "success": True, "providers_found": 2},
         {"put_value_out": True, "success": True},
