@@ -14,6 +14,7 @@ hard_coded_slash) are reported but do not block the pre-commit hook.
 import argparse
 from pathlib import Path
 import re
+import sys
 from typing import Any
 
 
@@ -64,13 +65,20 @@ def scan_for_path_issues(directory: Path) -> dict[str, list[dict[str, Any]]]:
         r"venv/",
         r"\.venv/",
         r"site-packages/",
+        r"(^|/)build/",  # setuptools output, gitignored and not source
         r"scripts/audit_paths\.py",  # Contains suggestion strings that match patterns
         r"_pb2\.py$",  # Generated protobuf code
     ]
 
     for py_file in directory.rglob("*.py"):
+        # Match exclusions against a forward-slash form of the path. The
+        # patterns above are written with forward slashes, but str() of a Path
+        # on Windows uses backslashes, so "venv/" and friends never matched
+        # there and the audit walked the whole virtualenv.
+        relative = str(py_file).replace("\\", "/")
+
         # Skip excluded files
-        if any(re.search(pattern, str(py_file)) for pattern in exclude_patterns):
+        if any(re.search(pattern, relative) for pattern in exclude_patterns):
             continue
 
         try:
@@ -247,6 +255,12 @@ def main():
     if not directory.exists():
         print(f"Error: Directory {directory} does not exist")
         return 1
+
+    # The report uses non-ASCII status characters. A Windows console defaults
+    # to a legacy codepage, where printing them raises UnicodeEncodeError and
+    # takes the pre-commit hook down with it.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
     print("🔍 Scanning for path handling issues...")
     issues = scan_for_path_issues(directory)
