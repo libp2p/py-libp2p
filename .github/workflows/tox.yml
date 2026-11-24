@@ -110,7 +110,9 @@ jobs:
     timeout-minutes: 60  # 1 hour timeout
     strategy:
       matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        # Note: 3.14 on Windows is deferred until upstream miniupnpc ships prebuilt
+        # cp314-win_amd64 wheels (source build fails due to missing ws2_32 MSVC symbols).
+        python-version: ["3.11", "3.12", "3.13"]
         toxenv: [core, demos, utils, wheel]
       fail-fast: false
     steps:
@@ -135,9 +137,6 @@ jobs:
           uv pip install tox
       - name: Test with tox
         shell: bash
-        env:
-          CFLAGS: "-Wno-error=incompatible-pointer-types"
-          CPPFLAGS: "-Wno-error=incompatible-pointer-types"
         run: |
           source venv/Scripts/activate
           if [[ "${{ matrix.toxenv }}" == "wheel" ]]; then
