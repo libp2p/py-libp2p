@@ -80,6 +80,7 @@ logging.getLogger("multiaddr").setLevel(logging.DEBUG)
 logging.getLogger("libp2p").setLevel(logging.DEBUG)
 
 PROTOCOL_ID = TProtocol("/bidirectional-chat/1.0.0")
+ECHO_PROTOCOL_ID = TProtocol("/echo/1.0.0")
 MAX_READ_LEN = 2**32 - 1
 
 
@@ -97,7 +98,7 @@ async def echo_mode(host, server_maddr: str, message: str) -> None:
         logger.debug(f"Successfully connected to peer {info.peer_id}")
 
         print("Opening stream...")
-        stream = await host.new_stream(info.peer_id, [PROTOCOL_ID])
+        stream = await host.new_stream(info.peer_id, [ECHO_PROTOCOL_ID])
         logger.debug(f"Stream opened: {stream}")
 
         print(f"Sending: {message}")
