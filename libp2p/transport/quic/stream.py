@@ -9,27 +9,18 @@ import time
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, cast
 
+from aioquic.quic.exceptions import StreamStateError
 import trio
 
 from libp2p.io.exceptions import IOException
 from libp2p.stream_muxer.exceptions import MuxedStreamEOF
 
 from .exceptions import (
-    QUICStreamBackpressureError,
     QUICStreamClosedError,
     QUICStreamError,
     QUICStreamResetError,
     QUICStreamTimeoutError,
 )
-
-try:
-    from aioquic.quic.connection import (
-        QuicConnectionError,
-        StreamFinishedError,
-    )
-except ImportError:
-    QuicConnectionError = None  # type: ignore[assignment,misc]
-    StreamFinishedError = None  # type: ignore[assignment,misc]
 
 if TYPE_CHECKING:
     from libp2p.abc import IMuxedStream
@@ -328,7 +319,6 @@ class QUICStream(IMuxedStream):
             QUICStreamClosedError: Stream is closed for writing
             QUICStreamResetError: Stream was reset while waiting to write
             QUICStreamTimeoutError: No send capacity within ``WRITE_TIMEOUT``
-            QUICStreamBackpressureError: Flow control window exhausted
 
         """
         if not data:
@@ -382,42 +372,18 @@ class QUICStream(IMuxedStream):
             # Raised by _wait_for_send_capacity(): the stream state already
             # reflects what happened, do not additionally reset the stream.
             raise
-        except ValueError as e:
-            if "unknown peer-initiated stream" in str(e):
-                raise QUICStreamClosedError(
-                    f"Stream {self.stream_id} was already closed in QUIC layer"
-                ) from e
-            logger.error(f"Error writing to stream {self.stream_id}: {e}")
-            await self._handle_stream_error(e)
-            raise
-        except AssertionError as e:
-            # aioquic asserts on "cannot call write() after FIN" / "after reset()".
-            # Our write side is already closed; surface that as a closed-stream
-            # error instead of resetting the stream (which would also kill the
-            # peer's still-open read side).
-            msg = str(e)
-            if "after FIN" in msg or "after reset" in msg:
-                self._write_closed = True
-                logger.debug(
-                    f"Write on stream {self.stream_id} after local FIN/reset: {e}"
-                )
-                raise QUICStreamClosedError(
-                    f"Stream {self.stream_id} write side is closed"
-                ) from e
-            logger.error(f"Error writing to stream {self.stream_id}: {e}")
-            await self._handle_stream_error(e)
-            raise
+        except StreamStateError as e:
+            # aioquic refuses data once our sending part has ended (FIN, reset or
+            # the peer's STOP_SENDING) or the stream is gone. Surface that as a
+            # closed-stream error instead of resetting the stream, which would
+            # also kill the peer's still-open read side.
+            self._write_closed = True
+            logger.debug(f"Write on stream {self.stream_id} after it ended: {e}")
+            raise QUICStreamClosedError(
+                f"Stream {self.stream_id} write side is closed"
+            ) from e
         except Exception as e:
             logger.error(f"Error writing to stream {self.stream_id}: {e}")
-            # Convert QUIC-specific errors using isinstance checks
-            if QuicConnectionError is not None and isinstance(e, QuicConnectionError):
-                error_code = getattr(e, "error_code", None)
-                # QUIC flow control error code is 0x03
-                if error_code == 0x03:
-                    raise QUICStreamBackpressureError(
-                        f"Flow control limit reached: {e}",
-                        error_code=error_code,
-                    )
             await self._handle_stream_error(e)
             raise
 
@@ -456,12 +422,16 @@ class QUICStream(IMuxedStream):
             return
 
         try:
-            # Send FIN to close write side
-            self._connection._quic.send_stream_data(
-                self._stream_id, b"", end_stream=True
-            )
-            self._connection._signal_activity()
-            await self._connection._transmit()
+            quic = self._connection._quic
+            if quic.can_send_stream_data(self._stream_id):
+                # Send FIN to close write side
+                quic.send_stream_data(self._stream_id, b"", end_stream=True)
+                self._connection._signal_activity()
+                await self._connection._transmit()
+            else:
+                # Our sending part already ended: FIN, reset or the peer's
+                # STOP_SENDING.
+                logger.debug(f"Stream {self.stream_id} write side already ended")
 
             self._write_closed = True
 
@@ -474,29 +444,6 @@ class QUICStream(IMuxedStream):
             logger.debug(f"Stream {self.stream_id} write side closed")
 
         except Exception as e:
-            # Classify the exception using isinstance instead of string matching.
-            # AssertionError: aioquic raises this for "after FIN" / "after reset".
-            # ValueError: aioquic raises this for unknown peer-initiated streams.
-            # StreamFinishedError: explicit stream-finished signal.
-            is_expected_shutdown = (
-                isinstance(e, AssertionError)
-                or (
-                    StreamFinishedError is not None
-                    and isinstance(e, StreamFinishedError)
-                )
-                or (isinstance(e, ValueError) and "peer-initiated" in str(e))
-            )
-            if is_expected_shutdown:
-                self._write_closed = True
-                async with self._state_lock:
-                    if self._read_closed:
-                        self._state = StreamState.CLOSED
-                    else:
-                        self._state = StreamState.WRITE_CLOSED
-                logger.debug(
-                    f"Ignoring close_write error on stream {self.stream_id}: {e}"
-                )
-                return
             logger.error(f"Error closing write side of stream {self.stream_id}: {e}")
 
     async def close_read(self) -> None:
@@ -545,13 +492,11 @@ class QUICStream(IMuxedStream):
             self._connection._quic.reset_stream(self._stream_id, error_code)
             await self._connection._transmit()
 
+        except StreamStateError as e:
+            # The peer has not opened the stream, expected during shutdown races.
+            logger.debug(f"Ignoring reset error on stream {self.stream_id}: {e}")
         except Exception as e:
-            # ValueError for unknown peer-initiated streams is expected
-            # during shutdown races; downgrade to debug.
-            if isinstance(e, ValueError) and "peer-initiated" in str(e):
-                logger.debug(f"Ignoring reset error on stream {self.stream_id}: {e}")
-            else:
-                logger.error(f"Error sending reset for stream {self.stream_id}: {e}")
+            logger.error(f"Error sending reset for stream {self.stream_id}: {e}")
         finally:
             # Always cleanup resources
             await self._cleanup_resources()

@@ -690,9 +690,6 @@ async def test_verify_peer_identity_raises_when_inbound_has_no_certificate() -> 
     mock_quic_conn = Mock()
     mock_quic_conn.configuration = Mock()
     mock_quic_conn.configuration.is_client = False
-    mock_quic_conn._handshake_complete = True
-    mock_quic_conn.tls = Mock()
-    mock_quic_conn.tls._peer_certificate = None
 
     connection = QUICConnection(
         quic_connection=mock_quic_conn,
