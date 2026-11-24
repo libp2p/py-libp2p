@@ -229,49 +229,27 @@ async def test_dial_listen_open_stream_echo(harness, version):
 
 
 @pytest.mark.trio
-async def test_listener_is_ice_lite_respond_only(monkeypatch):
+async def test_listener_full_controlled_with_ice_lite_answer_sdp():
     """
-    The listener is a true ICE-Lite agent (#1512): it answers the dialer's STUN
-    connectivity checks but never initiates its own. We tag the listener's muxed
-    connections (they alone go through ``make_connection_ice_lite``) and count
-    outbound STUN binding requests from them — during ICE establishment it must
-    be zero.
-
-    Consent freshness (``query_consent``) is intentionally kept in production but
-    also sends binding requests once ICE completes; we neutralise it here so the
-    count reflects *establishment* checks only and the assertion is deterministic
-    rather than resting on a wall-clock margin before the first consent probe.
+    Listener uses a full controlled muxed ICE agent (#1626 / aioice#114); the
+    dialer's synthetic answer still advertises ``a=ice-lite`` so the dialer is
+    controlling. py↔py STUN dial must complete without the old Lite monkey-patch.
     """
-    import aioice.ice as _ice
     from multiaddr import Multiaddr
 
     from libp2p.peer.id import ID
-    import libp2p.transport.webrtc._udp_mux as _udp_mux
+    from libp2p.transport.webrtc.certificate import WebRTCCertificate
+    from libp2p.transport.webrtc.sdp import build_synthetic_answer
 
-    async def _no_consent(self):  # type: ignore[no-untyped-def]
-        return None
-
-    monkeypatch.setattr(_ice.Connection, "query_consent", _no_consent)
-
-    lite_conn_ids: set[int] = set()
-    real_make_lite = _udp_mux.make_connection_ice_lite
-
-    def _tracking_make_lite(conn):  # type: ignore[no-untyped-def]
-        lite_conn_ids.add(id(conn))
-        real_make_lite(conn)
-
-    monkeypatch.setattr(_udp_mux, "make_connection_ice_lite", _tracking_make_lite)
-
-    outbound = {"listener_checks": 0}
-    real_request = _ice.StunProtocol.request
-
-    async def _counting_request(self, *a, **k):  # type: ignore[no-untyped-def]
-        owner = getattr(self, "receiver", None)
-        if owner is not None and id(owner) in lite_conn_ids:
-            outbound["listener_checks"] += 1
-        return await real_request(self, *a, **k)
-
-    monkeypatch.setattr(_ice.StunProtocol, "request", _counting_request)
+    cred = "libp2p+webrtc+v1/abcdefghijklmnop"
+    answer = build_synthetic_answer(
+        host="127.0.0.1",
+        port=4001,
+        certhash_multibase=WebRTCCertificate.generate().fingerprint_to_multibase(),
+        ufrag=cred,
+        pwd=cred,
+    )
+    assert "a=ice-lite" in answer
 
     server, server_kp = _transport()
     dialer, _ = _transport(webrtc_direct_dial_version=1)
@@ -291,11 +269,6 @@ async def test_listener_is_ice_lite_respond_only(monkeypatch):
             conn = await dialer.dial(maddr)
             assert conn.peer_id == server_id
             await handler_fired.wait()
-            assert lite_conn_ids, "listener never built a muxed ICE-Lite connection"
-            assert outbound["listener_checks"] == 0, (
-                f"ICE-Lite listener sent {outbound['listener_checks']} outbound "
-                "connectivity checks; a Lite agent must be respond-only"
-            )
             await conn.close()
     finally:
         await listener.close()

@@ -12,9 +12,10 @@ Provides two transport variants per the libp2p WebRTC specification:
 
   * **STUN listener (spec path, default).** Inbound dials hit one shared UDP
     port; the listener infers the SDP offer from the first STUN packet and
-    answers over a muxed ICE agent. Outbound dials synthesise an ICE-Lite
-    answer from the multiaddr with no public STUN servers. This is the only
-    path that interoperates with go-libp2p / js-libp2p / browsers.
+    answers over a muxed **full controlled** ICE agent. Outbound dials
+    synthesise an answer with ``a=ice-lite`` from the multiaddr (dialer is
+    controlling) with no public STUN servers. This is the only path that
+    interoperates with go-libp2p / js-libp2p / browsers.
   * **HTTP ``POST /sdp`` harness (dev only).** Opt-in via
     ``WebRTCTransportConfig(enable_sdp_http_harness=True)``; a minimal HTTP
     signalling server for **py↔py debugging only** — it is *not* interoperable
