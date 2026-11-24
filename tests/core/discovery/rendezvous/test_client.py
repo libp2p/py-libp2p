@@ -132,7 +132,7 @@ class TestRendezvousClient:
         peer_register = response.discoverResponse.registrations.add()
         peer_register.ns = "test-namespace"
         peer_register.peer.id = ID.from_base58("QmTest123").to_bytes()
-        peer_register.peer.addrs.append(b"/ip4/127.0.0.1/tcp/8001")
+        peer_register.peer.addrs.append(Multiaddr("/ip4/127.0.0.1/tcp/8001").to_bytes())
         peer_register.ttl = DEFAULT_TTL
 
         mock_stream.read.return_value = response.SerializeToString()
