@@ -74,7 +74,7 @@ Activation:
 
 Python selection (default):
   Parse requires-python and Programming Language :: Python :: 3.X classifiers
-  from pyproject.toml. Use the intersection (today 3.10-3.13). Pick the newest
+  from pyproject.toml. Use the intersection (today 3.10-3.14). Pick the newest
   installed interpreter in that set. If a needed version is missing and uv is
   available (including with -Python), install it via ``uv python install``.
 
@@ -117,8 +117,8 @@ function Get-SupportedPythonMinors {
 
     $req = [regex]::Match($text, 'requires-python\s*=\s*"([^"]+)"')
     $minMinor = 10
-    # Exclusive upper bound on the 3.X minor (default: allow through 3.13).
-    $maxExclusiveMinor = 14
+    # Exclusive upper bound on the 3.X minor (default: allow through 3.14).
+    $maxExclusiveMinor = 15
     if ($req.Success) {
         $spec = $req.Groups[1].Value.Replace(" ", "")
         foreach ($part in $spec.Split(",")) {
@@ -165,7 +165,7 @@ function Get-SupportedPythonMinors {
     )
     if ($filtered.Count -eq 0) {
         # Last-resort defaults matching current classifiers.
-        $filtered = @("3.10", "3.11", "3.12", "3.13")
+        $filtered = @("3.10", "3.11", "3.12", "3.13", "3.14")
     }
     return $filtered
 }

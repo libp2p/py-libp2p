@@ -21,7 +21,7 @@ Python's built-in ``venv`` module. Instructions vary by platform:
 
 .. note::
 
-    py-libp2p contributor setup is currently supported on Python versions ``<= 3.13``.
+    py-libp2p contributor setup is currently supported on Python versions ``<= 3.14``.
 
 .. warning::
 
@@ -55,7 +55,7 @@ The script checks for ``uv`` (``>= 0.13.4``,
 required unless ``--pip``) before installing, keeps ``pip`` at the
 eMudhra/emSign CA floor on the ``--pip`` path, and selects the newest
 **installed** Python that appears in ``pyproject.toml`` classifiers and
-satisfies ``requires-python`` (currently ``3.10``–``3.13``). If none is on
+satisfies ``requires-python`` (currently ``3.10``–``3.14``). If none is on
 ``PATH``, it runs ``uv python install`` for the newest supported version.
 
 .. note::
@@ -259,7 +259,7 @@ Setup Steps
 
    ``setup_dev.ps1`` checks for ``uv`` (``>= 0.13.4``, required unless
    ``-Pip``), selects the newest supported Python from
-   ``pyproject.toml`` classifiers (``3.10``–``3.13``; installs via
+   ``pyproject.toml`` classifiers (``3.10``–``3.14``; installs via
    ``uv python install`` when missing), or floors ``pip`` (``>= 26.2.2``) on the
    ``-Pip`` path, and installs the ``dev`` dependency group.
 
