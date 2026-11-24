@@ -135,6 +135,9 @@ jobs:
           uv pip install tox
       - name: Test with tox
         shell: bash
+        env:
+          CFLAGS: "-Wno-error=incompatible-pointer-types"
+          CPPFLAGS: "-Wno-error=incompatible-pointer-types"
         run: |
           source venv/Scripts/activate
           if [[ "${{ matrix.toxenv }}" == "wheel" ]]; then
