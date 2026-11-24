@@ -33,13 +33,13 @@ jobs:
           else
             echo "TOXENV=py${python}-${toxenv}" | tr -d '.' | tee -a $GITHUB_ENV
           fi
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v10.4.0
         with:
           # Floor, not pin: uv < 0.13.4 trusts the compromised eMudhra/emSign CA
           # certificates (GHSA-hq85-5cpj-mr62). A range resolves to the newest
@@ -56,7 +56,7 @@ jobs:
 
       - name: Cache nimble packages
         if: matrix.toxenv == 'interop'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.nimble
@@ -74,13 +74,13 @@ jobs:
 
       - name: Setup Node.js for interop testing
         if: matrix.toxenv == 'interop'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '22'
 
       - name: Setup Go for interop testing
         if: matrix.toxenv == 'interop'
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: '1.25'
 
@@ -116,13 +116,13 @@ jobs:
         toxenv: [core, demos, utils, wheel]
       fail-fast: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v10.4.0
         with:
           # Floor, not pin: uv < 0.13.4 trusts the compromised eMudhra/emSign CA
           # certificates (GHSA-hq85-5cpj-mr62). A range resolves to the newest
