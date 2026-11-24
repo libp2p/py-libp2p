@@ -71,7 +71,7 @@ Options:
                           Must be in the supported set from pyproject.toml.
   --pip                   Force the pip install path even if uv is available
   --skip-pre-commit       Do not run pre-commit install
-  --skip-system-checks    Skip cmake/pkg-config/GMP/uv checks (not recommended)
+  --skip-system-checks    Skip the uv check (not recommended)
 
 Activation:
   Running the script as a program cannot change your current shell. To create
@@ -87,8 +87,6 @@ Python selection (default):
   install it via ``uv python install``.
 
 System prerequisites (checked before install):
-  Linux:  sudo apt-get install cmake pkg-config libgmp-dev
-  macOS:  brew install cmake pkgconfig gmp
   uv >= 0.13.4 (required unless --pip):
           curl -LsSf https://astral.sh/uv/install.sh | sh
           then: export PATH="$HOME/.local/bin:$PATH"
@@ -168,29 +166,8 @@ check_system_prereqs() {
 
     echo "Checking system prerequisites..."
     local missing=0
-    local cmake_bin pkg_bin uv_bin
+    local uv_bin
     local uv_missing_or_old=0
-
-    if cmake_bin="$(command -v cmake 2>/dev/null)"; then
-        echo -e "  cmake:      ${GREEN}OK${NC} (${cmake_bin})"
-    else
-        echo -e "  cmake:      ${RED}MISSING${NC}"
-        missing=1
-    fi
-    if pkg_bin="$(command -v pkg-config 2>/dev/null)"; then
-        echo -e "  pkg-config: ${GREEN}OK${NC} (${pkg_bin})"
-    else
-        echo -e "  pkg-config: ${RED}MISSING${NC}"
-        missing=1
-    fi
-    if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists gmp 2>/dev/null; then
-        echo -e "  GMP:        ${GREEN}OK${NC} (pkg-config gmp)"
-    elif command -v pkg-config >/dev/null 2>&1; then
-        # Only blame GMP when pkg-config itself is present; otherwise the
-        # missing pkg-config line above already explains the failure.
-        echo -e "  GMP:        ${RED}MISSING${NC} (pkg-config gmp)"
-        missing=1
-    fi
 
     # uv is required on the default path (used both to sync deps and to
     # install a supported Python when none is on PATH). --pip skips this.
@@ -217,18 +194,8 @@ check_system_prereqs() {
 
     if [[ "${missing}" -ne 0 ]]; then
         echo
-        if [[ "$(uname -s)" == "Darwin" ]]; then
-            echo -e "${YELLOW}Install with Homebrew:${NC}"
-            echo "  brew install cmake pkgconfig gmp"
-        else
-            echo -e "${YELLOW}Install on Debian/Ubuntu:${NC}"
-            echo "  sudo apt-get install cmake pkg-config libgmp-dev"
-        fi
-        if [[ "${uv_missing_or_old}" -ne 0 && "${FORCE_PIP}" -eq 0 ]]; then
-            echo
-            print_uv_install_hint
-        fi
-        echo "See docs/contributing.rst (Prerequisites)."
+        print_uv_install_hint
+        echo "See docs/contributing.rst (Setup Steps)."
         exit 1
     fi
 }
@@ -468,12 +435,7 @@ ensure_uv() {
 
 run_uv_setup() {
     echo -e "${GREEN}Using uv for installation (recommended)...${NC}"
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-        CFLAGS="$(pkg-config --cflags gmp)" LDFLAGS="$(pkg-config --libs gmp)" \
-            uv sync --python "${PY_VER}" --group dev
-    else
-        uv sync --python "${PY_VER}" --group dev
-    fi
+    uv sync --python "${PY_VER}" --group dev
     if [[ "${SKIP_PRE_COMMIT}" -eq 0 ]]; then
         echo -e "${GREEN}Installing pre-commit hooks...${NC}"
         uv run pre-commit install
@@ -498,12 +460,7 @@ run_pip_setup() {
         python -m pip install --upgrade "pip>=${MIN_PIP_VERSION}"
     fi
 
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-        CFLAGS="$(pkg-config --cflags gmp)" LDFLAGS="$(pkg-config --libs gmp)" \
-            pip install --group dev -e .
-    else
-        pip install --group dev -e .
-    fi
+    pip install --group dev -e .
 
     if [[ "${SKIP_PRE_COMMIT}" -eq 0 ]]; then
         echo -e "${GREEN}Installing pre-commit hooks...${NC}"

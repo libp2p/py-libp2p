@@ -1,0 +1,1 @@
+Fixed the SECIO key exchange on Windows, which used secp256k1 instead of P-256 and so could not agree on a shared secret with other platforms or implementations.
