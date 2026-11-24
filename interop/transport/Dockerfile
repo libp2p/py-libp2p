@@ -11,9 +11,7 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     redis-tools \
     build-essential \
-    cmake \
     pkg-config \
-    libgmp-dev \
     libsrtp2-dev \
     git \
     curl \

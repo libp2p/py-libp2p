@@ -17,7 +17,6 @@
 import doctest
 from pathlib import Path
 import sys
-from unittest.mock import MagicMock
 
 # Add project root to path (cross-platform)
 _docs_dir = Path(__file__).resolve().parent
@@ -350,20 +349,6 @@ doctest_default_flags = (
     | doctest.NORMALIZE_WHITESPACE
 )
 
-# -- Mocked dependencies ----------------------------------------
-
-# Mock out dependencies that are unbuildable on readthedocs, as recommended here:
-# https://docs.readthedocs.io/en/rel/faq.html#i-get-import-errors-on-libraries-that-depend-on-c-modules
-
-
-# Add new modules to mock here (it should be the same list
-# as those excluded in pyproject.toml)
-MOCK_MODULES = [
-    "fastecdsa",
-    "fastecdsa.encoding",
-    "fastecdsa.encoding.sec1",
-]
-sys.modules.update((mod_name, MagicMock()) for mod_name in MOCK_MODULES)
 # -- Extension configuration -------------------------------------------------
 
 # -- Options for todo extension ----------------------------------------------
