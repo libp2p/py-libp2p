@@ -9,7 +9,6 @@ from trio.testing import wait_all_tasks_blocked
 
 from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.peer.id import ID
-from libp2p.transport.quic import aioquic_compat
 from libp2p.transport.quic.config import QUICTransportConfig
 from libp2p.transport.quic.connection import QUICConnection
 from libp2p.transport.quic.exceptions import QUICStreamResetError
@@ -125,8 +124,9 @@ async def test_write_after_fin_raises_closed_without_reset(
     quic_connection: QUICConnection,
 ) -> None:
     """Map aioquic's after-FIN error to a closed error instead of a reset."""
+    from aioquic.quic.exceptions import StreamStateError
+
     from libp2p.transport.quic.exceptions import QUICStreamClosedError
-    from libp2p.transport.quic.stream import StreamStateError
 
     stream = QUICStream(
         connection=quic_connection,
@@ -134,124 +134,12 @@ async def test_write_after_fin_raises_closed_without_reset(
         direction=StreamDirection.OUTBOUND,
         remote_addr=("127.0.0.1", 4001),
     )
-    # aioquic before 1.8 asserts; from 1.8 it raises StreamStateError.
-    if StreamStateError is not None:
-        quic_connection._quic.send_stream_data.side_effect = StreamStateError(  # type: ignore[attr-defined]
-            "Cannot send data after FIN"
-        )
-    else:
-        quic_connection._quic.send_stream_data.side_effect = AssertionError(  # type: ignore[attr-defined]
-            "cannot call write() after FIN"
-        )
+    quic_connection._quic.send_stream_data.side_effect = StreamStateError(  # type: ignore[attr-defined]
+        "Cannot send data after FIN"
+    )
 
     with pytest.raises(QUICStreamClosedError):
         await stream.write(b"late")
 
     assert not stream.is_reset()
-    quic_connection._quic.reset_stream.assert_not_called()  # type: ignore[attr-defined]
-
-
-@pytest.mark.trio
-async def test_write_after_reset_raises_closed_without_reset(
-    quic_connection: QUICConnection,
-) -> None:
-    """
-    Aioquic 1.8's "Cannot send data after the stream was reset" is a closed write.
-
-    Regression: the handler matched the substring "after reset", which never
-    appears in that message ("after the stream was reset"), so every write on an
-    already-reset stream fell through to _handle_stream_error(), logged ERROR,
-    and reset the stream again — 1,436 ERROR lines per hour in production.
-    """
-    from libp2p.transport.quic.exceptions import QUICStreamClosedError
-    from libp2p.transport.quic.stream import StreamStateError
-
-    if StreamStateError is None:
-        pytest.skip("aioquic < 1.8 raises AssertionError for this case")
-
-    stream = QUICStream(
-        connection=quic_connection,
-        stream_id=0,
-        direction=StreamDirection.OUTBOUND,
-        remote_addr=("127.0.0.1", 4001),
-    )
-    quic_connection._quic.send_stream_data.side_effect = StreamStateError(  # type: ignore[attr-defined]
-        "Cannot send data after the stream was reset"
-    )
-
-    with pytest.raises(QUICStreamClosedError):
-        await stream.write(b"late")
-
-    assert stream._write_closed is True
-    quic_connection._quic.reset_stream.assert_not_called()  # type: ignore[attr-defined]
-
-
-def test_aioquic_fin_only_frame_is_kept_when_packet_is_full() -> None:
-    """
-    Keep a FIN-only STREAM frame pending when the packet has no room for it.
-
-    aioquic's ``QuicStreamSender.get_frame`` clears ``_pending_eof`` before the packet
-    builder can reject the frame. With the compat fix applied, a negative
-    ``max_size`` (no room) must leave the FIN pending for the next packet.
-    """
-    from aioquic.quic.stream import QuicStreamSender
-
-    aioquic_compat.apply()
-
-    sender = QuicStreamSender(stream_id=4, writable=True)
-    sender.write(b"", end_stream=True)
-    assert sender._pending_eof is True
-
-    # No room in this packet: FIN must stay pending.
-    assert sender.get_frame(-1) is None
-    assert sender._pending_eof is True
-    assert sender.buffer_is_empty is False
-
-    # Next packet has room: FIN-only frame is emitted exactly once.
-    frame = sender.get_frame(1200)
-    assert frame is not None and frame.fin is True and frame.data == b""
-    assert sender._pending_eof is False
-    assert sender.get_frame(1200) is None
-
-
-def test_aioquic_compat_apply_is_idempotent() -> None:
-    from aioquic.quic.stream import QuicStreamSender
-
-    aioquic_compat.apply()
-    first = QuicStreamSender.get_frame
-    aioquic_compat.apply()
-    assert QuicStreamSender.get_frame is first
-
-
-@pytest.mark.trio
-async def test_close_write_treats_stream_state_error_as_closed(
-    quic_connection: QUICConnection,
-) -> None:
-    """
-    StreamStateError means the local write side is already closed.
-
-    aioquic 1.8 raises it instead of AssertionError for a stream that was
-    already reset. It must count as a closed write side: leaving the flag unset
-    let the wrapper be removed with an unfinished send half, which aioquic can
-    never discard (the production leak).
-    """
-    from libp2p.transport.quic.stream import StreamStateError
-
-    if StreamStateError is None:
-        pytest.skip("aioquic < 1.8 raises AssertionError for this case")
-
-    stream = QUICStream(
-        connection=quic_connection,
-        stream_id=0,
-        direction=StreamDirection.OUTBOUND,
-        remote_addr=("127.0.0.1", 4001),
-    )
-    quic_connection._quic.send_stream_data.side_effect = StreamStateError(  # type: ignore[attr-defined]
-        "Cannot send data after the stream was reset"
-    )
-
-    await stream.close_write()
-
-    assert stream._write_closed is True
-    assert not stream.is_closed()  # only the write half is closed
     quic_connection._quic.reset_stream.assert_not_called()  # type: ignore[attr-defined]

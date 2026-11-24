@@ -115,7 +115,7 @@ async def test_try_dial():
         host1, host2 = hosts
         service = AutoNATService(host1, serve=False)
         peer_id = host2.get_id()
-        addr = b"/ip4/127.0.0.1/tcp/4001"
+        addr = Multiaddr("/ip4/127.0.0.1/tcp/4001").to_bytes()
 
         with patch.object(host1, "connect", new_callable=AsyncMock) as mock_connect:
             result = await service._try_dial(peer_id, [addr])

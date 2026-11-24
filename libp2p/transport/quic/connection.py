@@ -45,10 +45,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Every QUICConnection wraps an aioquic QuicConnection; make sure the aioquic
-# fixes are in place before any stream data is sent.
-aioquic_compat.apply()
-
 # Event-loop cadence for QUIC connections.  The sans-IO aioquic core needs
 # periodic pumping for timers and queued events, but the old fixed 1-10ms
 # polling (and a zero-sleep yield while events were being processed) made
@@ -742,9 +738,6 @@ class QUICConnection(IRawConnection, IMuxedConn):
             return None
 
         try:
-            # Extract peer certificate from TLS handshake
-            await self._extract_peer_certificate()
-
             if not self._peer_certificate:
                 # Inbound (server-side) connections MUST present a peer
                 # certificate so the remote libp2p identity can be established.
@@ -793,43 +786,6 @@ class QUICConnection(IRawConnection, IMuxedConn):
             # Wrap other errors in verification error
             raise QUICPeerVerificationError(f"Peer verification failed: {e}") from e
 
-    async def _extract_peer_certificate(self) -> None:
-        """Extract peer certificate from completed TLS handshake."""
-        try:
-            # Get peer certificate from aioquic TLS context
-            if self._quic.tls:
-                tls_context = self._quic.tls
-
-                if tls_context._peer_certificate:
-                    # aioquic stores the peer certificate as cryptography
-                    # x509.Certificate
-                    self._peer_certificate = tls_context._peer_certificate
-                    logger.debug(
-                        f"Extracted peer certificate: {self._peer_certificate.subject}"
-                    )
-                else:
-                    logger.debug("No peer certificate found in TLS context")
-
-            else:
-                logger.debug("No TLS context available for certificate extraction")
-
-        except Exception as e:
-            logger.warning(f"Failed to extract peer certificate: {e}")
-
-            # Try alternative approach - check if certificate is in handshake events
-            try:
-                # Some versions of aioquic might expose certificate differently
-                config = self._quic.configuration
-                if hasattr(config, "certificate") and config.certificate:
-                    # This would be the local certificate, not peer certificate
-                    # but we can use it for debugging
-                    logger.debug("Found local certificate in configuration")
-
-            except Exception as inner_e:
-                logger.error(
-                    f"Alternative certificate extraction also failed: {inner_e}"
-                )
-
     async def get_peer_certificate(self) -> x509.Certificate | None:
         """
         Get the peer's TLS certificate.
@@ -838,23 +794,6 @@ class QUICConnection(IRawConnection, IMuxedConn):
             The peer's X.509 certificate, or None if not available
 
         """
-        # Fast path: already extracted
-        if self._peer_certificate:
-            return self._peer_certificate
-
-        # If our high-level handshake flag is set, extract now
-        if self._handshake_completed:
-            await self._extract_peer_certificate()
-            return self._peer_certificate
-
-        # For server-side connections promoted before background tasks have
-        # processed the HandshakeCompleted event, the aioquic-level TLS
-        # handshake is already done (quic_conn._handshake_complete is True)
-        # but our _handshake_completed flag hasn't been set yet.  Read the
-        # certificate directly from the TLS context in that case.
-        if self._quic and getattr(self._quic, "_handshake_complete", False):
-            await self._extract_peer_certificate()
-
         return self._peer_certificate
 
     def _validate_peer_certificate(self) -> bool:
@@ -924,13 +863,6 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     "tls_context_available": True,
                     "tls_state": getattr(self._quic.tls, "state", None),
                 }
-
-                # Check for peer certificate in TLS context
-                if hasattr(self._quic.tls, "_peer_certificate"):
-                    tls_info["tls_peer_certificate_available"] = (
-                        self._quic.tls._peer_certificate is not None
-                    )
-
                 info["tls_debug"] = tls_info
             else:
                 info["tls_debug"] = {"tls_context_available": False}
@@ -1976,8 +1908,9 @@ class QUICConnection(IRawConnection, IMuxedConn):
         # Store handshake event for security verification
         self._handshake_events.append(event)
 
-        # Try to extract certificate information after handshake
-        await self._extract_peer_certificate()
+        # The first certificate is the peer's own, the others its chain.
+        if event.peer_certificates:
+            self._peer_certificate = event.peer_certificates[0]
 
         logger.debug("✅ Setting connected event")
         self._connected_event.set()
@@ -2446,20 +2379,6 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     logger.debug(
                         f"Error notifying parent of connection termination: {e}"
                     )
-
-                # Clear internal aioquic event queues and stream maps to free memory
-                # immediately.
-                if self._quic is not None:
-                    if hasattr(self._quic, "_events"):
-                        try:
-                            self._quic._events.clear()
-                        except Exception:
-                            pass
-                    if hasattr(self._quic, "_streams"):
-                        try:
-                            self._quic._streams.clear()
-                        except Exception:
-                            pass
 
                 logger.debug(f"QUIC connection to {self._remote_peer_id} closed")
 

@@ -59,7 +59,8 @@ class ServerQuicConnection(QuicConnection):
     override _initialize to set the flag immediately after the TLS context is created.
 
     Coupled to aioquic internal APIs (``_initialize``,
-    ``tls._request_client_certificate``) stable for ``aioquic>=1.2.0``; guarded by
+    ``tls._request_client_certificate``), as aioquic has no public option for
+    requesting a client certificate; guarded by
     ``test_server_quic_connection_requests_client_certificate``.
     """
 
@@ -144,6 +145,9 @@ class QUICListener(IListener):
         self._pending_cid_by_quic_id: dict[int, bytes] = {}
         self._initial_dcid_by_quic_id: dict[int, bytes] = {}
         self._handler_invoked_quic_ids: set[int] = set()
+        # This listener consumes HandshakeCompleted for pending connections, so it
+        # keeps the event to hand it to the QUICConnection when promoting it.
+        self._handshake_by_quic_id: dict[int, events.HandshakeCompleted] = {}
 
         # Performance tracking
         self._stats = {
@@ -499,13 +503,13 @@ class QUICListener(IListener):
                 f"[PENDING] Handling packet for pending connection "
                 f"{destination_connection_id.hex()[:8]}... "
                 f"({len(data)} bytes from {addr}), "
-                f"handshake_complete={quic_conn._handshake_complete}"
+                f"handshake_complete={self._is_handshake_complete(quic_conn)}"
             )
 
             # Check if handshake is complete BEFORE feeding data
             # If complete, promote immediately so connection's event loop
             # handles all events
-            if quic_conn._handshake_complete:
+            if self._is_handshake_complete(quic_conn):
                 logger.debug(
                     f"[PENDING] Handshake already complete for "
                     f"{destination_connection_id.hex()[:8]}, "
@@ -551,7 +555,7 @@ class QUICListener(IListener):
             await self._transmit_for_connection(quic_conn, addr)
 
             # Check again if handshake completed after processing events
-            if quic_conn._handshake_complete:
+            if self._is_handshake_complete(quic_conn):
                 logger.debug(
                     f"[PENDING] Handshake completed after event processing for "
                     f"{destination_connection_id.hex()[:8]}, promoting connection"
@@ -668,25 +672,12 @@ class QUICListener(IListener):
                 original_destination_connection_id=packet_info.destination_cid,
             )
 
-            quic_conn._replenish_connection_ids()
-            # Use the first host CID as our routing CID
-            if quic_conn._host_cids:
-                destination_connection_id = quic_conn._host_cids[0].cid
-                logger.debug(
-                    f"Using host Connection ID as routing Connection ID: "
-                    f"{destination_connection_id.hex()}"
-                )
-            else:
-                # Fallback to random if no host CIDs generated
-                import secrets
-
-                destination_connection_id = secrets.token_bytes(8)
-                logger.debug(
-                    f"Fallback to random Connection ID: "
-                    f"{destination_connection_id.hex()}"
-                )
-
-            logger.debug(f"Generated {len(quic_conn._host_cids)} host CIDs for client")
+            # Use the host CID as our routing CID
+            destination_connection_id = quic_conn.host_cid
+            logger.debug(
+                f"Using host Connection ID as routing Connection ID: "
+                f"{destination_connection_id.hex()}"
+            )
 
             logger.debug(
                 f"QUIC connection created for destination Connection ID "
@@ -839,7 +830,7 @@ class QUICListener(IListener):
             await self._transmit_for_connection(quic_conn, addr)
 
             # Check if handshake completed
-            if quic_conn._handshake_complete:
+            if self._is_handshake_complete(quic_conn):
                 logger.debug("PENDING: Handshake completed, promoting connection")
                 await self._promote_pending_connection(
                     quic_conn, addr, destination_connection_id
@@ -910,6 +901,7 @@ class QUICListener(IListener):
                     break
 
                 elif isinstance(event, events.HandshakeCompleted):
+                    self._handshake_by_quic_id[id(quic_conn)] = event
                     await self._promote_pending_connection(
                         quic_conn, addr, destination_connection_id
                     )
@@ -922,21 +914,6 @@ class QUICListener(IListener):
                     # remaining events (including the re-queued one).
                     quic_conn._events.append(event)
                     break
-
-                elif isinstance(event, events.ProtocolNegotiated):
-                    # If handshake is complete, promote connection immediately
-                    # This can happen before HandshakeCompleted event in some cases
-                    (
-                        _,
-                        pending_conn,
-                        is_pending,
-                    ) = await self._registry.find_by_connection_id(
-                        destination_connection_id
-                    )
-                    if quic_conn._handshake_complete and is_pending and pending_conn:
-                        await self._promote_pending_connection(
-                            quic_conn, addr, destination_connection_id
-                        )
 
                 elif isinstance(event, events.StreamDataReceived):
                     # For pending connections, if handshake is complete, we should
@@ -955,7 +932,7 @@ class QUICListener(IListener):
                         # will handle it
                         pass
                     elif is_pending and pending_conn:
-                        if quic_conn._handshake_complete:
+                        if self._is_handshake_complete(quic_conn):
                             await self._promote_pending_connection(
                                 quic_conn, addr, destination_connection_id
                             )
@@ -978,7 +955,11 @@ class QUICListener(IListener):
                     )
                     if connection_obj:
                         await connection_obj._handle_stream_reset(event)
-                    elif is_pending and pending_conn and quic_conn._handshake_complete:
+                    elif (
+                        is_pending
+                        and pending_conn
+                        and self._is_handshake_complete(quic_conn)
+                    ):
                         # Promote connection to handle stream reset
                         await self._promote_pending_connection(
                             quic_conn, addr, destination_connection_id
@@ -1081,6 +1062,11 @@ class QUICListener(IListener):
             self._pending_cid_by_quic_id.pop(quic_key, None)
             self._initial_dcid_by_quic_id.pop(quic_key, None)
             self._handler_invoked_quic_ids.discard(quic_key)
+            self._handshake_by_quic_id.pop(quic_key, None)
+
+    def _is_handshake_complete(self, quic_conn: QuicConnection) -> bool:
+        """Return whether this listener saw HandshakeCompleted for quic_conn."""
+        return id(quic_conn) in self._handshake_by_quic_id
 
     async def _promote_pending_connection(
         self,
@@ -1178,6 +1164,10 @@ class QUICListener(IListener):
                 init_dcid = self._initial_dcid_by_quic_id.pop(quic_key, None)
                 if init_dcid:
                     await self._registry.remove_initial_connection_id(init_dcid)
+
+                handshake = self._handshake_by_quic_id.get(quic_key)
+                if handshake is not None and not connection._handshake_completed:
+                    await connection._handle_handshake_completed(handshake)
 
                 # Belt-and-suspenders: reject inbound connections that have no
                 # peer certificate before connect() and the application callback.
@@ -1601,6 +1591,7 @@ class QUICListener(IListener):
                         for qid in set(stale_qids):
                             self._pending_cid_by_quic_id.pop(qid, None)
                             self._handler_invoked_quic_ids.discard(qid)
+                            self._handshake_by_quic_id.pop(qid, None)
                             init_dcid = self._initial_dcid_by_quic_id.pop(qid, None)
                             if init_dcid:
                                 init_dcids_to_remove.append(init_dcid)
@@ -1618,6 +1609,7 @@ class QUICListener(IListener):
                     for qid in orphan_qids:
                         self._pending_cid_by_quic_id.pop(qid, None)
                         self._handler_invoked_quic_ids.discard(qid)
+                        self._handshake_by_quic_id.pop(qid, None)
                         init_dcid = self._initial_dcid_by_quic_id.pop(qid, None)
                         if init_dcid:
                             init_dcids_to_remove.append(init_dcid)
@@ -1682,6 +1674,7 @@ class QUICListener(IListener):
                 self._conn_by_quic_id.clear()
                 self._pending_cid_by_quic_id.clear()
                 self._handler_invoked_quic_ids.clear()
+                self._handshake_by_quic_id.clear()
 
             # If we spawned our own internal nursery (fallback path), cancel
             # its scope and wait for the system task to finish. This also

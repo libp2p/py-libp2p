@@ -537,72 +537,6 @@ class TestPeerRouting:
                 for call in calls
             ), "Should perform self-lookup with local ID"
 
-    @pytest.mark.trio
-    async def test_query_single_peer_for_closest_success(self, peer_routing):
-        """Test _query_single_peer_for_closest method."""
-        target_key = b"target_key"
-        peer_id = create_valid_peer_id("test")
-        new_peers = []
-        responding_peers = []
-
-        # Mock successful query
-        mock_result = [create_valid_peer_id("result1"), create_valid_peer_id("result2")]
-        with patch.object(
-            peer_routing, "_query_peer_for_closest", return_value=mock_result
-        ):
-            await peer_routing._query_single_peer_for_closest(
-                peer_id, target_key, new_peers, responding_peers
-            )
-
-            assert len(new_peers) == 2
-            assert all(peer in new_peers for peer in mock_result)
-            # peer_id should be in responding_peers since it returned results
-            assert peer_id in responding_peers
-
-    @pytest.mark.trio
-    async def test_query_single_peer_for_closest_failure(self, peer_routing):
-        """Test _query_single_peer_for_closest when query fails."""
-        target_key = b"target_key"
-        peer_id = create_valid_peer_id("test")
-        new_peers = []
-        responding_peers = []
-
-        # Mock query failure
-        with patch.object(
-            peer_routing,
-            "_query_peer_for_closest",
-            side_effect=Exception("Query failed"),
-        ):
-            await peer_routing._query_single_peer_for_closest(
-                peer_id, target_key, new_peers, responding_peers
-            )
-
-            # Should handle exception gracefully
-            assert len(new_peers) == 0
-            assert len(responding_peers) == 0
-
-    @pytest.mark.trio
-    async def test_query_single_peer_deduplication(self, peer_routing):
-        """Test that _query_single_peer_for_closest deduplicates peers."""
-        target_key = b"target_key"
-        peer_id = create_valid_peer_id("test")
-        duplicate_peer = create_valid_peer_id("duplicate")
-        new_peers = [duplicate_peer]  # Pre-existing peer
-        responding_peers: list = []
-
-        # Mock query to return the same peer
-        mock_result = [duplicate_peer, create_valid_peer_id("new")]
-        with patch.object(
-            peer_routing, "_query_peer_for_closest", return_value=mock_result
-        ):
-            await peer_routing._query_single_peer_for_closest(
-                peer_id, target_key, new_peers, responding_peers
-            )
-
-            # Should not add duplicate
-            assert len(new_peers) == 2  # Original + 1 new peer
-            assert new_peers.count(duplicate_peer) == 1
-
     def test_constants(self):
         """Test that important constants are properly defined."""
         assert ALPHA == 10  # Per libp2p Kademlia spec
@@ -633,7 +567,7 @@ class TestPeerRouting:
                 side_effect=mock_query_side_effect,
             ):
                 with patch(
-                    "libp2p.kad_dht.peer_routing.sort_peer_ids_by_distance"
+                    "libp2p.kad_dht.lookup.sort_peer_ids_by_distance"
                 ) as mock_sort:
                     # Always return different peers to prevent convergence
                     mock_sort.side_effect = lambda key, peers: peers[:20]
@@ -668,7 +602,7 @@ class TestPeerRouting:
         extra_peers = [create_valid_peer_id(f"sw_peer{i}") for i in range(3, 5)]
         started_at: dict[str, float] = {}
 
-        async def mock_query(peer, _target_key, new_peers, _responding_peers=None):
+        async def mock_query(peer, _target_key):
             started_at[str(peer)] = trio.current_time()
             # Peer 2 is slow; all others are fast
             if peer == initial_peers[2]:
@@ -677,9 +611,10 @@ class TestPeerRouting:
                 await trio.sleep(0.01)
             # Fast peers in round 1 "discover" extra peers
             if peer == initial_peers[0]:
-                new_peers.append(extra_peers[0])
-            elif peer == initial_peers[1]:
-                new_peers.append(extra_peers[1])
+                return [extra_peers[0]]
+            if peer == initial_peers[1]:
+                return [extra_peers[1]]
+            return []
 
         with patch.object(
             peer_routing.routing_table,
@@ -690,7 +625,7 @@ class TestPeerRouting:
             mock_host.get_peerstore().peer_ids.return_value = []
             with patch.object(
                 peer_routing,
-                "_query_single_peer_for_closest",
+                "_query_peer_for_closest",
                 side_effect=mock_query,
             ):
                 await peer_routing.find_closest_peers_network(target_key)
@@ -726,19 +661,16 @@ class TestPeerRouting:
         group3 = [create_valid_peer_id(f"vol_g3_{i}") for i in range(ALPHA)]
         queried_peers: list[ID] = []
 
-        async def mock_query(peer, _target_key, new_peers, _responding_peers=None):
+        async def mock_query(peer, _target_key):
             queried_peers.append(peer)
             await trio.sleep(0)
             # Group 1 queries discover group 2 peers
             if peer in group1:
-                for p in group2:
-                    if p not in new_peers:
-                        new_peers.append(p)
+                return list(group2)
             # Group 2 queries discover group 3 peers
-            elif peer in group2:
-                for p in group3:
-                    if p not in new_peers:
-                        new_peers.append(p)
+            if peer in group2:
+                return list(group3)
+            return []
 
         with patch.object(
             peer_routing.routing_table,
@@ -749,7 +681,7 @@ class TestPeerRouting:
             mock_host.get_peerstore().peer_ids.return_value = []
             with patch.object(
                 peer_routing,
-                "_query_single_peer_for_closest",
+                "_query_peer_for_closest",
                 side_effect=mock_query,
             ):
                 # Track round sizes by counting queries per nursery cycle
@@ -786,10 +718,11 @@ class TestPeerRouting:
         for _ in range(8):
             queried: list[ID] = []
 
-            async def mock_query(peer, _target_key, _new_peers, _sink=queried):
+            async def mock_query(peer, _target_key, _sink=queried):
                 # Discover nothing, so the candidate window stays as given.
                 _sink.append(peer)
                 await trio.sleep(0)
+                return []
 
             with patch.object(
                 peer_routing.routing_table,
@@ -800,7 +733,7 @@ class TestPeerRouting:
                 mock_host.get_peerstore().peer_ids.return_value = []
                 with patch.object(
                     peer_routing,
-                    "_query_single_peer_for_closest",
+                    "_query_peer_for_closest",
                     side_effect=mock_query,
                 ):
                     await peer_routing.find_closest_peers_network(
@@ -844,12 +777,12 @@ class TestPeerRouting:
         for _ in range(12):
             queried: list[ID] = []
 
-            async def mock_query(peer, _target_key, new_peers, _sink=queried):
+            async def mock_query(peer, _target_key, _sink=queried):
                 _sink.append(peer)
                 await trio.sleep(0)
                 # Only ever discover a peer farther than everything known, so
                 # no round can improve the closest set.
-                new_peers.append(far_peer)
+                return [far_peer]
 
             with patch.object(
                 peer_routing.routing_table,
@@ -859,12 +792,12 @@ class TestPeerRouting:
                 mock_host.get_connected_peers.return_value = []
                 mock_host.get_peerstore().peer_ids.return_value = []
                 with patch(
-                    "libp2p.kad_dht.peer_routing.sort_peer_ids_by_distance",
+                    "libp2p.kad_dht.lookup.sort_peer_ids_by_distance",
                     side_effect=fake_sort,
                 ):
                     with patch.object(
                         peer_routing,
-                        "_query_single_peer_for_closest",
+                        "_query_peer_for_closest",
                         side_effect=mock_query,
                     ):
                         result = await peer_routing.find_closest_peers_network(

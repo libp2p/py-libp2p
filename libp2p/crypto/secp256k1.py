@@ -1,4 +1,11 @@
-import coincurve
+from cryptography.exceptions import InvalidSignature, UnsupportedAlgorithm
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.asymmetric.utils import (
+    decode_dss_signature,
+    encode_dss_signature,
+)
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 from libp2p.crypto.keys import (
     KeyPair,
@@ -7,17 +14,27 @@ from libp2p.crypto.keys import (
     PublicKey,
 )
 
+# The order of the secp256k1 group.
+SECP256K1_ORDER = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
+
+# Sign with deterministic nonces (RFC 6979), as libsecp256k1 does, unless the
+# OpenSSL which cryptography uses lacks them.
+try:
+    ECDSA_SHA256 = ec.ECDSA(hashes.SHA256(), deterministic_signing=True)
+except UnsupportedAlgorithm:  # pragma: no cover - depends on the OpenSSL build
+    ECDSA_SHA256 = ec.ECDSA(hashes.SHA256())
+
 
 class Secp256k1PublicKey(PublicKey):
-    def __init__(self, impl: coincurve.PublicKey) -> None:
+    def __init__(self, impl: ec.EllipticCurvePublicKey) -> None:
         self.impl = impl
 
     def to_bytes(self) -> bytes:
-        return self.impl.format()
+        return self.impl.public_bytes(Encoding.X962, PublicFormat.CompressedPoint)
 
     @classmethod
     def from_bytes(cls, data: bytes) -> "Secp256k1PublicKey":
-        impl = coincurve.PublicKey(data)
+        impl = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256K1(), data)
         return cls(impl)
 
     @classmethod
@@ -29,24 +46,39 @@ class Secp256k1PublicKey(PublicKey):
         return KeyType.Secp256k1
 
     def verify(self, data: bytes, signature: bytes) -> bool:
-        return self.impl.verify(signature, data)
+        try:
+            _, s = decode_dss_signature(signature)
+        except ValueError:
+            return False
+
+        # Like libsecp256k1, only accept the low-S form, so that signatures
+        # cannot be altered while remaining valid.
+        if s > SECP256K1_ORDER // 2:
+            return False
+
+        try:
+            self.impl.verify(signature, data, ECDSA_SHA256)
+        except InvalidSignature:
+            return False
+        return True
 
 
 class Secp256k1PrivateKey(PrivateKey):
-    def __init__(self, impl: coincurve.PrivateKey) -> None:
+    def __init__(self, impl: ec.EllipticCurvePrivateKey) -> None:
         self.impl = impl
 
     @classmethod
     def new(cls, secret: bytes | None = None) -> "Secp256k1PrivateKey":
-        private_key_impl = coincurve.PrivateKey(secret)
-        return cls(private_key_impl)
+        if secret is None:
+            return cls(ec.generate_private_key(ec.SECP256K1()))
+        return cls.from_bytes(secret)
 
     def to_bytes(self) -> bytes:
-        return self.impl.secret
+        return self.impl.private_numbers().private_value.to_bytes(32, "big")
 
     @classmethod
     def from_bytes(cls, data: bytes) -> "Secp256k1PrivateKey":
-        impl = coincurve.PrivateKey(data)
+        impl = ec.derive_private_key(int.from_bytes(data, "big"), ec.SECP256K1())
         return cls(impl)
 
     @classmethod
@@ -58,11 +90,13 @@ class Secp256k1PrivateKey(PrivateKey):
         return KeyType.Secp256k1
 
     def sign(self, data: bytes) -> bytes:
-        return self.impl.sign(data)
+        r, s = decode_dss_signature(self.impl.sign(data, ECDSA_SHA256))
+
+        # Produce the low-S form, which libsecp256k1 requires.
+        return encode_dss_signature(r, min(s, SECP256K1_ORDER - s))
 
     def get_public_key(self) -> PublicKey:
-        public_key_impl = coincurve.PublicKey.from_secret(self.impl.secret)
-        return Secp256k1PublicKey(public_key_impl)
+        return Secp256k1PublicKey(self.impl.public_key())
 
 
 def create_new_key_pair(secret: bytes | None = None) -> KeyPair:

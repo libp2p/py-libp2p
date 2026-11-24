@@ -36,21 +36,6 @@ Python's built-in ``venv`` module. Instructions vary by platform:
 Linux Setup
 ^^^^^^^^^^^
 
-Prerequisites
-"""""""""""""
-
-On Debian Linux, you need to install the following dependencies:
-
-- `GNU Multiprecision Arithmetic Library <https://gmplib.org/>`_
-- `CMake <https://cmake.org>`_
-- `freedesktop.org pkg-config <https://www.freedesktop.org/wiki/Software/pkg-config>`_
-
-Install them with:
-
-.. code:: sh
-
-    sudo apt-get install cmake pkg-config libgmp-dev
-
 Setup Steps
 """""""""""
 
@@ -66,7 +51,7 @@ Install the development dependencies using a virtual environment:
     # optional: source ./scripts/setup_dev.sh --python 3.12
     # or run without activating: ./scripts/setup_dev.sh
 
-The script checks for ``cmake``, ``pkg-config``, GMP, and ``uv`` (``>= 0.13.4``,
+The script checks for ``uv`` (``>= 0.13.4``,
 required unless ``--pip``) before installing, keeps ``pip`` at the
 eMudhra/emSign CA floor on the ``--pip`` path, and selects the newest
 **installed** Python that appears in ``pyproject.toml`` classifiers and
@@ -135,21 +120,6 @@ An alternative using ``virtualenv``:
 macOS Setup
 ^^^^^^^^^^^
 
-Prerequisites
-"""""""""""""
-
-On macOS, you need to install the following dependencies:
-
-- `GNU Multiprecision Arithmetic Library <https://gmplib.org/>`_
-- `CMake <https://cmake.org>`_
-- `freedesktop.org pkg-config <https://www.freedesktop.org/wiki/Software/pkg-config>`_
-
-Install them with:
-
-.. code:: sh
-
-    brew install cmake pkgconfig gmp
-
 Setup Steps
 """""""""""
 
@@ -191,7 +161,7 @@ Then set up the development environment:
 .. code:: sh
 
     cd py-libp2p
-    CFLAGS="$(pkg-config --cflags gmp)" LDFLAGS="$(pkg-config --libs gmp)" uv sync --group dev
+    uv sync --group dev
     uv run pre-commit install
 
 **Option 3: Manual setup with pip:**
@@ -202,7 +172,7 @@ Then set up the development environment:
     python3 -m venv .venv
     . .venv/bin/activate
     pip install --upgrade "pip>=26.2.2"  # PEP 735 needs >= 25.1; eMudhra/emSign CA fix needs >= 26.2.2
-    CFLAGS="$(pkg-config --cflags gmp)" LDFLAGS="$(pkg-config --libs gmp)" pip install --group dev -e .
+    pip install --group dev -e .
     pre-commit install
 
 **Note:** This project uses PEP 735 ``[dependency-groups]`` which requires pip >= 25.1;
@@ -243,16 +213,7 @@ Prerequisites
         winget install --id Git.Git -e
         git --version
 
-3. **CMake**
-   - Install CMake with ``winget`` or download from `cmake.org <https://cmake.org/download/>`_.
-   - Add CMake to your PATH during installation, then verify:
-
-   .. code:: powershell
-
-        winget install --id Kitware.CMake -e
-        cmake --version
-
-4. **Make** (only needed for Makefile targets such as ``make test``)
+3. **Make** (only needed for Makefile targets such as ``make test``)
 
    Prefer **Git Bash** (ships with Git). The Makefile uses Unix tools
    (``rm``, ``find``, ...) that are available in Git Bash, **not** in
@@ -296,12 +257,11 @@ Setup Steps
         # optional: . .\scripts\setup_dev.ps1 -Python 3.12
         # or: pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup_dev.ps1
 
-   ``setup_dev.ps1`` checks for ``cmake`` and ``uv`` (``>= 0.13.4``, required
-   unless ``-Pip``), selects the newest supported Python from
+   ``setup_dev.ps1`` checks for ``uv`` (``>= 0.13.4``, required unless
+   ``-Pip``), selects the newest supported Python from
    ``pyproject.toml`` classifiers (``3.10``–``3.13``; installs via
    ``uv python install`` when missing), or floors ``pip`` (``>= 26.2.2``) on the
    ``-Pip`` path, and installs the ``dev`` dependency group.
-   GMP is not required on Windows (``fastecdsa`` is skipped on ``win32``).
 
    If you ran the script without dot-sourcing, activate afterwards. Under the
    default Windows 11 Restricted policy, either unlock scripts for this session
@@ -380,7 +340,7 @@ Notes
   still a follow-up (typecheck, path-audit UTF-8, interop ``fcntl``).
 - WSL users can run ``scripts/setup_dev.sh`` inside Linux and use ``make``
   as on Linux.
-- Ensure all tools (Python, Git, CMake) are on ``PATH``.
+- Ensure all tools (Python, Git) are on ``PATH``.
 - If tools resolve to the Microsoft Store ``python`` / ``python3`` stubs,
   disable those App execution aliases or rely on the ``.venv`` interpreter
   after ``setup_dev.ps1``.

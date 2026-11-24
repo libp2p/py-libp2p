@@ -1,0 +1,10 @@
+{
+  "name": "py-libp2p-js-webrtc-direct-harness",
+  "private": true,
+  "type": "module",
+  "description": "js-libp2p WebRTC-Direct harness for py-libp2p interop tests",
+  "dependencies": {
+    "@libp2p/webrtc": "7.0.2",
+    "libp2p": "3.5.1"
+  }
+}
