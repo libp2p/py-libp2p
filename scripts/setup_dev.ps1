@@ -4,12 +4,11 @@
   Set up a py-libp2p development environment on Windows (native PowerShell).
 
 .DESCRIPTION
-  Checks cmake and uv (>= 0.13.4, required unless -Pip), selects a supported
+  Checks uv (>= 0.13.4, required unless -Pip), selects a supported
   Python from pyproject.toml (classifiers intersect requires-python), installs a
   missing interpreter via ``uv python install`` when needed (including with
   -Python), then installs the dev dependency group. With -Pip, floors pip at
-  >= 26.2.2 (eMudhra/emSign CA). GMP is not required on Windows (fastecdsa is
-  skipped on win32). Dot-source the script to also activate .venv.
+  >= 26.2.2 (eMudhra/emSign CA). Dot-source the script to also activate .venv.
 
 .PARAMETER Help
   Show help and exit.
@@ -80,13 +79,11 @@ Python selection (default):
   available (including with -Python), install it via ``uv python install``.
 
 Prerequisites (checked before install):
-  - CMake on PATH (winget install --id Kitware.CMake -e)
   - uv >= 0.13.4 unless -Pip (auto-tries winget install astral-sh.uv;
     no system Python required - uv downloads CPython)
   - Git recommended (winget install --id Git.Git -e)
   - With -Pip: a supported system Python on PATH and pip >= 26.2.2
     (eMudhra/emSign CA incident; Discussion #1570)
-  - GMP is not required on Windows (fastecdsa is skipped on win32)
 
 If script execution is blocked (common on Windows 11 Restricted policy):
   One-shot (no policy change):
@@ -307,15 +304,6 @@ function Test-SystemPrereqs {
     Write-Host "Checking system prerequisites..."
     Update-SessionPath
     $missing = $false
-    $cmake = Get-Command cmake -ErrorAction SilentlyContinue
-    if (-not $cmake) {
-        Write-Host "  cmake: MISSING" -ForegroundColor Red
-        $missing = $true
-    }
-    else {
-        Write-Host "  cmake: OK ($($cmake.Source))" -ForegroundColor Green
-    }
-
     $uv = Get-Command uv -ErrorAction SilentlyContinue
     if (-not $uv -and -not $Pip) {
         Write-Host "  uv: MISSING" -ForegroundColor Red
@@ -342,9 +330,6 @@ function Test-SystemPrereqs {
     }
 
     if ($missing) {
-        if (-not $cmake) {
-            Write-Host "Install cmake with: winget install --id Kitware.CMake -e"
-        }
         if (-not $Pip -and -not (Get-Command uv -ErrorAction SilentlyContinue)) {
             Write-Host "Install uv with: winget install --id=astral-sh.uv"
             Write-Host "Then re-run; uv will download Python - no system Python install needed."

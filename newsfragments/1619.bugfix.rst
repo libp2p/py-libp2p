@@ -1,0 +1,1 @@
+Raise ``QUICStreamClosedError`` again when writing to a QUIC stream whose sending side has ended, instead of letting aioquic's ``StreamStateError`` through and resetting the stream, which happened with aioquic 1.8 and later.
