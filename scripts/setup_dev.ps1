@@ -74,9 +74,10 @@ Activation:
 
 Python selection (default):
   Parse requires-python and Programming Language :: Python :: 3.X classifiers
-  from pyproject.toml. Use the intersection (today 3.10-3.13). Pick the newest
-  installed interpreter in that set. If a needed version is missing and uv is
-  available (including with -Python), install it via ``uv python install``.
+  from pyproject.toml. Use the intersection (today 3.10-3.14 on Linux/macOS;
+  Windows defaults cap at 3.13 until miniupnpc ships cp314 wheels). Pick the
+  newest installed interpreter in that set. If a needed version is missing and
+  uv is available (including with -Python), install it via ``uv python install``.
 
 Prerequisites (checked before install):
   - uv >= 0.13.4 unless -Pip (auto-tries winget install astral-sh.uv;
@@ -117,8 +118,8 @@ function Get-SupportedPythonMinors {
 
     $req = [regex]::Match($text, 'requires-python\s*=\s*"([^"]+)"')
     $minMinor = 10
-    # Exclusive upper bound on the 3.X minor (default: allow through 3.13).
-    $maxExclusiveMinor = 14
+    # Exclusive upper bound on the 3.X minor (default: allow through 3.14).
+    $maxExclusiveMinor = 15
     if ($req.Success) {
         $spec = $req.Groups[1].Value.Replace(" ", "")
         foreach ($part in $spec.Split(",")) {
@@ -151,6 +152,14 @@ function Get-SupportedPythonMinors {
         }
     }
 
+    # Windows: no miniupnpc cp314-win_amd64 wheel yet; keep default selection at
+    # 3.13 (matches CI). Explicit -Python 3.14 still works if the user insists.
+    if ($IsWindows -or $env:OS -eq "Windows_NT") {
+        if ($maxExclusiveMinor -gt 14) {
+            $maxExclusiveMinor = 14
+        }
+    }
+
     if ($minors.Count -eq 0) {
         for ($i = $minMinor; $i -lt $maxExclusiveMinor; $i++) {
             $minors.Add("3.$i") | Out-Null
@@ -164,7 +173,7 @@ function Get-SupportedPythonMinors {
         }
     )
     if ($filtered.Count -eq 0) {
-        # Last-resort defaults matching current classifiers.
+        # Last-resort defaults matching current Windows-safe classifiers.
         $filtered = @("3.10", "3.11", "3.12", "3.13")
     }
     return $filtered
