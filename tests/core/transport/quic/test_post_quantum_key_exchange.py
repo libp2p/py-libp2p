@@ -8,142 +8,156 @@ handshake still completes with a classical group in that case, which is why
 this test reads the TLS hello messages instead of only checking that the
 connection comes up.
 
+The hellos are read from the wire. The dialer reaches the listener through a
+UDP relay that keeps every datagram, and the QUIC Initial packets among them
+are decoded with keys any observer can derive. Nothing in aioquic is patched
+or inspected.
+
 See https://github.com/libp2p/py-libp2p/issues/1581
 """
 
-from dataclasses import dataclass, field
-
 import pytest
-from aioquic import tls
-from aioquic.buffer import Buffer
 import multiaddr
 import trio
 
 from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.peer.id import ID
 from libp2p.transport.quic.config import QUICTransportConfig
+from libp2p.transport.quic.connection import QUICConnection
 from libp2p.transport.quic.transport import QUICTransport
 from libp2p.transport.quic.utils import create_quic_multiaddr
+from tests.utils.quic_initial_hellos import (
+    Direction,
+    ObservedHellos,
+    derive_initial_keys,
+    observe_hellos,
+)
 
-# TLS NamedGroup code point (draft-ietf-tls-ecdhe-mlkem). Written out here so
-# that the test fails on an assertion, not an AttributeError, when the
-# installed aioquic has no such group.
+# TLS NamedGroup code point (draft-ietf-tls-ecdhe-mlkem).
 X25519MLKEM768 = 0x11EC
 
+LOOPBACK = "127.0.0.1"
 HANDSHAKE_TIMEOUT = 10.0
+MAX_DATAGRAM_SIZE = 65536
+
+Datagrams = list[tuple[Direction, bytes]]
 
 
-@dataclass
-class ObservedHellos:
-    """TLS hello messages parsed by aioquic during a handshake."""
-
-    # ClientHellos as the server parsed them. A second one means the client
-    # answered a HelloRetryRequest.
-    client_hellos: list[tls.ClientHello] = field(default_factory=list)
-    # ServerHellos as the client parsed them. aioquic parses a
-    # HelloRetryRequest as a ServerHello too.
-    server_hellos: list[tls.ServerHello] = field(default_factory=list)
-
-
-@pytest.fixture
-def observed_hellos(monkeypatch: pytest.MonkeyPatch) -> ObservedHellos:
+async def _relay(
+    relay_socket: trio.socket.SocketType,
+    server_address: tuple[str, int],
+    datagrams: Datagrams,
+) -> None:
     """
-    Record every ClientHello and ServerHello that aioquic parses.
+    Forward datagrams between one client and the server, keeping a copy.
 
-    aioquic has no public API for the negotiated group, so the test observes
-    the parsed messages. ``pull_client_hello`` and ``pull_server_hello`` are
-    module-level functions which ``tls.Context`` looks up at call time.
+    Whatever does not come from the server is taken to come from the client,
+    which is enough for a single dialer on loopback.
     """
-    observed = ObservedHellos()
-    pull_client_hello = tls.pull_client_hello
-    pull_server_hello = tls.pull_server_hello
-
-    def record_client_hello(buf: Buffer) -> tls.ClientHello:
-        hello = pull_client_hello(buf)
-        observed.client_hellos.append(hello)
-        return hello
-
-    def record_server_hello(buf: Buffer) -> tls.ServerHello:
-        hello = pull_server_hello(buf)
-        observed.server_hellos.append(hello)
-        return hello
-
-    monkeypatch.setattr(tls, "pull_client_hello", record_client_hello)
-    monkeypatch.setattr(tls, "pull_server_hello", record_server_hello)
-    return observed
+    client_address: tuple[str, int] | None = None
+    while True:
+        data, address = await relay_socket.recvfrom(MAX_DATAGRAM_SIZE)
+        if address == server_address:
+            datagrams.append(("server_to_client", data))
+            if client_address is not None:
+                await relay_socket.sendto(data, client_address)
+        else:
+            client_address = address
+            datagrams.append(("client_to_server", data))
+            await relay_socket.sendto(data, server_address)
 
 
-async def _handshake() -> None:
-    """Complete one QUIC handshake between two py-libp2p transports."""
+async def _handshake_through_relay() -> Datagrams:
+    """
+    Complete one QUIC handshake between two py-libp2p transports.
+
+    Returns every datagram the two sides exchanged, in order.
+    """
     server_key = create_new_key_pair()
     client_key = create_new_key_pair()
     config = QUICTransportConfig(idle_timeout=10.0, connection_timeout=5.0)
     server_transport = QUICTransport(server_key.private_key, config)
     client_transport = QUICTransport(client_key.private_key, config)
+    datagrams: Datagrams = []
 
-    async def server_handler(conn) -> None:
+    async def server_handler(conn: QUICConnection) -> None:
         await trio.sleep_forever()
 
     listener = server_transport.create_listener(server_handler)
+    relay_socket = trio.socket.socket(trio.socket.AF_INET, trio.socket.SOCK_DGRAM)
     try:
+        await relay_socket.bind((LOOPBACK, 0))
         async with trio.open_nursery() as nursery:
             server_transport.set_background_nursery(nursery)
             client_transport.set_background_nursery(nursery)
-            await listener.listen(create_quic_multiaddr("127.0.0.1", 0, "/quic"))
-            server_addr = multiaddr.Multiaddr(
-                f"{listener.get_addrs()[0]}/p2p/{ID.from_pubkey(server_key.public_key)}"
-            )
+            await listener.listen(create_quic_multiaddr(LOOPBACK, 0))
+            listen_port = listener.get_addrs()[0].value_for_protocol("udp")
+            assert listen_port is not None, "the listener has no UDP port"
+            server_port = int(listen_port)
+            nursery.start_soon(_relay, relay_socket, (LOOPBACK, server_port), datagrams)
+
+            relay_port = relay_socket.getsockname()[1]
+            relay_addr = create_quic_multiaddr(LOOPBACK, relay_port)
+            server_peer_id = ID.from_pubkey(server_key.public_key)
             with trio.fail_after(HANDSHAKE_TIMEOUT):
-                conn = await client_transport.dial(server_addr)
+                conn = await client_transport.dial(
+                    multiaddr.Multiaddr(f"{relay_addr}/p2p/{server_peer_id}")
+                )
             await conn.close()
             nursery.cancel_scope.cancel()
     finally:
+        relay_socket.close()
         if not listener._closed:
             await listener.close()
         await server_transport.close()
         await client_transport.close()
+    return datagrams
 
 
 def assert_post_quantum_key_exchange(observed: ObservedHellos) -> None:
-    """
-    Fail unless the observed handshake used X25519MLKEM768.
-
-    ``observed.client_hellos[i].supported_groups`` is the list of group code
-    points the client offered, in preference order, and ``.key_share`` is a
-    list of ``(group, public_bytes)``. ``observed.server_hellos[i].key_share``
-    is the ``(group, bytes)`` the server chose, or ``None`` on a
-    HelloRetryRequest, where ``.selected_group`` is set instead.
-    """
-    assert observed.client_hellos, "the server parsed no ClientHello"
-    assert observed.server_hellos, "the client parsed no ServerHello"
+    """Fail unless the observed handshake used X25519MLKEM768."""
+    assert observed.client_hellos, "no ClientHello in the client's Initial packets"
+    assert observed.server_hellos, "no ServerHello in the server's Initial packets"
 
     # Offered, and with a key share, so that the group does not depend on the
     # server asking for it with a HelloRetryRequest. Where it sits in the
     # client's order of preference is aioquic's policy and is not checked.
     first_client_hello = observed.client_hellos[0]
-    offered_groups = first_client_hello.supported_groups or []
-    assert X25519MLKEM768 in offered_groups, (
+    offered_groups = [f"{g:#06x}" for g in first_client_hello.supported_groups]
+    assert X25519MLKEM768 in first_client_hello.supported_groups, (
         f"the client did not offer X25519MLKEM768, only {offered_groups}. "
         "Post-quantum key exchange needs aioquic 1.9 or later"
     )
-    offered_shares = [group for group, _ in first_client_hello.key_share or []]
-    assert X25519MLKEM768 in offered_shares, (
+    offered_shares = [f"{g:#06x}" for g in first_client_hello.key_share_groups]
+    assert X25519MLKEM768 in first_client_hello.key_share_groups, (
         f"the client sent no X25519MLKEM768 key share, only {offered_shares}"
     )
 
     # Selected. The last ServerHello is the real one, after any
     # HelloRetryRequest, and carries the server's key share.
-    server_key_share = observed.server_hellos[-1].key_share
-    assert server_key_share is not None, "the last ServerHello has no key share"
-    assert server_key_share[0] == X25519MLKEM768, (
-        f"the server selected group {server_key_share[0]:#06x}, not X25519MLKEM768"
+    server_hello = observed.server_hellos[-1]
+    assert not server_hello.is_hello_retry_request, (
+        "the handshake ended on a HelloRetryRequest"
+    )
+    assert server_hello.selected_group is not None, "the ServerHello has no key share"
+    assert server_hello.selected_group == X25519MLKEM768, (
+        f"the server selected group {server_hello.selected_group:#06x}, "
+        "not X25519MLKEM768"
     )
 
 
-@pytest.mark.trio
-async def test_quic_handshake_uses_post_quantum_key_exchange(
-    observed_hellos: ObservedHellos,
-) -> None:
-    await _handshake()
+def test_initial_keys_match_rfc_9001_appendix_a1() -> None:
+    # The decoder is only as good as its key schedule, so pin that to the
+    # published vector for Destination Connection ID 0x8394c8f03e515708.
+    keys = derive_initial_keys(bytes.fromhex("8394c8f03e515708"), "client")
 
-    assert_post_quantum_key_exchange(observed_hellos)
+    assert keys.key.hex() == "1f369613dd76d5467730efcbe3b1a22d"
+    assert keys.iv.hex() == "fa044b2f42a3fd3b46fb255c"
+    assert keys.header_protection.hex() == "9f50449e04a0e810283a1e9933adedd2"
+
+
+@pytest.mark.trio
+async def test_quic_handshake_uses_post_quantum_key_exchange() -> None:
+    datagrams = await _handshake_through_relay()
+
+    assert_post_quantum_key_exchange(observe_hellos(datagrams))
