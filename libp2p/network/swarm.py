@@ -507,13 +507,12 @@ class Swarm(Service, INetworkService):
                                 e,
                             )
 
-                    # A dial already in flight when the auto-connector stopped
-                    # can still register a connection while this runs:
-                    # AutoConnector.stop() sets a flag and does not drain
-                    # self._in_flight_dials. Closing one snapshot and then
-                    # clearing the map would drop such a connection unclosed and
-                    # leak its socket, so drain instead -- take what is there,
-                    # close it, then look again. The enclosing scope bounds it.
+                    # AutoConnector.stop() cancels the connect cycle and waits
+                    # for in-flight dials (#1630), but drain anyway as defense
+                    # in depth: closing one snapshot then clearing the map could
+                    # still drop a late registration unclosed. Take what is
+                    # there, close it, then look again. The enclosing scope
+                    # bounds it.
                     async def drain_connections() -> None:
                         while self.connections:
                             batch = [
