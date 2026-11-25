@@ -17,7 +17,7 @@ jobs:
     timeout-minutes: 60  # 1 hour timeout
     strategy:
       matrix:
-        python: ["3.10", "3.11", "3.12", "3.13"]
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
         toxenv: [core, demos, interop, lint, utils, wheel]
         include:
           - python: "3.10"
@@ -110,6 +110,8 @@ jobs:
     timeout-minutes: 60  # 1 hour timeout
     strategy:
       matrix:
+        # Note: 3.14 on Windows is deferred until upstream miniupnpc ships prebuilt
+        # cp314-win_amd64 wheels (source build fails due to missing ws2_32 MSVC symbols).
         python-version: ["3.11", "3.12", "3.13"]
         toxenv: [core, demos, utils, wheel]
       fail-fast: false
