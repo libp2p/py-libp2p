@@ -5,7 +5,8 @@ TLS-Enabled Py-libp2p Bidirectional Chat Server Example
 This example demonstrates how to create a TLS-enabled py-libp2p host that acts as
 a bidirectional chat server. The server listens for incoming TLS connections and
 engages in full-duplex chat sessions where both server and client can send messages
-simultaneously.
+simultaneously. It also answers echo (``/echo/1.0.0``) and ping requests, so every
+``tls-client-demo`` mode works against it.
 
 Features:
 - TLS 1.3 encryption for secure peer-to-peer communication
@@ -75,7 +76,22 @@ logging.getLogger("multiaddr").setLevel(logging.DEBUG)
 logging.getLogger("libp2p").setLevel(logging.DEBUG)
 
 PROTOCOL_ID = TProtocol("/bidirectional-chat/1.0.0")
+ECHO_PROTOCOL_ID = TProtocol("/echo/1.0.0")
 MAX_READ_LEN = 2**32 - 1
+
+
+async def _echo_handler(stream: INetStream) -> None:
+    """Send the client's message straight back (the client's echo mode)."""
+    try:
+        msg = await stream.read(MAX_READ_LEN)
+        print(f"Echoing message: {msg.decode('utf-8', errors='replace')}")
+        await stream.write(msg)
+    except StreamEOF:
+        print("Stream closed by remote peer.")
+    except Exception as e:
+        print(f"Error in echo handler: {e}")
+    finally:
+        await stream.close()
 
 
 async def _bidirectional_chat_handler(stream: INetStream) -> None:
@@ -215,6 +231,9 @@ async def run(port: int, seed: int | None = None) -> None:
 
         host.set_stream_handler(PROTOCOL_ID, _bidirectional_chat_handler)
         logger.debug(f"Registered stream handler for protocol: {PROTOCOL_ID}")
+
+        host.set_stream_handler(ECHO_PROTOCOL_ID, _echo_handler)
+        logger.debug(f"Registered echo handler for protocol: {ECHO_PROTOCOL_ID}")
 
         # Register ping handler for ping mode
         host.set_stream_handler(PING_PROTOCOL_ID, handle_ping)
