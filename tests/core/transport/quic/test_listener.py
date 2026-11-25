@@ -2,6 +2,8 @@ import logging
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from aioquic.quic.events import HandshakeCompleted
+from aioquic.tls import CipherSuite
 from multiaddr.multiaddr import Multiaddr
 import trio
 
@@ -361,21 +363,25 @@ class TestQUICListenerRaceConditions:
         return listener_obj
 
     @pytest.fixture
-    def mock_quic_connection(self, private_key):
-        """Create mock aioquic QuicConnection with TLS handshake state."""
+    def mock_quic_connection(self, listener, private_key):
+        """Create mock aioquic QuicConnection whose handshake the listener saw."""
         peer_id = ID.from_pubkey(private_key.get_public_key())
         manager = QUICTLSConfigManager(libp2p_private_key=private_key, peer_id=peer_id)
 
         mock = Mock()
         mock.configuration = Mock()
         mock.configuration.is_client = False
-        mock._handshake_complete = True
-        mock.tls = Mock()
-        mock.tls._peer_certificate = manager.tls_config.certificate
         mock.next_event.return_value = None
         mock.datagrams_to_send.return_value = []
         mock.get_timer.return_value = None
         mock.receive_datagram = Mock()
+        listener._handshake_by_quic_id[id(mock)] = HandshakeCompleted(
+            alpn_protocol="libp2p",
+            cipher_suite=CipherSuite.AES_128_GCM_SHA256,
+            early_data_accepted=False,
+            peer_certificates=[manager.tls_config.certificate],
+            session_resumed=False,
+        )
         return mock
 
     @pytest.mark.trio

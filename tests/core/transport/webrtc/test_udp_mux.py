@@ -599,29 +599,24 @@ class TestAttachMuxedConnection:
 
 
 # ---------------------------------------------------------------------------
-# make_connection_ice_lite
+# controlled muxed connection (no local Lite helper; #1626)
 # ---------------------------------------------------------------------------
 
 
-class TestIceLite:
-    def test_lite_agent_stays_controlled(self) -> None:
-        asyncio.run(self._stays_controlled())
+class TestControlledMuxConnection:
+    def test_muxed_connection_is_controlled(self) -> None:
+        asyncio.run(self._is_controlled())
 
-    async def _stays_controlled(self) -> None:
+    async def _is_controlled(self) -> None:
         mux, _ = await UdpMux.create("127.0.0.1", 0)
         try:
             conn = mux.add_ice_connection(
-                "liteufr1",
-                "litepassword1234567890ab",
+                "ctrlufr1",
+                "ctrlpassword1234567890ab",
                 host="127.0.0.1",
-                ice_lite=True,
             )
             assert conn.ice_controlling is False
-            # RFC 8445 §6.1.1: a Lite agent is always controlled and never
-            # switches, even if a peer sends an ICE-CONTROLLED attribute (which
-            # aioice's request_received would otherwise honour).
-            conn.switch_role(ice_controlling=True)
-            assert conn.ice_controlling is False
+            assert len(conn._protocols) == 1
         finally:
             await mux.close()
 
