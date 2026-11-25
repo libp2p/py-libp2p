@@ -175,9 +175,11 @@ def build_synthetic_answer(
     """
     The server's answer as the dialer synthesises it (spec v1 step 4).
 
-    ICE-Lite, ``a=setup:passive`` (server = DTLS server), single host
-    candidate at the multiaddr's IP:port, fingerprint from the certhash (so
-    aiortc pins the server's DTLS certificate for us).
+    ICE-Lite **answer SDP** (``a=ice-lite``) so the dialer is controlling,
+    ``a=setup:passive`` (server = DTLS server), single host candidate at the
+    multiaddr's IP:port, fingerprint from the certhash (so aiortc pins the
+    server's DTLS certificate for us). The listener process itself runs a full
+    controlled ICE agent; the Lite attribute is what the dialer believes.
     """
     fingerprint_bytes = fingerprint_from_multibase(certhash_multibase)
     fingerprint_hex = ":".join(f"{b:02X}" for b in fingerprint_bytes)
