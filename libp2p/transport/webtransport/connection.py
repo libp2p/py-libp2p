@@ -13,7 +13,7 @@ import time
 from typing import Any
 
 from aioquic.buffer import Buffer
-from aioquic.h3.connection import H3_ALPN, FrameType, H3Connection
+from aioquic.h3.connection import H3_ALPN, H3Connection
 from aioquic.h3.events import (
     HeadersReceived,
     WebTransportStreamDataReceived,
@@ -74,26 +74,6 @@ class _Libp2pH3Connection(H3Connection):
             settings[_SETTINGS_WT_ENABLED] = 1
             settings[_SETTINGS_WT_MAX_SESSIONS] = 1
         return settings
-
-
-def _mark_local_webtransport_stream(
-    h3: H3Connection, stream_id: int, session_id: int
-) -> None:
-    """
-    Tell aioquic's H3 layer that *stream_id* carries WT payloads.
-
-    Before aioquic 1.8, ``create_webtransport_stream`` only sends the WT frame
-    header; it does not set ``frame_type`` on the local ``H3Stream``. Without
-    that, inbound bytes on the same bidi stream are mis-parsed as HTTP/3 frames.
-    aioquic 1.8 records the stream itself and dropped ``_get_or_create_stream``,
-    so there is nothing left to do there.
-    """
-    get_or_create = getattr(h3, "_get_or_create_stream", None)
-    if get_or_create is None:
-        return
-    with get_or_create(stream_id) as stream:
-        stream.frame_type = FrameType.WEBTRANSPORT_STREAM
-        stream.session_id = session_id
 
 
 class WebTransportConnection(IRawConnection, IMuxedConn):
@@ -234,7 +214,6 @@ class WebTransportConnection(IRawConnection, IMuxedConn):
         stream_id = self._h3.create_webtransport_stream(
             session_id=self._session_id, is_unidirectional=False
         )
-        _mark_local_webtransport_stream(self._h3, stream_id, self._session_id)
         stream = WebTransportStream(self, stream_id, is_initiator=True)
         async with self._stream_lock:
             self._streams[stream_id] = stream
@@ -314,7 +293,7 @@ class WebTransportConnection(IRawConnection, IMuxedConn):
 
     async def _handle_quic_event(self, event: QuicEvent) -> None:
         if isinstance(event, HandshakeCompleted):
-            self._extract_peer_certificate()
+            self._extract_peer_certificate(event)
             if self._h3 is None:
                 self._h3 = _Libp2pH3Connection(self._quic, enable_webtransport=True)
             self._handshake_completed.set()
@@ -408,16 +387,14 @@ class WebTransportConnection(IRawConnection, IMuxedConn):
         if self._noise_stream_id == stream_id and not self._first_wt_stream.is_set():
             self._first_wt_stream.set()
 
-    def _extract_peer_certificate(self) -> None:
-        try:
-            tls_ctx = self._quic.tls
-            peer_cert = getattr(tls_ctx, "_peer_certificate", None)
-            if peer_cert is not None:
-                self._peer_certificate = peer_cert
-                der = peer_cert.public_bytes(serialization.Encoding.DER)
-                self._used_cert_multihash = multihash_from_der(der)
-        except Exception:
-            logger.debug("Failed to extract peer certificate", exc_info=True)
+    def _extract_peer_certificate(self, event: HandshakeCompleted) -> None:
+        if not event.peer_certificates:
+            return
+        # The first certificate is the peer's own, the others its chain.
+        peer_cert = event.peer_certificates[0]
+        self._peer_certificate = peer_cert
+        der = peer_cert.public_bytes(serialization.Encoding.DER)
+        self._used_cert_multihash = multihash_from_der(der)
 
     @property
     def used_cert_multihash(self) -> bytes | None:
@@ -455,7 +432,6 @@ class WebTransportConnection(IRawConnection, IMuxedConn):
         noise_stream_id = self._h3.create_webtransport_stream(
             session_id=stream_id, is_unidirectional=False
         )
-        _mark_local_webtransport_stream(self._h3, noise_stream_id, stream_id)
         noise_stream = WebTransportStream(self, noise_stream_id, is_initiator=True)
         async with self._stream_lock:
             self._streams[noise_stream_id] = noise_stream

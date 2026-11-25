@@ -114,6 +114,13 @@ PAIRS = [
         r"Ping #3: [\d.]+ ms",
     ),
     Pair(
+        "tls-echo",  # the client's default mode (#1613)
+        ("examples.tls.example_tls_server", "-p", "0"),
+        ("examples.tls.example_tls_client", "--server", "{addr}"),
+        TCP,
+        r"Received: Hello from TLS client!",
+    ),
+    Pair(
         "chat",
         ("examples.chat.chat", "-p", "0"),
         ("examples.chat.chat", "-d", "{addr}"),

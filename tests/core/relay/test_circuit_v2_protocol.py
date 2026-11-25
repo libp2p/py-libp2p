@@ -508,6 +508,16 @@ async def test_circuit_v2_voucher_verification_complete():
         logger.info("All voucher verification tests passed successfully!")
 
 
+def _parse_hop_response(response_bytes: bytes) -> proto.HopMessage:
+    """Parse an unsigned-varint length-prefixed HopMessage write."""
+    response = proto.HopMessage()
+    prefix_len = 1
+    while response_bytes[prefix_len - 1] & 0x80:
+        prefix_len += 1
+    response.ParseFromString(response_bytes[prefix_len:])
+    return response
+
+
 @pytest.mark.trio
 async def test_handle_reserve_returns_signed_reservation_payload():
     relay_key_pair = create_new_key_pair()
@@ -521,11 +531,14 @@ async def test_handle_reserve_returns_signed_reservation_payload():
     mock_host.get_private_key.return_value = relay_key_pair.private_key
     mock_host.get_public_key.return_value = relay_key_pair.public_key
     mock_host.get_peerstore.return_value = mock_peerstore
+    mock_host.get_id.return_value = ID.from_pubkey(relay_key_pair.public_key)
+    mock_host.get_addrs.return_value = []
 
     protocol = CircuitV2Protocol(mock_host, DEFAULT_RELAY_LIMITS, allow_hop=True)
 
     stream = AsyncMock()
     stream.write = AsyncMock()
+    stream.muxed_conn.peer_id = client_peer_id
 
     reserve_msg = proto.HopMessage(type=proto.HopMessage.RESERVE)
     reserve_msg.peer.id = client_peer_id.to_bytes()
@@ -535,17 +548,75 @@ async def test_handle_reserve_returns_signed_reservation_payload():
     assert stream.write.await_count == 1
     await_args = stream.write.await_args
     assert await_args is not None
-    response_bytes = await_args.args[0]
-    response = proto.HopMessage()
-    # Written messages are unsigned-varint length-prefixed on the wire.
-    prefix_len = 1
-    while response_bytes[prefix_len - 1] & 0x80:
-        prefix_len += 1
-    response.ParseFromString(response_bytes[prefix_len:])
+    response = _parse_hop_response(await_args.args[0])
 
     assert response.type == proto.HopMessage.STATUS
     assert response.status == StatusCode.OK
     assert response.reservation.expire > 0
+
+
+@pytest.mark.trio
+async def test_handle_reserve_rejects_foreign_claimed_peer_ids():
+    """Authenticated peer cannot consume reservation slots under foreign IDs."""
+    relay_key_pair = create_new_key_pair()
+    attacker_key_pair = create_new_key_pair()
+    attacker_peer_id = ID.from_pubkey(attacker_key_pair.public_key)
+
+    mock_peerstore = Mock()
+    mock_peerstore.addrs.return_value = []
+
+    mock_host = Mock()
+    mock_host.get_private_key.return_value = relay_key_pair.private_key
+    mock_host.get_public_key.return_value = relay_key_pair.public_key
+    mock_host.get_peerstore.return_value = mock_peerstore
+    mock_host.get_id.return_value = ID.from_pubkey(relay_key_pair.public_key)
+    mock_host.get_addrs.return_value = []
+    # Reservations are only "active" while the peer is connected.
+    mock_network = Mock()
+    mock_network.connections = {attacker_peer_id: [Mock()]}
+    mock_host.get_network.return_value = mock_network
+
+    limits = RelayLimits(
+        duration=3600,
+        data=1_000_000,
+        max_circuit_conns=10,
+        max_reservations=4,
+    )
+    protocol = CircuitV2Protocol(mock_host, limits, allow_hop=True)
+
+    stream = AsyncMock()
+    stream.write = AsyncMock()
+    stream.muxed_conn.peer_id = attacker_peer_id
+
+    foreign_ids = [ID.from_pubkey(create_new_key_pair().public_key) for _ in range(5)]
+    for foreign_id in foreign_ids:
+        stream.write.reset_mock()
+        reserve_msg = proto.HopMessage(type=proto.HopMessage.RESERVE)
+        reserve_msg.peer.id = foreign_id.to_bytes()
+
+        await protocol._handle_reserve(stream, reserve_msg)
+
+        assert stream.write.await_count == 1
+        response = _parse_hop_response(stream.write.await_args.args[0])
+        assert response.type == proto.HopMessage.STATUS
+        assert response.status == StatusCode.PERMISSION_DENIED
+        assert foreign_id not in protocol.resource_manager._reservations
+
+    # Foreign claims must not fill the reservation table.
+    assert protocol.resource_manager._reservations == {}
+    assert not protocol.resource_manager.has_reservation(attacker_peer_id)
+
+    # A matching peer still reserves under the authenticated ID only.
+    stream.write.reset_mock()
+    matching_msg = proto.HopMessage(type=proto.HopMessage.RESERVE)
+    matching_msg.peer.id = attacker_peer_id.to_bytes()
+    await protocol._handle_reserve(stream, matching_msg)
+
+    response = _parse_hop_response(stream.write.await_args.args[0])
+    assert response.type == proto.HopMessage.STATUS
+    assert response.status == StatusCode.OK
+    assert protocol.resource_manager.has_reservation(attacker_peer_id)
+    assert list(protocol.resource_manager._reservations) == [attacker_peer_id]
 
 
 @pytest.mark.trio

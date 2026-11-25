@@ -347,7 +347,7 @@ def create_connection_error(
 class QUICErrorContext:
     """
     Context manager for handling QUIC errors with automatic error mapping.
-    Useful for converting low-level aioquic errors to py-libp2p QUIC errors.
+    Converts timeouts to py-libp2p QUIC timeout errors.
     """
 
     def __init__(self, operation: str, component: str = "quic") -> None:
@@ -366,49 +366,7 @@ class QUICErrorContext:
         if exc_type is None or exc_val is None:
             return False
 
-        # Import aioquic exception classes for isinstance() checks
-        # instead of fragile string matching on type names.
-        try:
-            from aioquic.quic.connection import (
-                QuicConnectionError,
-                StreamFinishedError,
-            )
-        except ImportError:
-            QuicConnectionError = None  # type: ignore[assignment,misc]
-            StreamFinishedError = None  # type: ignore[assignment,misc]
-
-        # Map aioquic exceptions to our typed exception hierarchy,
-        # extracting structured attributes where available.
-        if QuicConnectionError is not None and isinstance(exc_val, QuicConnectionError):
-            error_code = getattr(exc_val, "error_code", None)
-            raise QUICConnectionClosedError(
-                f"Connection closed during {self.operation}: {exc_val}",
-                error_code=error_code,
-            ) from exc_val
-        elif StreamFinishedError is not None and isinstance(
-            exc_val, StreamFinishedError
-        ):
-            raise QUICStreamClosedError(
-                f"Stream finished during {self.operation}: {exc_val}"
-            ) from exc_val
-        elif isinstance(exc_val, AssertionError):
-            # aioquic uses assert for "cannot call write() after FIN"
-            # and "cannot call write() after reset()".
-            msg = str(exc_val)
-            if "after FIN" in msg or "after reset" in msg:
-                raise QUICStreamClosedError(
-                    f"Stream already closed during {self.operation}: {exc_val}"
-                ) from exc_val
-            return False
-        elif isinstance(exc_val, ValueError):
-            # aioquic raises ValueError for unknown / invalid streams.
-            msg = str(exc_val)
-            if "peer-initiated" in msg or "unidirectional stream" in msg:
-                raise QUICStreamError(
-                    f"Invalid stream during {self.operation}: {exc_val}"
-                ) from exc_val
-            return False
-        elif isinstance(exc_val, (TimeoutError, trio.TooSlowError)):
+        if isinstance(exc_val, (TimeoutError, trio.TooSlowError)):
             if "stream" in self.component.lower():
                 raise QUICStreamTimeoutError(
                     f"Timeout during {self.operation}: {exc_val}"
