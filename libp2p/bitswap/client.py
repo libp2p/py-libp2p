@@ -1019,7 +1019,7 @@ class BitswapClient(INotifee):
     ) -> None:
         """Respond by opening a NEW stream to the requester (go-bitswap style)."""
         protocol = self._peer_protocols.get(peer_id, BITSWAP_PROTOCOL_V100)
-        stream = await self.host.new_stream(peer_id, [protocol])
+        stream = await self.host.new_stream(peer_id, [TProtocol(protocol)])
         try:
             if blocks_to_send_v100:
                 await self._send_blocks_in_batches_v100(

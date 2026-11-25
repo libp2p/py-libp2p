@@ -9,11 +9,12 @@ from aioquic.quic.connection import QuicConnection
 from aioquic.quic.packet_builder import QuicDeliveryState
 import trio
 
-from libp2p.abc import IHost, ISecureConn
+from libp2p.abc import IHost, INetStream, ISecureConn
 from libp2p.host.ping import PingService
 from libp2p.kad_dht.routing_table import KBucket
 from libp2p.network.connection.swarm_connection import SwarmConn
 from libp2p.network.stream.net_stream import NetStream
+from libp2p.network.swarm import Swarm
 from libp2p.peer.id import ID
 from libp2p.stream_muxer.yamux.yamux import Yamux, YamuxStream
 from libp2p.transport.quic.config import QUICTransportConfig
@@ -205,6 +206,7 @@ class _EchoPingStream:
 
     def __init__(self):
         self._pending = b""
+        self.muxed_conn: Any = None
 
     async def write(self, data):
         await trio.lowlevel.checkpoint()
@@ -315,7 +317,7 @@ async def test_cancelled_inbound_ping_handler_resets_stream():
 
     service = PingService(_ping_host(lambda *args: None))
     with trio.move_on_after(0.02) as scope:
-        await service.handle_ping(stream)
+        await service.handle_ping(cast(INetStream, stream))
 
     assert scope.cancelled_caught
     assert stream.is_closed
@@ -337,7 +339,9 @@ async def test_inbound_handler_return_releases_muxed_stream():
         return None
 
     mux = Yamux(
-        SimpleNamespace(is_initiator=True, write=write), ID(b"peer"), is_initiator=False
+        cast(ISecureConn, SimpleNamespace(is_initiator=True, write=write)),
+        ID(b"peer"),
+        is_initiator=False,
     )
     notified: list[Any] = []
 
@@ -350,7 +354,12 @@ async def test_inbound_handler_return_releases_muxed_stream():
 
     conn = SwarmConn(
         mux,
-        SimpleNamespace(notify_opened_stream=noop, notify_closed_stream=notify_closed),
+        cast(
+            Swarm,
+            SimpleNamespace(
+                notify_opened_stream=noop, notify_closed_stream=notify_closed
+            ),
+        ),
     )
     conn.event_started.set()
 
@@ -389,7 +398,9 @@ async def test_cancelled_open_stream_releases_bookkeeping_and_backlog_slot():
     async def write(data):
         await trio.sleep_forever()
 
-    mux = Yamux(SimpleNamespace(is_initiator=True, write=write), ID(b"peer"))
+    mux = Yamux(
+        cast(ISecureConn, SimpleNamespace(is_initiator=True, write=write)), ID(b"peer")
+    )
 
     for _ in range(10):
         with trio.move_on_after(0.02) as scope:

@@ -1,12 +1,14 @@
 """Regression tests for bounded Bitswap state and unreachable providers."""
 
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import patch
 
 import pytest
 import trio
 
-from libp2p.bitswap.cid import compute_cid_v1
+from libp2p.abc import IHost, INetStream
+from libp2p.bitswap.cid import CIDObject, compute_cid_v1
 from libp2p.bitswap.client import BitswapClient
 from libp2p.bitswap.message_queue import BitswapMessageQueue
 from libp2p.bitswap.messages import create_message, create_wantlist_entry
@@ -46,7 +48,7 @@ class _UnreachableHost:
 @pytest.mark.trio
 async def test_unreachable_provider_creates_no_queue_or_wants():
     host = _UnreachableHost()
-    client = BitswapClient(host)
+    client = BitswapClient(cast(IHost, host))
     async with trio.open_nursery() as nursery:
         client.set_nursery(nursery)
         await client.start()
@@ -64,7 +66,7 @@ async def test_unreachable_provider_creates_no_queue_or_wants():
 
 @pytest.mark.trio
 async def test_duplicate_batch_cids_leave_no_pending_events():
-    client = BitswapClient(_UnreachableHost())
+    client = BitswapClient(cast(IHost, _UnreachableHost()))
     session = BitswapSession(client, 1)
     cid = compute_cid_v1(b"duplicate")
 
@@ -75,7 +77,7 @@ async def test_duplicate_batch_cids_leave_no_pending_events():
 
 def test_message_queue_bounds_wants_and_blocks():
     host = _UnreachableHost()
-    queue = BitswapMessageQueue(host, ID(b"peer"), ["/ipfs/bitswap/1.0.0"])
+    queue = BitswapMessageQueue(cast(IHost, host), ID(b"peer"), ["/ipfs/bitswap/1.0.0"])
 
     with (
         patch("libp2p.bitswap.message_queue.MAX_PENDING_WANTS_PER_PEER", 5),
@@ -83,7 +85,7 @@ def test_message_queue_bounds_wants_and_blocks():
         patch("libp2p.bitswap.message_queue.MAX_PENDING_BLOCK_BYTES_PER_PEER", 8),
     ):
         for i in range(20):
-            queue.add_wants([compute_cid_v1(str(i).encode())])
+            queue.add_wants([cast(CIDObject, compute_cid_v1(str(i).encode()))])
         for i in range(20):
             queue.add_blocks_v100([bytes([i])])
 
@@ -94,7 +96,7 @@ def test_message_queue_bounds_wants_and_blocks():
 
 @pytest.mark.trio
 async def test_inbound_wantlist_is_capped():
-    client = BitswapClient(_UnreachableHost())
+    client = BitswapClient(cast(IHost, _UnreachableHost()))
     peer = ID(b"peer")
 
     with patch("libp2p.bitswap.client.MAX_PEER_WANTLIST_ENTRIES", 5):
@@ -105,11 +107,11 @@ async def test_inbound_wantlist_is_capped():
                     create_wantlist_entry(cid, want_type=0, send_dont_have=False)
                 ]
             )
-            await client._process_wantlist(msg.wantlist, peer, None)
+            await client._process_wantlist(msg.wantlist, peer, cast(INetStream, None))
 
         assert len(client._peer_wantlists[peer]) == 5
 
         full = create_message(full_wantlist=True)
         full.wantlist.full = True
-        await client._process_wantlist(full.wantlist, peer, None)
+        await client._process_wantlist(full.wantlist, peer, cast(INetStream, None))
         assert client._peer_wantlists[peer] == {}

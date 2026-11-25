@@ -223,7 +223,8 @@ class SwarmConn(INetConn):
         # Notify all listeners about the disconnection
         logging.debug(f"Notifying disconnection for peer {self.muxed_conn.peer_id}")
         try:
-            with trio.CancelScope(shield=True):
+            with trio.CancelScope() as shield_scope:
+                shield_scope.shield = True
                 await self._notify_disconnected()
         except Exception as e:
             logging.warning(f"Error notifying disconnection: {e}")

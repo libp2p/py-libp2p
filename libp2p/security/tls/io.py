@@ -42,9 +42,11 @@ class TLSStreamReadWriter(ReadWriteCloser):
         self.ssl_context = ssl_context
         self.server_side = server_side
         self.server_hostname = server_hostname
-        self._ssl_socket: ssl.SSLObject
-        self._in_bio: ssl.MemoryBIO
-        self._out_bio: ssl.MemoryBIO
+        # Released in close() to free the OpenSSL state immediately, so these
+        # are only populated between a successful handshake() and close().
+        self._ssl_socket: ssl.SSLObject | None = None
+        self._in_bio: ssl.MemoryBIO | None = None
+        self._out_bio: ssl.MemoryBIO | None = None
         self._peer_certificate: x509.Certificate | None = None
         self._handshake_complete = False
         self._negotiated_protocol: str | None = None
@@ -230,12 +232,17 @@ class TLSStreamReadWriter(ReadWriteCloser):
         if not self._handshake_complete:
             raise RuntimeError("Call handshake() first")
 
+        ssl_socket = self._ssl_socket
+        out_bio = self._out_bio
+        if ssl_socket is None or out_bio is None:
+            raise RuntimeError("Call handshake() first")
+
         logger.debug("TLS write: writing %d bytes to SSL socket", len(data))
         remaining = data
         bytes_written = 0
         while remaining:
             try:
-                n = self._ssl_socket.write(remaining)
+                n = ssl_socket.write(remaining)
                 remaining = remaining[n:]
                 bytes_written += n
                 logger.debug("TLS write: %d bytes (%d left)", n, len(remaining))
@@ -244,7 +251,7 @@ class TLSStreamReadWriter(ReadWriteCloser):
                 pass
             # Flush all encrypted output
             while True:
-                out_data = self._out_bio.read()
+                out_data = out_bio.read()
                 if not out_data:
                     break
                 await self.raw_connection.write(out_data)
@@ -252,7 +259,7 @@ class TLSStreamReadWriter(ReadWriteCloser):
 
         # Ensure all encrypted data is flushed
         while True:
-            out_data = self._out_bio.read()
+            out_data = out_bio.read()
             if not out_data:
                 break
             await self.raw_connection.write(out_data)
@@ -269,6 +276,12 @@ class TLSStreamReadWriter(ReadWriteCloser):
 
         if n is None:
             n = 65536
+
+        ssl_socket = self._ssl_socket
+        in_bio = self._in_bio
+        out_bio = self._out_bio
+        if ssl_socket is None or in_bio is None or out_bio is None:
+            raise RuntimeError("Call handshake() first")
 
         # First, drain from read buffer if available
         if self._read_buffer:
@@ -296,17 +309,17 @@ class TLSStreamReadWriter(ReadWriteCloser):
             attempt += 1
 
             # Flush any pending output first (TLS might need to send something)
-            pending_output = self._out_bio.read()
+            pending_output = out_bio.read()
             if pending_output:
                 await self.raw_connection.write(pending_output)
                 logger.debug("TLS read: flushed %d output bytes", len(pending_output))
 
-            # If _in_bio is empty, read from raw connection first
-            if self._in_bio.pending == 0:
+            # If in_bio is empty, read from raw connection first
+            if in_bio.pending == 0:
                 try:
                     incoming = await self.raw_connection.read(4096)
                     if incoming:
-                        self._in_bio.write(incoming)
+                        in_bio.write(incoming)
                         logger.debug("TLS read: %d encrypted bytes", len(incoming))
                     elif incoming == b"":
                         # Connection closed
@@ -321,7 +334,7 @@ class TLSStreamReadWriter(ReadWriteCloser):
 
             # Try to read from SSL socket
             try:
-                data = self._ssl_socket.read(min(n if n else 65536, 65536))
+                data = ssl_socket.read(min(n if n else 65536, 65536))
                 if data:
                     buffer.extend(data)
                     logger.debug("TLS read: %d decrypted bytes", len(data))
@@ -395,8 +408,8 @@ class TLSStreamReadWriter(ReadWriteCloser):
             # immediately rather than waiting for GC (which may be delayed
             # by reference cycles or deferred collection).
             self._ssl_socket = None
-            self.in_bio = None
-            self.out_bio = None
+            self._in_bio = None
+            self._out_bio = None
             await self.raw_connection.close()
             self._closed = True
             logger.debug("TLS close: connection closed")
@@ -416,7 +429,14 @@ class TLSReadWriter(EncryptedMsgReadWriter):
     2. Read chunks from TLS stream (multistream handles varint parsing)
     """
 
-    stream_writer: TLSStreamReadWriter
+    stream_writer: TLSStreamReadWriter | None
+
+    @property
+    def _writer(self) -> TLSStreamReadWriter:
+        """Return the live stream writer, or fail once the connection closed."""
+        if self.stream_writer is None:
+            raise RuntimeError("TLS connection is closed")
+        return self.stream_writer
 
     def __init__(
         self,
@@ -457,12 +477,13 @@ class TLSReadWriter(EncryptedMsgReadWriter):
             - Verifies minimum TLS version (1.3)
 
         """
-        await self.stream_writer.handshake(enable_autotls)
+        writer = self._writer
+        await writer.handshake(enable_autotls)
 
         # There are lint errors here, telling to update the constructor of
         # this class. Since this is only temporary, I will put type ignore here
-        self.remote_primitive_pk = self.stream_writer.remote_primitive_pk  # type: ignore
-        self.remote_primitive_peerid = self.stream_writer.remote_pid  # type: ignore
+        self.remote_primitive_pk = writer.remote_primitive_pk  # type: ignore
+        self.remote_primitive_peerid = writer.remote_pid  # type: ignore
 
     def get_peer_certificate(self) -> x509.Certificate | None:
         """
@@ -472,7 +493,7 @@ class TLSReadWriter(EncryptedMsgReadWriter):
             Peer certificate or None if not available
 
         """
-        return self.stream_writer.get_peer_certificate()
+        return self._writer.get_peer_certificate()
 
     async def write_msg(self, msg: bytes) -> None:
         """
@@ -481,7 +502,7 @@ class TLSReadWriter(EncryptedMsgReadWriter):
         Data is encrypted by TLS and sent over the raw connection.
         """
         logger.debug("TLS write_msg: writing %d bytes to stream", len(msg))
-        await self.stream_writer.write(msg)
+        await self._writer.write(msg)
         logger.debug("TLS write_msg: done (plaintext=%d)", len(msg))
 
     async def read_msg(self) -> bytes:
@@ -493,7 +514,7 @@ class TLSReadWriter(EncryptedMsgReadWriter):
         logger.debug("TLS read_msg: reading from stream")
         # Read a chunk from the TLS stream
         # SecureSession will buffer and multistream will parse varint messages
-        data = await self.stream_writer.read(65536)  # Read up to 64KB
+        data = await self._writer.read(65536)  # Read up to 64KB
         if not data:
             logger.debug("TLS read_msg: connection closed (no data)")
             return b""  # Connection closed
@@ -533,7 +554,10 @@ class TLSReadWriter(EncryptedMsgReadWriter):
     async def close(self) -> None:
         """Close the TLS connection."""
         logger.debug("TLS close: closing connection")
-        await self.stream_writer.close()
+        writer = self.stream_writer
+        if writer is None:
+            return
+        await writer.close()
         self.stream_writer = None
         logger.debug("TLS close: connection closed")
 
@@ -541,7 +565,7 @@ class TLSReadWriter(EncryptedMsgReadWriter):
         """
         Return the ALPN-negotiated protocol (e.g., selected muxer) if any.
         """
-        return self.stream_writer.get_negotiated_protocol()
+        return self._writer.get_negotiated_protocol()
 
     def get_remote_address(self) -> tuple[str, int] | None:
         """
@@ -551,4 +575,4 @@ class TLSReadWriter(EncryptedMsgReadWriter):
             Remote address tuple or None
 
         """
-        return self.stream_writer.get_remote_address()
+        return self._writer.get_remote_address()

@@ -65,6 +65,8 @@ class _Routing:
 class _EndlessValueStore:
     """Returns no record but a batch of fresh closer peers on every query."""
 
+    calls: int
+
     def __init__(self) -> None:
         self.calls = 0
 
@@ -84,7 +86,8 @@ async def test_get_value_lookup_stops_at_query_cap() -> None:
     dht.host = _Host()  # type: ignore[assignment]
     dht.local_peer_id = _peer_id(0)
     dht.validator = _Validator()  # type: ignore[assignment]
-    dht.value_store = _EndlessValueStore()  # type: ignore[assignment]
+    store = _EndlessValueStore()
+    dht.value_store = store  # type: ignore[assignment]
     dht.peer_routing = _Routing()  # type: ignore[assignment]
 
     with trio.fail_after(20.0):
@@ -92,7 +95,7 @@ async def test_get_value_lookup_stops_at_query_cap() -> None:
 
     assert result is None
     # A little slack for the ALPHA queries already in flight at the cap.
-    assert dht.value_store.calls <= MAX_LOOKUP_QUERIES + ALPHA
+    assert store.calls <= MAX_LOOKUP_QUERIES + ALPHA
 
 
 @pytest.mark.trio
@@ -103,7 +106,7 @@ async def test_provider_lookup_stops_at_query_cap() -> None:
 
     async def endless(peer_id: ID, key: bytes):
         nonlocal calls
-        calls += 1
+        calls = calls + 1
         await trio.sleep(0)
         base = 50000 + calls * 20
         return [], [_peer_id(base + i) for i in range(20)]
@@ -125,7 +128,9 @@ async def test_get_value_stops_at_deadline(monkeypatch) -> None:
     monkeypatch.setattr(kad_module, "MAX_LOOKUP_DURATION", 0.05)
 
     class SlowStore(_EndlessValueStore):
-        async def _get_from_peer(self, peer_id: ID, key: bytes, **kwargs: object):
+        async def _get_from_peer(
+            self, peer_id: ID, key: bytes, **kwargs: object
+        ) -> tuple[None, list[ID]]:
             self.calls += 1
             await trio.sleep(0.01)
             return None, [_peer_id(90000 + self.calls)]
@@ -134,10 +139,11 @@ async def test_get_value_stops_at_deadline(monkeypatch) -> None:
     dht.host = _Host()  # type: ignore[assignment]
     dht.local_peer_id = _peer_id(0)
     dht.validator = _Validator()  # type: ignore[assignment]
-    dht.value_store = SlowStore()  # type: ignore[assignment]
+    store = SlowStore()
+    dht.value_store = store  # type: ignore[assignment]
     dht.peer_routing = _Routing()  # type: ignore[assignment]
 
     with trio.fail_after(5.0):
         await dht.get_value("/test/key")
 
-    assert 0 < dht.value_store.calls < 100
+    assert 0 < store.calls < 100

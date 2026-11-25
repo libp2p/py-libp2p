@@ -291,7 +291,7 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
         peer_ids: set[ID] = set()
         prefixes = [(prefix, len(prefix)) for prefix in self._peer_key_prefixes()]
         try:
-            for key, _ in self.datastore.query():
+            for key, _ in self.datastore.query(b""):
                 for prefix, prefix_len in prefixes:
                     if key.startswith(prefix):
                         try:

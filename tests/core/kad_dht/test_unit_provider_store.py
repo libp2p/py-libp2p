@@ -10,6 +10,7 @@ This module tests the core functionality of provider record management including
 """
 
 import time
+from typing import cast
 from unittest.mock import (
     AsyncMock,
     Mock,
@@ -22,6 +23,7 @@ from multiaddr import (
 )
 import trio
 
+from libp2p.abc import IHost
 from libp2p.kad_dht.provider_store import (
     PROVIDER_RECORD_EXPIRATION_INTERVAL,
     PROVIDER_RECORD_REPUBLISH_INTERVAL,
@@ -820,7 +822,9 @@ class TestProviderStoreLocalUnprovide:
 
     @pytest.mark.trio
     async def test_unprovide_removes_all_metadata(self):
-        store = ProviderStore(host=_FakeHost(), peer_routing=_FakePeerRouting())
+        store = ProviderStore(
+            host=cast(IHost, _FakeHost()), peer_routing=_FakePeerRouting()
+        )
         await store.provide(b"local-key")
         assert b"local-key" in store.providing_keys
         assert b"local-key" in store.providers
@@ -834,7 +838,9 @@ class TestProviderStoreLocalUnprovide:
 
     @pytest.mark.trio
     async def test_cap_is_enforced_when_every_key_is_locally_provided(self):
-        store = ProviderStore(host=_FakeHost(), peer_routing=_FakePeerRouting())
+        store = ProviderStore(
+            host=cast(IHost, _FakeHost()), peer_routing=_FakePeerRouting()
+        )
 
         with patch("libp2p.kad_dht.provider_store.MAX_PROVIDER_KEYS", 5):
             for i in range(8):
@@ -858,7 +864,9 @@ class TestRepublishMetadataOwnership:
 
     @pytest.mark.trio
     async def test_unprovide_during_republish_leaves_no_metadata(self):
-        store = ProviderStore(host=_FakeHost(), peer_routing=_FakePeerRouting())
+        store = ProviderStore(
+            host=cast(IHost, _FakeHost()), peer_routing=_FakePeerRouting()
+        )
         key = b"racy-key"
         await store.provide(key)
         store._last_republish[key] = 0  # Force a republish pass to consider it.

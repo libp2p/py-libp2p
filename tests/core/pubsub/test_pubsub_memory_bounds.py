@@ -1,6 +1,7 @@
 import pytest
 import trio
 
+from libp2p.peer.id import ID
 from libp2p.pubsub.gossipsub import (
     MAX_EQUIVOCATION_ENTRIES,
     PROTOCOL_ID_V20,
@@ -108,7 +109,7 @@ def test_observe_tracking_is_capped_per_peer():
     )
 
     state = TopicObservationState()
-    peer = b"\x33" * 8
+    peer = ID(b"\x33" * 8)
 
     for i in range(MAX_OBSERVED_TOPICS_PER_PEER + 50):
         state.add_observer(f"topic-{i}", peer)

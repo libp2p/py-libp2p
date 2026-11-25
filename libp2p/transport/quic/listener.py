@@ -1429,7 +1429,8 @@ class QUICListener(IListener):
             except BaseException as e:
                 # Cancelled startup must release transport ownership as well
                 # as the socket. close() does not cancel the shared nursery.
-                with trio.CancelScope(shield=True):
+                with trio.CancelScope() as shield_scope:
+                    shield_scope.shield = True
                     await self.close()
                 if not isinstance(e, Exception):
                     raise
@@ -1495,7 +1496,8 @@ class QUICListener(IListener):
             # Use the full lifecycle cleanup: stopping the task/socket alone
             # leaves this listener retained in the long-lived transport.
             # close() also cancels and joins in-progress owned startup.
-            with trio.CancelScope(shield=True):
+            with trio.CancelScope() as shield_scope:
+                shield_scope.shield = True
                 await self.close()
             raise
 

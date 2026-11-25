@@ -535,12 +535,25 @@ class CircuitV2Protocol(Service):
         """Handle a reservation request."""
         peer_id = None
         try:
-            # The peer field is optional; fall back to the connection's
-            # remote peer like other implementations do.
+            # Always key reservation admission on the authenticated connection
+            # peer (go-libp2p RemotePeer). A caller-controlled msg.peer must
+            # not allocate capacity under unrelated identities.
+            peer_id = stream.muxed_conn.peer_id
             if msg.HasField("peer") and msg.peer.id:
-                peer_id = ID(msg.peer.id)
-            else:
-                peer_id = stream.muxed_conn.peer_id
+                claimed_peer_id = ID(msg.peer.id)
+                if claimed_peer_id != peer_id:
+                    logger.warning(
+                        "Rejecting reservation: claimed peer %s does not "
+                        "match authenticated peer %s",
+                        claimed_peer_id,
+                        peer_id,
+                    )
+                    status_msg = HopMessage(
+                        type=HopMessage.STATUS,
+                        status=to_proto_status(StatusCode.PERMISSION_DENIED),
+                    )
+                    await write_delimited_msg(stream, status_msg)
+                    return
             logger.debug("Handling reservation request from peer %s", peer_id)
 
             # Check if peer already has a reservation

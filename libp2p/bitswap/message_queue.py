@@ -129,26 +129,28 @@ class BitswapMessageQueue:
 
     def _trim_pending_blocks(self) -> None:
         """Bound queued blocks by both entry count and total payload bytes."""
-        total_entries = len(self._pending_blocks_v100) + len(self._pending_blocks_v110)
-        total_bytes = sum(map(len, self._pending_blocks_v100)) + sum(
-            len(prefix) + len(data) for prefix, data in self._pending_blocks_v110
+        blocks_v100 = self._pending_blocks_v100
+        blocks_v110 = self._pending_blocks_v110
+        total_entries = len(blocks_v100) + len(blocks_v110)
+        total_bytes = sum(map(len, blocks_v100)) + sum(
+            len(prefix) + len(data) for prefix, data in blocks_v110
         )
 
         while total_entries > MAX_PENDING_BLOCKS_PER_PEER:
-            if self._pending_blocks_v100:
-                total_bytes -= len(self._pending_blocks_v100.pop(0))
-            elif self._pending_blocks_v110:
-                prefix, data = self._pending_blocks_v110.pop(0)
+            if blocks_v100:
+                total_bytes -= len(blocks_v100.pop(0))
+            elif blocks_v110:
+                prefix, data = blocks_v110.pop(0)
                 total_bytes -= len(prefix) + len(data)
             else:
                 break
             total_entries -= 1
 
         while total_bytes > MAX_PENDING_BLOCK_BYTES_PER_PEER:
-            if self._pending_blocks_v100:
-                total_bytes -= len(self._pending_blocks_v100.pop(0))
-            elif self._pending_blocks_v110:
-                prefix, data = self._pending_blocks_v110.pop(0)
+            if blocks_v100:
+                total_bytes -= len(blocks_v100.pop(0))
+            elif blocks_v110:
+                prefix, data = blocks_v110.pop(0)
                 total_bytes -= len(prefix) + len(data)
             else:
                 break

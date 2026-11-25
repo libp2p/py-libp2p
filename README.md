@@ -40,8 +40,9 @@ ______________________________________________________________________
 | **`libp2p-webrtc-private-to-private`** |     🌱     |                                                                                       |
 
 WebRTC-Direct (browser/server) uses the spec **STUN path** by default: inbound
-dials hit a shared UDP port and the listener infers the offer from the first
-STUN packet; outbound dials synthesise an ICE-Lite answer from the multiaddr
+dials hit a shared UDP port and the listener (a full controlled ICE agent)
+infers the offer from the first STUN packet; outbound dials synthesise an
+answer with `a=ice-lite` from the multiaddr (so the dialer is controlling)
 with no default public STUN servers. This is the only signalling path that
 interoperates with go-libp2p / js-libp2p / browsers. An experimental HTTP
 `POST /sdp` harness (`WebRTCTransportConfig(enable_sdp_http_harness=True)`) is

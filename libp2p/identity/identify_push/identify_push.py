@@ -185,22 +185,10 @@ async def push_identify_to_peer(
             stream = None
 
             logger.debug("Successfully pushed identify to peer %s", peer_id)
-            event = IdentityEvent()
-            event.push = True
-            event.direction = "outbound"
-            event.peer_id = str(peer_id)
-            event.success = True
-            host.get_event_bus().emit(event)
-            return True
+            success = True
         except Exception as e:
             logger.error("Error pushing identify to peer %s: %s", peer_id, e)
-            event = IdentityEvent()
-            event.push = True
-            event.direction = "outbound"
-            event.peer_id = str(peer_id)
-            event.success = False
-            host.get_event_bus().emit(event)
-            return False
+            success = False
         finally:
             # Trio cancellation derives from BaseException, so the handler above
             # never sees it. Without this the acquired stream is neither closed
@@ -213,6 +201,14 @@ async def push_identify_to_peer(
                         await stream.reset()
                     except Exception:
                         pass
+
+        event = IdentityEvent()
+        event.push = True
+        event.direction = "outbound"
+        event.peer_id = str(peer_id)
+        event.success = success
+        host.get_event_bus().emit(event)
+        return success
 
 
 async def push_identify_to_peers(

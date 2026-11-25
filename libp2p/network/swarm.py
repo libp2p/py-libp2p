@@ -105,6 +105,11 @@ from .exceptions import (
 
 logger = logging.getLogger(__name__)
 
+# Upper bound on the connection/listener teardown when Swarm.run() exits (#1584).
+SHUTDOWN_CLEANUP_TIMEOUT = 10.0
+# Second, shorter attempt at listeners/transports when the first bound fired.
+SHUTDOWN_RETRY_TIMEOUT = 2.0
+
 _HAPPY_EYEBALLS_DELAY = (
     0.250  # 250ms head start for primary transport (matches go-libp2p DialDelay)
 )
@@ -441,26 +446,76 @@ class Swarm(Service, INetworkService):
             try:
                 await self.manager.wait_finished()
             finally:
-                # Stop connection management components
-                try:
-                    await self.connection_pruner.stop()
-                    await self.auto_connector.stop()
-                except Exception as e:
-                    logger.warning(
-                        f"Error stopping connection management components: {e}"
-                    )
+                transports_closed = False
 
-                # Close live connections so their sockets are released on
-                # shutdown. self.connections maps peer id -> list[INetConn].
-                # This service-manager stop path previously closed only the
-                # listeners and never the connections, so every dialed or
-                # accepted socket leaked whenever a swarm was stopped through
-                # the manager instead of an explicit Swarm.close() (#1485).
-                # Swarm.close() clears self.connections before stopping the
-                # manager, so this is a no-op on that path; SwarmConn.close()
-                # is idempotent.
-                for peer_id, conns in list(self.connections.items()):
-                    for conn in list(conns):
+                async def close_listeners_and_transports() -> None:
+                    """Close what's left, matching Swarm.close(); safe to re-run."""
+                    nonlocal transports_closed
+                    # Close all listeners so their internal nurseries are
+                    # cancelled and system tasks finish cleanly, and tell
+                    # notifiees, as Swarm.close() does.
+                    for maddr_str, listener in list(self.listeners.items()):
+                        try:
+                            await listener.close()
+                        except Exception as e:
+                            logger.debug(
+                                "Error closing listener during shutdown: %s", e
+                            )
+                        self.listeners.pop(maddr_str, None)
+                        try:
+                            await self.notify_listen_close(Multiaddr(maddr_str))
+                        except Exception as e:
+                            logger.warning(
+                                "Failed to notify listen_close for %s: %s",
+                                maddr_str,
+                                e,
+                            )
+
+                    # Close transports (QUIC/WebSocket/WebTransport) so UDP
+                    # sockets and session state are released on the
+                    # manager-stop path too (#1498). Retried only if the first
+                    # attempt was cut short.
+                    if not transports_closed:
+                        try:
+                            await self.transport_manager.close_all()
+                            transports_closed = True
+                        except Exception as e:
+                            logger.warning(
+                                "Error closing transports during shutdown: %s", e
+                            )
+
+                # The service manager has already cancelled this task when we
+                # get here, so without a shield the first await raises
+                # Cancelled and the rest of the teardown is skipped: leaving
+                # host.run() left connections and listeners open (#1584).
+                # Bounded so a peer that never finishes closing cannot hang
+                # shutdown.
+                # From here on add_conn refuses new connections and disconnects
+                # no longer trigger auto-connect dials, as in Swarm.close().
+                self._closing = True
+                with trio.move_on_after(SHUTDOWN_CLEANUP_TIMEOUT) as cleanup_scope:
+                    cleanup_scope.shield = True
+                    # Stop connection management components
+                    try:
+                        await self.connection_pruner.stop()
+                        await self.auto_connector.stop()
+                    except Exception as e:
+                        logger.warning(
+                            f"Error stopping connection management components: {e}"
+                        )
+
+                    # Close live connections so their sockets are released on
+                    # shutdown. self.connections maps peer id -> list[INetConn].
+                    # This service-manager stop path previously closed only the
+                    # listeners and never the connections, so every dialed or
+                    # accepted socket leaked whenever a swarm was stopped through
+                    # the manager instead of an explicit Swarm.close() (#1485).
+                    # Swarm.close() clears self.connections before stopping the
+                    # manager, so this is a no-op on that path; SwarmConn.close()
+                    # is idempotent.
+                    # Connections close concurrently: each yamux close sleeps briefly,
+                    # so closing 50 one at a time would add seconds to shutdown.
+                    async def _close_conn(peer_id: ID, conn: INetConn) -> None:
                         try:
                             await conn.close()
                         except Exception as e:
@@ -469,23 +524,60 @@ class Swarm(Service, INetworkService):
                                 peer_id,
                                 e,
                             )
+
+                    # AutoConnector.stop() cancels the connect cycle and waits
+                    # for in-flight dials (#1630), but drain anyway as defense
+                    # in depth: closing one snapshot then clearing the map could
+                    # still drop a late registration unclosed. Take what is
+                    # there, close it, then look again. The enclosing scope
+                    # bounds it.
+                    async def drain_connections() -> None:
+                        while self.connections:
+                            batch = [
+                                (peer_id, conn)
+                                for peer_id, conns in list(self.connections.items())
+                                for conn in list(conns)
+                            ]
+                            for peer_id, _conn in batch:
+                                self.connections.pop(peer_id, None)
+                            if not batch:  # only empty lists were left
+                                break
+                            async with trio.open_nursery() as close_nursery:
+                                for peer_id, conn in batch:
+                                    close_nursery.start_soon(_close_conn, peer_id, conn)
+
+                    await drain_connections()
+                    await close_listeners_and_transports()
+                    # Closing listeners and transports awaits too; drain again
+                    # so nothing that landed meanwhile is dropped by clear().
+                    await drain_connections()
+
+                # Whatever happened above, this swarm no longer owns these
+                # connections; clear them even if the bound fired mid-close so
+                # local state matches the shutdown.
                 self.connections.clear()
 
-                # Close all listeners so their internal nurseries are
-                # cancelled and system tasks finish cleanly.
-                for listener in list(self.listeners.values()):
-                    try:
-                        await listener.close()
-                    except Exception as e:
-                        logger.debug("Error closing listener during shutdown: %s", e)
-
-                # Close transports (QUIC/WebSocket/WebTransport) so UDP sockets
-                # and session state are released on the manager-stop path too.
-                # Swarm.close() already does this; keep parity here (#1498).
-                try:
-                    await self.transport_manager.close_all()
-                except Exception as e:
-                    logger.warning("Error closing transports during shutdown: %s", e)
+                if cleanup_scope.cancelled_caught:
+                    logger.warning(
+                        "Swarm shutdown cleanup exceeded %.1fs; some connections "
+                        "may not have closed",
+                        SHUTDOWN_CLEANUP_TIMEOUT,
+                    )
+                    # A stuck peer used up the bound, so the listeners and
+                    # transports may never have been reached. Give them one
+                    # short attempt of their own.
+                    with trio.move_on_after(SHUTDOWN_RETRY_TIMEOUT) as retry_scope:
+                        retry_scope.shield = True
+                        await close_listeners_and_transports()
+                    if retry_scope.cancelled_caught:
+                        logger.warning(
+                            "Closing listeners and transports after an abandoned "
+                            "shutdown exceeded %.1fs",
+                            SHUTDOWN_RETRY_TIMEOUT,
+                        )
+                # Same policy as connections: an abandoned listener close leaves
+                # no entry behind.
+                self.listeners.clear()
 
                 # Cancel the background nursery (transport / auto-connector).
                 nursery.cancel_scope.cancel()
@@ -2229,13 +2321,14 @@ class Swarm(Service, INetworkService):
                     pass
 
         if registered_conn is not None:
+            active_conn = registered_conn
             try:
                 # Wait until the connection closes or the swarm shuts down.
                 with trio.CancelScope() as scope:
                     async with trio.open_nursery() as n:
 
                         async def _wait_closed() -> None:
-                            await registered_conn.event_closed.wait()
+                            await active_conn.event_closed.wait()
                             scope.cancel()
 
                         async def _wait_mgr() -> None:
@@ -2295,7 +2388,7 @@ class Swarm(Service, INetworkService):
                     self._event_bus.emit(transport_event)
                 except Exception:
                     pass
-                return
+                return None
 
         # If the incoming connection is already fully multiplexed (e.g. QUIC,
         # WebTransport), skip the security + muxer upgrade entirely.
@@ -2357,7 +2450,7 @@ class Swarm(Service, INetworkService):
         # Standard upgrade path (TCP, WebSocket): wrap in RawConnection then
         # run the security + muxer upgrade pipeline.
         raw_conn = None
-        registered_conn: SwarmConn | None = None
+        registered_conn = None
         try:
             raw_conn = RawConnection(read_write_closer, False)
             inbound_swarm_conn = await self.upgrade_inbound_raw_conn(raw_conn, maddr)
@@ -3021,6 +3114,15 @@ class Swarm(Service, INetworkService):
             if swarm_conn.event_closed.is_set():
                 raise SwarmException("SwarmConn closed during start")
 
+            # Refuse once the swarm is shutting down: its teardown has already
+            # drained the table, so a connection registered now would be
+            # dropped by the final clear() without being closed (#1584). No
+            # await sits between this check and the append below, so a dial
+            # landing mid-teardown cannot slip in. The handler below closes
+            # swarm_conn.
+            if self._closing:
+                raise SwarmException("Swarm is closing; connection refused")
+
             # Add to connections dict with deduplication
             peer_id = muxed_conn.peer_id
             if peer_id not in self.connections:
@@ -3141,7 +3243,8 @@ class Swarm(Service, INetworkService):
                 listen_conn_event.remote_maddr = ",".join(str(a) for a in actual_addrs)
             else:
                 try:
-                    remote = muxed_conn.get_remote_address()
+                    get_remote_address = getattr(muxed_conn, "get_remote_address", None)
+                    remote = get_remote_address() if get_remote_address else None
                     if remote:
                         host, port = remote
                         proto = "tcp"
@@ -3459,6 +3562,8 @@ class Swarm(Service, INetworkService):
         stale: list[SwarmConn] = []
         for conns in list(self.connections.values()):
             for conn in list(conns):
+                if not isinstance(conn, SwarmConn):
+                    continue
                 try:
                     is_closed = conn.event_closed.is_set() or conn.muxed_conn.is_closed
                 except Exception:

@@ -14,6 +14,7 @@ as soon as ``SwarmConn.event_closed`` fires.
 """
 
 from contextlib import AsyncExitStack
+from typing import cast
 
 import pytest
 from multiaddr import Multiaddr
@@ -22,6 +23,7 @@ from trio.testing import wait_all_tasks_blocked
 
 from libp2p import new_swarm
 from libp2p.network.config import ConnectionConfig
+from libp2p.network.swarm import Swarm
 from libp2p.tools.anyio_service import background_trio_service
 from libp2p.tools.utils import connect_swarm
 
@@ -52,7 +54,7 @@ async def _disconnect_from_server(server_swarm, client_swarm) -> None:
 @pytest.mark.parametrize("num_clients", [3])
 async def test_inbound_slots_released_after_connection_close(num_clients):
     """Sequential connect/disconnect churn must not exhaust inbound slots."""
-    server_swarm = new_swarm(connection_config=_server_conn_config())
+    server_swarm = cast(Swarm, new_swarm(connection_config=_server_conn_config()))
     async with AsyncExitStack() as stack:
         await stack.enter_async_context(background_trio_service(server_swarm))
         await server_swarm.listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
@@ -63,7 +65,7 @@ async def test_inbound_slots_released_after_connection_close(num_clients):
 
         clients = []
         for _ in range(num_clients):
-            client = new_swarm()
+            client = cast(Swarm, new_swarm())
             await stack.enter_async_context(background_trio_service(client))
             await client.listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
             clients.append(client)
@@ -115,18 +117,18 @@ async def test_new_inbound_accepted_after_previous_peers_disconnect():
     permanently consumed slots; once ``cap`` was reached every subsequent
     inbound connection was rejected post-handshake.
     """
-    server_swarm = new_swarm(connection_config=_server_conn_config())
+    server_swarm = cast(Swarm, new_swarm(connection_config=_server_conn_config()))
     async with AsyncExitStack() as stack:
         await stack.enter_async_context(background_trio_service(server_swarm))
         await server_swarm.listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
 
         limiter = server_swarm._inbound_limiter
 
-        churn_client = new_swarm()
+        churn_client = cast(Swarm, new_swarm())
         await stack.enter_async_context(background_trio_service(churn_client))
         await churn_client.listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
 
-        final_client = new_swarm()
+        final_client = cast(Swarm, new_swarm())
         await stack.enter_async_context(background_trio_service(final_client))
         await final_client.listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
 

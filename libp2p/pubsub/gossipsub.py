@@ -836,22 +836,28 @@ class GossipSub(IPubsubRouter, Service):
         if event is not None:
             event.set()
         try:
-            if hasattr(self, "host") and self.host:
-                if hasattr(self.host, "conn_manager"):
-                    self.host.conn_manager.tag_peer(peer_id, f"pubsub:{topic}", 100)
-                elif hasattr(self.host, "get_network"):
-                    self.host.get_network().tag_peer(peer_id, f"pubsub:{topic}", 100)
+            host = getattr(self, "host", None)
+            conn_manager = getattr(host, "conn_manager", None)
+            if conn_manager is not None:
+                conn_manager.tag_peer(peer_id, f"pubsub:{topic}", 100)
+            else:
+                get_network = getattr(host, "get_network", None)
+                if get_network is not None:
+                    get_network().tag_peer(peer_id, f"pubsub:{topic}", 100)
         except Exception:
             pass
 
     def _notify_mesh_peer_removed(self, peer_id: ID, topic: str) -> None:
         """Untag peer when pruned or removed from mesh."""
         try:
-            if hasattr(self, "host") and self.host:
-                if hasattr(self.host, "conn_manager"):
-                    self.host.conn_manager.untag_peer(peer_id, f"pubsub:{topic}")
-                elif hasattr(self.host, "get_network"):
-                    self.host.get_network().untag_peer(peer_id, f"pubsub:{topic}")
+            host = getattr(self, "host", None)
+            conn_manager = getattr(host, "conn_manager", None)
+            if conn_manager is not None:
+                conn_manager.untag_peer(peer_id, f"pubsub:{topic}")
+            else:
+                get_network = getattr(host, "get_network", None)
+                if get_network is not None:
+                    get_network().untag_peer(peer_id, f"pubsub:{topic}")
         except Exception:
             pass
 

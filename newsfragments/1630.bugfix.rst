@@ -1,0 +1,1 @@
+``AutoConnector.stop()`` now cancels the running connect cycle, including in-flight dials and on-demand discovery, and returns only once it has unwound, so no auto-connect dial can register a connection after ``stop()`` returns.

@@ -46,6 +46,11 @@ def find_available_port(start_port: int = 8000, host: str = "127.0.0.1") -> int:
     raise RuntimeError("Unreachable")
 
 
+def _new_metrics_instance(cls: type["Metrics"]) -> "Metrics":
+    """Allocate the singleton instance without re-entering ``__new__``."""
+    return object.__new__(cls)
+
+
 class Metrics:
     """
     Prometheus collectors for all libp2p modules.
@@ -75,9 +80,11 @@ class Metrics:
     rcmgr: "RcMgrMetrics | None"
 
     def __new__(cls, *args: Any, **kwargs: Any) -> "Metrics":
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
+        instance = cls._instance
+        if instance is None:
+            instance = _new_metrics_instance(cls)
+            cls._instance = instance
+        return instance
 
     def __init__(self, resource_manager: Any = None) -> None:
         if getattr(self, "_initialized", False):

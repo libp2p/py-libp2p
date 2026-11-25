@@ -1712,7 +1712,7 @@ class INetwork(ABC):
     @abstractmethod
     async def upgrade_inbound_raw_conn(
         self, raw_conn: IRawConnection, maddr: Multiaddr
-    ) -> IMuxedConn:
+    ) -> INetConn:
         """
         Secure and upgrade a raw inbound connection to a multiplexed network connection
 
@@ -2571,7 +2571,7 @@ class IHost(ABC):
     @abstractmethod
     async def upgrade_inbound_connection(
         self, raw_conn: IRawConnection, maddr: Multiaddr
-    ) -> IMuxedConn:
+    ) -> INetConn:
         """
         Upgrade a raw inbound connection to a fully secure and
         multiplexed network connection for the given multiaddress.

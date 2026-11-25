@@ -10,16 +10,17 @@ from __future__ import annotations
 import gc
 import time
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import Mock, patch
 import weakref
 
 import pytest
 from aioquic.buffer import Buffer
 from aioquic.quic.configuration import QuicConfiguration
-from aioquic.quic.connection import QuicConnection
-from aioquic.quic.events import StopSendingReceived, StreamDataReceived
+from aioquic.quic.connection import QuicConnection, QuicReceiveContext
+from aioquic.quic.events import QuicEvent, StopSendingReceived, StreamDataReceived
 from aioquic.quic.packet import QuicFrameType
-from aioquic.quic.packet_builder import QuicDeliveryState
+from aioquic.quic.packet_builder import QuicDeliveryState, QuicPacketBuilder
 from multiaddr import Multiaddr
 import trio
 from trio.testing import wait_all_tasks_blocked
@@ -46,9 +47,13 @@ def make_transport() -> QUICTransport:
     return QUICTransport(create_new_key_pair().private_key)
 
 
-def make_conn(transport=None) -> tuple[QuicConnection, QUICConnection]:
+def make_conn(
+    transport: QUICTransport | None = None,
+) -> tuple[QuicConnection, QUICConnection]:
     raw = QuicConnection(configuration=QuicConfiguration(is_client=True))
-    transport = transport or SimpleNamespace(_config=QUICTransportConfig())
+    conn_transport = transport or cast(
+        QUICTransport, SimpleNamespace(_config=QUICTransportConfig())
+    )
     conn = QUICConnection(
         raw,
         ("127.0.0.1", 1),
@@ -56,7 +61,7 @@ def make_conn(transport=None) -> tuple[QuicConnection, QUICConnection]:
         ID(b"local"),
         True,
         Multiaddr("/ip4/127.0.0.1/udp/1/quic-v1"),
-        transport,
+        conn_transport,
     )
     conn._started = True
     return raw, conn
@@ -80,7 +85,9 @@ async def test_outbound_opens_wait_for_peer_credit(autojump_clock):
     # when admission fails before the host obtains a stream to reset.
     for _ in range(100):
         with pytest.raises(QUICStreamTimeoutError):
-            await BasicHost.new_stream(host, conn._remote_peer_id, [])
+            await BasicHost.new_stream(
+                cast(BasicHost, host), cast(ID, conn._remote_peer_id), []
+            )
         assert semaphore.value == 1
     assert conn._next_stream_id == 0
     assert not conn._streams and not raw._streams and not raw._streams_blocked_bidi
@@ -128,16 +135,18 @@ async def test_retired_connection_id_leaves_listener_registry():
 
     for _ in range(50):
         cid = next(c for c in raw._host_cids if c.sequence_number > 0)
-        raw._write_new_connection_id_frame(builder, cid)
+        raw._write_new_connection_id_frame(cast(QuicPacketBuilder, builder), cid)
         while (event := raw.next_event()) is not None:
-            await conn._handle_quic_event(event)
+            await conn._handle_quic_event(cast(QuicEvent, event))
         frame = Buffer(capacity=16)
         frame.push_uint_var(cid.sequence_number)
         raw._handle_retire_connection_id_frame(
-            context, QuicFrameType.RETIRE_CONNECTION_ID, Buffer(data=frame.data)
+            cast(QuicReceiveContext, context),
+            QuicFrameType.RETIRE_CONNECTION_ID,
+            Buffer(data=frame.data),
         )
         while (event := raw.next_event()) is not None:
-            await conn._handle_quic_event(event)
+            await conn._handle_quic_event(cast(QuicEvent, event))
 
     registry = listener._registry
     assert len(registry._connections) == 1
@@ -161,9 +170,9 @@ async def test_retransmitted_connection_id_does_not_add_sequences():
 
     for _ in range(50):
         cid = next(c for c in raw._host_cids if c.sequence_number > 0)
-        raw._write_new_connection_id_frame(builder, cid)
+        raw._write_new_connection_id_frame(cast(QuicPacketBuilder, builder), cid)
         while (event := raw.next_event()) is not None:
-            await conn._handle_quic_event(event)
+            await conn._handle_quic_event(cast(QuicEvent, event))
         raw._on_new_connection_id_delivery(QuicDeliveryState.LOST, cid)
 
     registry = listener._registry
@@ -449,7 +458,10 @@ async def test_cancelled_listener_start_releases_transport_ownership(
         assert all(item._socket is None for item in listeners)
         assert all(item._close_complete.is_set() for item in listeners)
         if not shared_nursery:
-            assert all(item._owned_stopped.is_set() for item in listeners)
+            assert all(
+                item._owned_stopped is not None and item._owned_stopped.is_set()
+                for item in listeners
+            )
 
         # Aborted listeners are closed and unregistered; reopening one would
         # create a listener the transport can no longer shut down.
@@ -532,7 +544,7 @@ async def test_dial_after_transport_close_does_not_publish_connection():
 
     async def gated_connect(conn, nursery):
         nonlocal entered
-        entered += 1
+        entered = entered + 1
         if entered == 10:
             all_entered.set()
         await release.wait()

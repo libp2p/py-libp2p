@@ -7,10 +7,15 @@ error handling, and concurrent operations.
 import logging
 import time
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-from aioquic.quic.events import ConnectionIdIssued, StreamDataReceived
+from aioquic.quic.events import (
+    ConnectionIdIssued,
+    ConnectionTerminated,
+    StreamDataReceived,
+)
 from multiaddr.multiaddr import Multiaddr
 import trio
 
@@ -807,16 +812,26 @@ def test_abandon_quic_stream_survives_unidirectional_streams() -> None:
     quic.reset_stream.assert_called_once_with(3, 0)
 
 
-def _unfinished_quic_stream(**sender_fields: object) -> SimpleNamespace:
-    defaults: dict[str, object] = {
-        "is_finished": False,
-        "_buffer_fin": None,
-        "_reset_error_code": None,
-    }
-    defaults.update(sender_fields)
-    sender = SimpleNamespace(**defaults)
-    receiver = SimpleNamespace(is_finished=False)
-    return SimpleNamespace(sender=sender, receiver=receiver, is_finished=False)
+class _QuicStreamHalf:
+    """aioquic send/receive half stand-in with its tracked close state."""
+
+    def __init__(self, **fields: object) -> None:
+        self.is_finished = bool(fields.get("is_finished", False))
+        self._buffer_fin = fields.get("_buffer_fin")
+        self._reset_error_code = fields.get("_reset_error_code")
+
+
+class _FakeQuicStream:
+    """aioquic stream stand-in used by the abandoned-stream tests."""
+
+    def __init__(self, **sender_fields: object) -> None:
+        self.sender = _QuicStreamHalf(**sender_fields)
+        self.receiver = _QuicStreamHalf()
+        self.is_finished = False
+
+
+def _unfinished_quic_stream(**sender_fields: object) -> _FakeQuicStream:
+    return _FakeQuicStream(**sender_fields)
 
 
 def test_remove_stream_finishes_a_stream_whose_send_half_was_never_closed() -> None:
@@ -906,8 +921,8 @@ class _BlockedStream:
 
     def __init__(self, stream_id: int, finished: bool = False) -> None:
         self.stream_id = stream_id
-        self.sender = SimpleNamespace(is_finished=finished)
-        self.receiver = SimpleNamespace(is_finished=finished)
+        self.sender = _QuicStreamHalf(is_finished=finished)
+        self.receiver = _QuicStreamHalf(is_finished=finished)
 
     @property
     def is_finished(self) -> bool:
@@ -1005,7 +1020,11 @@ async def test_connection_termination_survives_removed_on_close_hook(caplog) -> 
 
     with caplog.at_level(logging.ERROR):
         await QUICConnection._handle_connection_terminated(
-            conn, SimpleNamespace(reason_phrase="done", error_code=0)
+            conn,
+            cast(
+                ConnectionTerminated,
+                SimpleNamespace(reason_phrase="done", error_code=0),
+            ),
         )
 
     assert conn._closed is True

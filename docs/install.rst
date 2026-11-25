@@ -5,7 +5,10 @@ Follow the steps below to install `py-libp2p` on your platform.
 
 .. note::
 
-    py-libp2p installation is currently supported on Python versions ``<= 3.13``.
+    py-libp2p installation is currently supported on Python versions ``<= 3.14``
+    on Linux and macOS. On Windows, use Python ``3.10``–``3.13`` until upstream
+    ``miniupnpc`` ships ``cp314-win_amd64`` wheels (CI omits Windows 3.14 for
+    the same reason).
 
 .. warning::
 

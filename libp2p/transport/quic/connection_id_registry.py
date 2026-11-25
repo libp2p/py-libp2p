@@ -14,7 +14,7 @@ This class encapsulates the four synchronized dictionaries that track:
 from collections import defaultdict
 import logging
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import trio
 
@@ -934,6 +934,15 @@ class ConnectionIDRegistry:
                 if connection_id is None:
                     return None
 
+            if connection_id is None:
+                return None
+
+            # The per-connection maps below are keyed by the QUICConnection
+            # wrapper.  A connection resolved from `_pending` is a raw aioquic
+            # object, so those lookups simply miss; the cast only narrows the
+            # type used for keying, it does not change runtime behaviour.
+            wrapper = cast("QUICConnection", connection)
+
             # Expand to every CID that routes to this connection object so no
             # alias outlives the removal.
             cids_to_remove: set[bytes] = {connection_id}
@@ -943,9 +952,7 @@ class ConnectionIDRegistry:
             cids_to_remove.update(
                 cid for cid, conn in self._pending.items() if conn is connection
             )
-            cids_to_remove.update(
-                self._connection_sequences.get(connection, {}).values()
-            )
+            cids_to_remove.update(self._connection_sequences.get(wrapper, {}).values())
             raw_quic = getattr(connection, "_quic", None) or getattr(
                 connection, "quic_connection", None
             )
@@ -984,15 +991,15 @@ class ConnectionIDRegistry:
                 if other_cid in cids_to_remove:
                     self._addr_to_connection_id.pop(other_addr, None)
             for other_addr, conns in list(self._addr_to_connections.items()):
-                conns.discard(connection)
+                conns.discard(wrapper)
                 if not conns:
                     self._addr_to_connections.pop(other_addr, None)
 
             # Remove per-connection mappings.
-            self._connection_addresses.pop(connection, None)
-            self._connection_primary_cid.pop(connection, None)
-            self._connection_cid_counts.pop(connection, None)
-            self._connection_sequences.pop(connection, None)
+            self._connection_addresses.pop(wrapper, None)
+            self._connection_primary_cid.pop(wrapper, None)
+            self._connection_cid_counts.pop(wrapper, None)
+            self._connection_sequences.pop(wrapper, None)
 
             if raw_quic is not None:
                 _purge_quic_conn(raw_quic)

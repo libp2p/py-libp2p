@@ -1076,7 +1076,8 @@ class QUICConnection(IRawConnection, IMuxedConn):
         """
         # Cancellation after buffering data must not skip the budget check or
         # strand the resources of an entry already removed from the queue.
-        with trio.CancelScope(shield=True):
+        with trio.CancelScope() as shield_scope:
+            shield_scope.shield = True
             queue = self._stream_accept_queue
             while queue:
                 buffered = sum(len(stream._receive_buffer) for stream in queue)
@@ -1189,6 +1190,8 @@ class QUICConnection(IRawConnection, IMuxedConn):
         untouched. Nothing owns the stream afterwards, so finish what is open.
         """
         quic = getattr(self, "_quic", None)
+        if quic is None:
+            return
         streams = getattr(quic, "_streams", None)
         if not isinstance(streams, dict):
             return
@@ -2406,13 +2409,13 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     # Null out TLS context — frees OpenSSL key schedule, peer
                     # certificate chains, EC private keys, and receive buffers.
                     try:
-                        self._quic.tls = None
+                        setattr(self._quic, "tls", None)
                     except Exception:
                         pass
                     # Null out loss/recovery state — frees packet number space,
                     # ACK tracking, congestion controller, and pacer buffers.
                     try:
-                        self._quic._loss = None
+                        setattr(self._quic, "_loss", None)
                     except Exception:
                         pass
                     # Clear crypto stream state — these hold bytearrays for
@@ -2458,7 +2461,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
                         pass
                     # Release the aioquic QuicConnection object entirely so
                     # Python GC can reclaim it immediately.
-                    self._quic = None
+                    setattr(self, "_quic", None)
 
                 self._stream_accept_queue.clear()
                 self._handshake_events.clear()

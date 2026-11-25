@@ -238,13 +238,15 @@ class RTRefreshManager:
                 except Exception as e:
                     logger.warning(f"Refresh callback error: {e}")
 
-            return (len(discovered_peers), added_count)
+            refresh_result = (len(discovered_peers), added_count)
 
         except Exception as e:
             logger.error(f"Routing table refresh failed: {e}")
             raise RoutingTableRefreshError(f"Refresh operation failed: {e}") from e
         finally:
             self._is_refreshing = False
+
+        return refresh_result
 
     def add_refresh_done_callback(self, callback: Callable[[], None]) -> None:
         """Add a callback to be called when refresh completes."""

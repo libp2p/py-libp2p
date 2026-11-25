@@ -138,7 +138,7 @@ class BitswapSession:
         try:
             if self.client.host.get_network().connections.get(peer_id):
                 return True
-            addrs = self.client.host.peerstore.addrs(peer_id)
+            addrs = self.client.host.get_peerstore().addrs(peer_id)
             if not addrs:
                 return False
             from libp2p.peer.peerinfo import PeerInfo
@@ -157,7 +157,8 @@ class BitswapSession:
         session deadline. Runs only until providers are found; discovered
         providers are recorded and dialed lazily by ``_request_block``.
         """
-        if self.client.provider_query_manager is None:
+        provider_query_manager = self.client.provider_query_manager
+        if provider_query_manager is None:
             return
         while getattr(self.client, "_started", True):
             if time.time() >= deadline:
@@ -170,10 +171,8 @@ class BitswapSession:
             if self._discovered_providers.get(cid):
                 return
             try:
-                providers = (
-                    await self.client.provider_query_manager.find_providers_single(
-                        cid, timeout=min(10.0, max(1.0, deadline - time.time()))
-                    )
+                providers = await provider_query_manager.find_providers_single(
+                    cid, timeout=min(10.0, max(1.0, deadline - time.time()))
                 )
             except Exception:
                 continue

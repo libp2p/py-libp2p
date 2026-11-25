@@ -860,7 +860,8 @@ class WebsocketTransport(ITransport):
                                 # fail_after: shield the close, otherwise the
                                 # socket leaks exactly when the handshake times
                                 # out.
-                                with trio.CancelScope(shield=True):
+                                with trio.CancelScope() as shield_scope:
+                                    shield_scope.shield = True
                                     await aclose_forcefully(stream)
                                 raise
                     except BaseException as exc:
@@ -935,6 +936,10 @@ class WebsocketTransport(ITransport):
             raise result
         if isinstance(result, BaseException):
             raise OpenConnectionError(f"Failed to dial {ws_url}: {result}") from result
+        if not isinstance(result, P2PWebSocketConnection):
+            raise OpenConnectionError(
+                f"Failed to dial {ws_url}: unexpected result {result!r}"
+            )
         return result
 
     async def _create_proxy_connection(

@@ -188,8 +188,8 @@ class WebRTCDirectTransport(ITransport):
                     cred = make_v2_credential(ice_conn.local_password)
                 offer = await bridge.run_coro(pc.createOffer())
                 await bridge.run_coro(pc.setLocalDescription(offer))
-                # The listener is ICE-Lite/controlled and the DTLS server; its
-                # fingerprint comes from the certhash so aiortc pins it.
+                # Synthetic answer is a=ice-lite + setup:passive (dialer
+                # controlling, listener DTLS server); fingerprint from certhash.
                 answer_sdp = build_synthetic_answer(
                     host=host,
                     port=port,

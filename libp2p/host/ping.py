@@ -170,7 +170,8 @@ def _stream_is_usable(stream: INetStream) -> bool:
         is_closed = is_closed()
     if is_closed:
         return False
-    if hasattr(stream, "_state") and getattr(stream._state, "value", None) == "RESET":
+    state = getattr(stream, "_state", None)
+    if getattr(state, "value", None) == "RESET":
         return False
     return True
 

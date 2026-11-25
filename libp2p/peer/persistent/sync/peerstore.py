@@ -224,7 +224,7 @@ class SyncPersistentPeerStore(IPeerStore):
             if hasattr(self.datastore, "query_keys"):
                 key_iter = self.datastore.query_keys()
             else:
-                key_iter = (k for k, _ in self.datastore.query())
+                key_iter = (k for k, _ in self.datastore.query(b""))
             for key in key_iter:
                 for prefix, prefix_len in prefixes:
                     if key.startswith(prefix):
@@ -662,8 +662,9 @@ class SyncPersistentPeerStore(IPeerStore):
 
     def count_peers(self) -> int:
         """Return the number of peers stored without materializing them."""
-        if hasattr(self.datastore, "count"):
-            return self.datastore.count(self.ADDR_PREFIX)
+        count = getattr(self.datastore, "count", None)
+        if count is not None:
+            return int(count(self.ADDR_PREFIX))
         return len(self.peer_data_map)
 
     def peer_ids(self) -> list[ID]:

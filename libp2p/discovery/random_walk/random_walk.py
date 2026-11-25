@@ -248,10 +248,12 @@ class RandomWalk:
         """
         try:
             peerstore = self.host.get_peerstore()
-            if hasattr(peerstore, "sample_peer_ids"):
-                peer_ids = peerstore.sample_peer_ids(limit=limit, random_order=True)
-            elif hasattr(peerstore, "valid_peer_ids"):
-                peer_ids = peerstore.valid_peer_ids()[:limit]
+            sample_peer_ids = getattr(peerstore, "sample_peer_ids", None)
+            valid_peer_ids = getattr(peerstore, "valid_peer_ids", None)
+            if sample_peer_ids is not None:
+                peer_ids = sample_peer_ids(limit=limit, random_order=True)
+            elif valid_peer_ids is not None:
+                peer_ids = valid_peer_ids()[:limit]
             else:
                 peer_ids = peerstore.peers_with_addrs()[:limit]
 

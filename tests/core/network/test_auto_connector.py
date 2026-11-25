@@ -6,6 +6,7 @@ and connection pruner with watermark support.
 """
 
 import pytest
+import trio
 
 from libp2p.network.auto_connector import AutoConnector
 from libp2p.network.config import (
@@ -232,6 +233,97 @@ class TestAutoConnectorStartStop:
 
         await connector.stop()
         assert connector._started is False
+
+    @pytest.mark.trio
+    async def test_stop_cancels_in_flight_dials(self):
+        """stop() returns only once in-flight dials are cancelled and unwound."""
+        peer = ID(b"stuck-peer")
+        dial_started = trio.Event()
+        dial_cancelled = trio.Event()
+
+        class MockSwarm:
+            def __init__(self):
+                self.connection_config = ConnectionConfig()
+
+            def get_total_connections(self):
+                return 0
+
+            def get_connected_peer_count(self):
+                return 0
+
+            def get_connections(self, peer_id):
+                return []
+
+            async def dial_peer(self, peer_id):
+                dial_started.set()
+                try:
+                    await trio.sleep_forever()
+                finally:
+                    dial_cancelled.set()
+
+        connector = AutoConnector(MockSwarm())  # type: ignore
+
+        async def candidates():
+            return [peer]
+
+        connector._get_candidate_peers = candidates  # type: ignore[method-assign]
+        await connector.start()
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(connector.maybe_connect)
+            with trio.fail_after(2):
+                await dial_started.wait()
+            assert connector._in_flight_dials == {peer}
+
+            with trio.fail_after(2):
+                await connector.stop()
+
+            assert dial_cancelled.is_set()
+            assert connector._in_flight_dials == set()
+            assert connector._is_connecting is False
+            # Shutdown is not a dial failure: no cooldown is recorded.
+            assert peer not in connector._failure_counts
+
+    @pytest.mark.trio
+    async def test_stop_cancels_hung_discovery(self):
+        """A discovery callback that never returns does not hold up stop()."""
+        discovery_started = trio.Event()
+        dialed = []
+
+        class MockSwarm:
+            def __init__(self):
+                self.connection_config = ConnectionConfig()
+
+            def get_total_connections(self):
+                return 0
+
+            def get_connected_peer_count(self):
+                return 0
+
+            async def dial_peer(self, peer_id):
+                dialed.append(peer_id)
+
+        connector = AutoConnector(MockSwarm())  # type: ignore
+
+        async def candidates():
+            return [ID(b"some-peer")]
+
+        async def hung_discovery():
+            discovery_started.set()
+            await trio.sleep_forever()
+
+        connector._get_candidate_peers = candidates  # type: ignore[method-assign]
+        connector.set_discovery_callback(hung_discovery)
+        await connector.start()
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(connector.maybe_connect)
+            with trio.fail_after(2):
+                await discovery_started.wait()
+                await connector.stop()
+
+            assert connector._is_connecting is False
+            assert dialed == []
 
 
 class TestConnectionPrunerWatermarks:

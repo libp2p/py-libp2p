@@ -671,7 +671,7 @@ async def test_child_task_discarded_from_parent_on_exit():
     service = ChildTaskTestService()
     async with background_trio_service(service) as manager:
         await trio.sleep(0.25)
-        for root_task in manager._root_tasks:
+        for root_task in getattr(manager, "_root_tasks", []):
             if hasattr(root_task, "children"):
                 assert len(root_task.children) == 0
         manager.cancel()
