@@ -21,7 +21,9 @@ Python's built-in ``venv`` module. Instructions vary by platform:
 
 .. note::
 
-    py-libp2p contributor setup is currently supported on Python versions ``<= 3.14``.
+    py-libp2p contributor setup is currently supported on Python versions
+    ``<= 3.14`` on Linux and macOS. On Windows, use ``3.10``–``3.13`` until
+    ``miniupnpc`` ships ``cp314-win_amd64`` wheels.
 
 .. warning::
 
@@ -259,7 +261,8 @@ Setup Steps
 
    ``setup_dev.ps1`` checks for ``uv`` (``>= 0.13.4``, required unless
    ``-Pip``), selects the newest supported Python from
-   ``pyproject.toml`` classifiers (``3.10``–``3.14``; installs via
+   ``pyproject.toml`` classifiers capped at ``3.13`` on Windows (``3.14`` is
+   omitted until ``miniupnpc`` wheels land; installs via
    ``uv python install`` when missing), or floors ``pip`` (``>= 26.2.2``) on the
    ``-Pip`` path, and installs the ``dev`` dependency group.
 
