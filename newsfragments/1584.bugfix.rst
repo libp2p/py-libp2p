@@ -1,0 +1,1 @@
+Leaving ``host.run()`` without calling ``host.close()`` now closes the host's connections, listeners and transports. Previously the teardown in ``Swarm.run()`` ran in an already-cancelled scope and stopped at its first ``await``.
