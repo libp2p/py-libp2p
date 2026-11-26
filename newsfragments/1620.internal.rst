@@ -1,1 +1,0 @@
-Updated the test suite for ``multiaddr`` 0.3, which now validates multiaddr bytes eagerly, and silenced two ``pyrefly`` false positives on ``py-multihash`` 4.0.0's ``Multihash`` fields. This restores the CI ``core`` and ``lint`` environments.

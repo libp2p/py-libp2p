@@ -1,1 +1,0 @@
-Added a test that a QUIC handshake between two py-libp2p peers offers and selects the post-quantum X25519MLKEM768 key exchange, so that a dependency change cannot drop it unnoticed.

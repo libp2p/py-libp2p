@@ -1,1 +1,0 @@
-Require aioquic 1.9.1 or later, so that QUIC and WebTransport connections use the post-quantum X25519MLKEM768 key exchange whenever the peer supports it, and stop relying on aioquic internals which it now covers with public API.
