@@ -10,7 +10,6 @@ Subpackages
    libp2p.bitswap
    libp2p.crypto
    libp2p.discovery
-   libp2p.events
    libp2p.filecoin
    libp2p.host
    libp2p.identity

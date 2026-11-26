@@ -44,7 +44,9 @@ Added server-side semaphore protection matching client-side behavior:
 muxed_conn = getattr(net_stream, "muxed_conn", None)
 negotiation_semaphore = None
 if muxed_conn is not None:
-    negotiation_semaphore = getattr(muxed_conn, "_negotiation_semaphore", None)
+    negotiation_semaphore = getattr(
+        muxed_conn, "_negotiation_semaphore", None
+    )
 
 if negotiation_semaphore is not None:
     # Use connection-level semaphore to throttle server-side negotiations

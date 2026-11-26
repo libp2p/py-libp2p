@@ -1,4 +1,0 @@
-Released retained connection, stream, and task state across QUIC, stream
-multiplexers, WebSocket, pubsub, Bitswap, and Kad-DHT. Bounded peerstore and
-swarm bookkeeping, reclaimed inbound connection slots after disconnect, and
-improved auto-connector recovery after peer churn.

@@ -1,4 +1,0 @@
-Inbound upgrade methods on ``IHost`` and ``INetwork`` now return the registered
-``INetConn``. Implementations and callers that need the underlying multiplexer
-can access it through ``INetConn.muxed_conn``. Custom ``IHost`` implementations
-must also provide ``get_event_bus()``.
