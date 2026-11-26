@@ -1,7 +1,7 @@
 """
 Event-bus listener that records events into the Prometheus metrics.
 
-``MetricsListener`` is the bridge between the INotifee-style event bus and
+``MetricsListener`` is the bridge between the observability event bus and
 the per-module Prometheus collectors: register it on a host's event bus
 (``host.get_event_bus().register_listener(MetricsListener())``, or use
 ``Metrics.attach(event_bus)``) and every module event is recorded.

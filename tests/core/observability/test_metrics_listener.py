@@ -7,7 +7,7 @@ outbound pubsub), the ``MetricsListener`` type dispatch and
 """
 
 import pytest
-from prometheus_client import REGISTRY
+from prometheus_client import REGISTRY, CollectorRegistry
 
 from libp2p.bitswap.events import BitswapEvent
 from libp2p.discovery.events.events import DiscoveryEvent
@@ -19,22 +19,13 @@ from libp2p.metrics.metrics import Metrics
 from libp2p.metrics.swarm import SwarmEvent
 from libp2p.peer.id import ID
 from libp2p.pubsub.pubsub import GossipsubEvent
+from libp2p.rcmgr import new_resource_manager
 
 PEER_ID = "12D3KooWRcqGSY7VJKZihipeo3NMikpWb185DxA5ZQreJ364ihEx"
 PEER_ID_OBJ = ID.from_string(PEER_ID)
 
 
-def clear_registry() -> None:
-    collectors = list(REGISTRY._collector_to_names.keys())
-    for collector in collectors:
-        try:
-            REGISTRY.unregister(collector)
-        except KeyError:
-            pass
-
-
 def test_bitswap_metrics_records_all_event_kinds() -> None:
-    clear_registry()
     metrics = Metrics()
 
     for flag, payload in [
@@ -57,7 +48,6 @@ def test_bitswap_metrics_records_all_event_kinds() -> None:
 
 
 def test_discovery_metrics_records_all_event_kinds() -> None:
-    clear_registry()
     metrics = Metrics()
 
     cases = [
@@ -76,7 +66,6 @@ def test_discovery_metrics_records_all_event_kinds() -> None:
 
 
 def test_kad_dht_metrics_records_outbound_events() -> None:
-    clear_registry()
     metrics = Metrics()
 
     cases = [
@@ -107,7 +96,6 @@ def test_kad_dht_metrics_records_outbound_events() -> None:
 
 
 def test_gossipsub_metrics_records_outbound_events() -> None:
-    clear_registry()
     metrics = Metrics()
 
     publish = GossipsubEvent()
@@ -125,7 +113,6 @@ def test_gossipsub_metrics_records_outbound_events() -> None:
 
 
 def test_metrics_listener_dispatches_by_event_type() -> None:
-    clear_registry()
     metrics = Metrics()
     listener = MetricsListener(metrics)
 
@@ -142,20 +129,42 @@ def test_metrics_listener_dispatches_by_event_type() -> None:
 
 
 def test_metrics_attach_registers_listener_on_bus() -> None:
-    clear_registry()
     bus = EventBus()
     metrics = Metrics()
-    attached = metrics.attach(bus)
+    attached = metrics.attach(bus).attach(bus)
 
     assert attached is metrics
     assert len(bus.listeners) == 1
     assert isinstance(bus.listeners[0], MetricsListener)
 
+    before = REGISTRY.get_sample_value("swarm_dial_attempt_total")
+    assert before is not None
+    event = SwarmEvent()
+    event.dial_attempt = True
+    bus.emit(event)
+    assert REGISTRY.get_sample_value("swarm_dial_attempt_total") == before + 1
+
+
+def test_metrics_replaces_resource_manager_collector(monkeypatch) -> None:
+    registry = CollectorRegistry(auto_describe=True)
+    metrics = Metrics()
+    monkeypatch.setattr("libp2p.metrics.metrics.REGISTRY", registry)
+    monkeypatch.setattr(metrics, "rcmgr", None)
+    first = new_resource_manager()
+    second = new_resource_manager()
+    assert first.metrics is not None
+    first.metrics.allow_conn("inbound")
+
+    labels = {"dir": "inbound"}
+    assert Metrics(first) is metrics
+    assert registry.get_sample_value("libp2p_rcmgr_connections", labels) == 1
+    assert Metrics(second) is metrics
+    assert registry.get_sample_value("libp2p_rcmgr_connections", labels) == 0
+
 
 @pytest.mark.trio
 async def test_metrics_listener_records_emitted_events(monkeypatch) -> None:
     """End-to-end: emit on the bus -> MetricsListener -> prometheus registry."""
-    clear_registry()
     bus = EventBus()
     metrics = Metrics()
     metrics.attach(bus)
@@ -169,8 +178,8 @@ async def test_metrics_listener_records_emitted_events(monkeypatch) -> None:
     def fake_bitswap_record(event):
         recorded.append("bitswap")
 
-    metrics.kad_dht.record = fake_kad_record
-    metrics.bitswap.record = fake_bitswap_record
+    monkeypatch.setattr(metrics.kad_dht, "record", fake_kad_record)
+    monkeypatch.setattr(metrics.bitswap, "record", fake_bitswap_record)
 
     kad_event = KadDhtEvent()
     kad_event.peer_id = PEER_ID

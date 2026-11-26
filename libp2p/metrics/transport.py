@@ -7,6 +7,7 @@ _TRANSPORT_NAMES = {
     "WebsocketTransport": "websocket",
     "WebRTCDirectTransport": "webrtc_direct",
     "WebRTCPrivateTransport": "webrtc_private",
+    "WebTransportTransport": "webtransport",
     "CircuitV2Transport": "circuit_v2",
     "CircuitV2Listener": "circuit_v2",
 }
@@ -18,28 +19,25 @@ def transport_label(
     """Return a bounded prometheus label for a transport (class or multiaddr)."""
     if transport is not None:
         name = _TRANSPORT_NAMES.get(type(transport).__name__)
-        if name:
+        if name is not None:
             return name
-        raw = type(transport).__name__.lower()
-        for suffix in ("transport", "listener"):
-            raw = raw.replace(suffix, "")
-        return raw or "unknown"
 
     if maddr is not None:
-        maddr_str = str(maddr)
-        if "quic" in maddr_str:
-            return "quic"
-        if "webtransport" in maddr_str:
-            return "webtransport"
-        if "webrtc" in maddr_str:
-            return "webrtc_direct"
-        if "ws" in maddr_str:
-            return "websocket"
-        if "p2p-circuit" in maddr_str:
+        protocols = {protocol.name for protocol in maddr.protocols()}
+        if "p2p-circuit" in protocols:
             return "circuit_v2"
-        if "tcp" in maddr_str:
+        if "webtransport" in protocols:
+            return "webtransport"
+        if "webrtc-direct" in protocols:
+            return "webrtc_direct"
+        if "webrtc" in protocols:
+            return "webrtc_private"
+        if protocols & {"quic", "quic-v1"}:
+            return "quic"
+        if protocols & {"ws", "wss"}:
+            return "websocket"
+        if "tcp" in protocols:
             return "tcp"
-        return "unknown"
 
     return "unknown"
 
@@ -126,7 +124,7 @@ class TransportMetrics:
 
         self.inbound_conn_total = Counter(
             "transport_inbound_conn_total",
-            "Inbound connections accepted by listeners, by transport and result",
+            "Inbound swarm admission outcomes, by transport and result",
             labelnames=["transport", "result"],
         )
 

@@ -61,6 +61,8 @@ class SwarmConn(INetConn):
         self.streams = set()
         self.event_closed = trio.Event()
         self.event_started = trio.Event()
+        self._connected_notified = False
+        self._disconnect_notified = False
         self._nursery: trio.Nursery | None = None
         # Track connection creation time for pruning
         self._created_at = time.time()
@@ -223,9 +225,7 @@ class SwarmConn(INetConn):
         # Notify all listeners about the disconnection
         logging.debug(f"Notifying disconnection for peer {self.muxed_conn.peer_id}")
         try:
-            with trio.CancelScope() as shield_scope:
-                shield_scope.shield = True
-                await self._notify_disconnected()
+            await self._notify_disconnected()
         except Exception as e:
             logging.warning(f"Error notifying disconnection: {e}")
 
@@ -396,7 +396,11 @@ class SwarmConn(INetConn):
         return net_stream
 
     async def _notify_disconnected(self) -> None:
-        await self.swarm.notify_disconnected(self)
+        if self._connected_notified and not self._disconnect_notified:
+            self._disconnect_notified = True
+            with trio.CancelScope() as scope:
+                scope.shield = True
+                await self.swarm.notify_disconnected(self)
 
     async def start(self) -> None:
         if self.event_closed.is_set():

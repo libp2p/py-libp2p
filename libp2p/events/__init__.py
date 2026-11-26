@@ -1,4 +1,4 @@
-"""Event bus for libp2p — INotifee-style listener fan-out."""
+"""Synchronous observability events for libp2p."""
 
 from .bus import (
     ChannelBridgeListener,

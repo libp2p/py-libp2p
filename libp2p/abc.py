@@ -1725,8 +1725,8 @@ class INetwork(ABC):
 
         Returns
         -------
-        IMuxedConn
-            The upgraded, secure, and multiplexed network connection.
+        INetConn
+            The registered, secure, and multiplexed network connection.
 
         Raises
         ------
@@ -2585,8 +2585,8 @@ class IHost(ABC):
 
         Returns
         -------
-        IMuxedConn
-            The upgraded and authenticated inbound muxed connection.
+        INetConn
+            The registered and authenticated inbound network connection.
 
         Raises
         ------

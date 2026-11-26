@@ -1,13 +1,12 @@
 import logging
 import socket
+import threading
 from typing import TYPE_CHECKING, Any
 
-from prometheus_client import start_http_server
+from prometheus_client import REGISTRY, start_http_server
 import trio
 
 from libp2p.events import EventBus
-from libp2p.host.ping import PingEvent
-from libp2p.kad_dht.events import KadDhtEvent
 from libp2p.metrics.bitswap import BitswapMetrics
 from libp2p.metrics.discovery import DiscoveryMetrics
 from libp2p.metrics.gossipsub import GossipsubMetrics
@@ -18,15 +17,14 @@ from libp2p.metrics.ping import PingMetrics
 from libp2p.metrics.relay import RelayMetrics
 from libp2p.metrics.request_response import RequestResponseMetrics
 from libp2p.metrics.security import SecurityMetrics
-from libp2p.metrics.swarm import SwarmEvent, SwarmMetrics
+from libp2p.metrics.swarm import SwarmMetrics
 from libp2p.metrics.transport import (
-    ListenConn,
     ListenConnMetrics,
     TransportMetrics,
 )
-from libp2p.pubsub.pubsub import GossipsubEvent
 
 if TYPE_CHECKING:
+    from libp2p.metrics.listener import MetricsListener
     from libp2p.metrics.rcmgr import RcMgrMetrics
 
 logger = logging.getLogger("libp2p.metrics")
@@ -62,6 +60,7 @@ class Metrics:
     """
 
     _instance: "Metrics | None" = None
+    _lock = threading.Lock()
 
     ping: PingMetrics
     gossipsub: GossipsubMetrics
@@ -78,18 +77,25 @@ class Metrics:
     listen_conns: ListenConnMetrics
 
     rcmgr: "RcMgrMetrics | None"
+    _listener: "MetricsListener"
 
     def __new__(cls, *args: Any, **kwargs: Any) -> "Metrics":
-        instance = cls._instance
-        if instance is None:
-            instance = _new_metrics_instance(cls)
-            cls._instance = instance
-        return instance
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = _new_metrics_instance(cls)
+            return cls._instance
 
     def __init__(self, resource_manager: Any = None) -> None:
-        if getattr(self, "_initialized", False):
-            return
-        self._initialized = True
+        with self._lock:
+            if not getattr(self, "_initialized", False):
+                self._initialize_collectors()
+                self._initialized = True
+        if resource_manager is not None:
+            self.attach_rcmgr(resource_manager)
+
+    def _initialize_collectors(self) -> None:
+        from libp2p.metrics.listener import MetricsListener
+
         self.ping = PingMetrics()
         self.gossipsub = GossipsubMetrics()
         self.kad_dht = KadDhtMetrics()
@@ -104,35 +110,32 @@ class Metrics:
         self.request_response = RequestResponseMetrics()
         self.listen_conns = ListenConnMetrics()
         self.rcmgr = None
-
-        if resource_manager is not None:
-            self.attach_rcmgr(resource_manager)
+        self._listener = MetricsListener(self)
 
     def attach_rcmgr(self, resource_manager: Any) -> "Metrics":
         """
         Expose the resource manager's counters on the shared Prometheus
-        registry (go-libp2p-style ``libp2p_rcmgr_*`` gauges). No-op if the
-        resource manager exposes no ``metrics`` summary.
+        registry (go-libp2p-style ``libp2p_rcmgr_*`` gauges). Registering
+        another manager replaces the previous one. No-op if the manager
+        exposes no metrics summary.
         """
-        from prometheus_client.registry import REGISTRY
-
         from libp2p.metrics.rcmgr import RcMgrMetrics
 
+        metrics = getattr(resource_manager, "metrics", None)
+        if not callable(getattr(metrics, "get_summary", None)):
+            return self
         bridge = RcMgrMetrics(resource_manager)
-        try:
-            REGISTRY.unregister(bridge)
-        except Exception:
-            pass
-        try:
+        with self._lock:
+            if self.rcmgr is not None:
+                REGISTRY.unregister(self.rcmgr)
             REGISTRY.register(bridge)
-        except Exception:
-            pass
-        self.rcmgr = bridge
+            self.rcmgr = bridge
         return self
 
     def attach(self, event_bus: EventBus) -> "Metrics":
         """
         Register a metrics listener on ``event_bus`` and return self.
+        Repeated calls on the same bus register only one listener.
 
         From this point on, every event emitted on the bus (DHT lookups,
         Bitswap block transfers, discovery events, pubsub messages, ping
@@ -144,9 +147,7 @@ class Metrics:
             metrics.attach(host.get_event_bus())
             metrics.start_http_server()
         """
-        from libp2p.metrics.listener import MetricsListener
-
-        event_bus.register_listener(MetricsListener(self))
+        event_bus.register_listener(self._listener)
         return self
 
     def start_http_server(self, port: int | None = None) -> int:
@@ -181,20 +182,8 @@ class Metrics:
             f"Grafana dashboard will be visible at: http://localhost:{grafana}\n"
         )
 
-        while True:
-            event = await metric_recv_channel.receive()
-
+        async for event in metric_recv_channel:
             try:
-                match event:
-                    case PingEvent():
-                        self.ping.record(event)
-                    case GossipsubEvent():
-                        self.gossipsub.record(event)
-                    case KadDhtEvent():
-                        self.kad_dht.record(event)
-                    case SwarmEvent():
-                        self.swarm.record(event)
-                    case ListenConn():
-                        self.listen_conns.record(event)
+                self._listener.handle_event(event)
             except Exception:
                 logger.debug("Failed to record metric event: %r", event, exc_info=True)

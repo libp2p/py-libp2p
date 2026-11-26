@@ -1,22 +1,13 @@
 import pytest
-from prometheus_client import REGISTRY
 import trio
 
+from libp2p.bitswap.events import BitswapEvent
 from libp2p.host.ping import PingEvent
 from libp2p.kad_dht.kad_dht import KadDhtEvent
 from libp2p.metrics.metrics import Metrics, find_available_port
 from libp2p.metrics.swarm import SwarmEvent
 from libp2p.peer.id import ID
 from libp2p.pubsub.pubsub import GossipsubEvent
-
-
-def clear_registry():
-    collectors = list(REGISTRY._collector_to_names.keys())
-    for collector in collectors:
-        try:
-            REGISTRY.unregister(collector)
-        except KeyError:
-            pass
 
 
 def test_find_available_port_returns_free_port() -> None:
@@ -26,7 +17,6 @@ def test_find_available_port_returns_free_port() -> None:
 
 
 def test_ping_metrics_records_rtt() -> None:
-    clear_registry()
     metrics = Metrics()
 
     event = PingEvent(
@@ -49,7 +39,6 @@ def test_ping_metrics_records_rtt() -> None:
 
 
 def test_gossipsub_metrics_records_events() -> None:
-    clear_registry()
     metrics = Metrics()
 
     event = GossipsubEvent()
@@ -62,7 +51,6 @@ def test_gossipsub_metrics_records_events() -> None:
 
 
 def test_kad_dht_metrics_records_all_events() -> None:
-    clear_registry()
     metrics = Metrics()
 
     event = KadDhtEvent()
@@ -75,7 +63,6 @@ def test_kad_dht_metrics_records_all_events() -> None:
 
 
 def test_swarm_metrics_records_all_events() -> None:
-    clear_registry()
     metrics = Metrics()
 
     event = SwarmEvent()
@@ -88,8 +75,7 @@ def test_swarm_metrics_records_all_events() -> None:
 
 
 @pytest.mark.trio
-async def test_metrics_pipeline_dispatches_ping(monkeypatch) -> None:
-    clear_registry()
+async def test_metrics_pipeline_dispatches_legacy_and_new_events(monkeypatch) -> None:
     metrics = Metrics()
 
     # --- mock prometheus server ---
@@ -98,35 +84,22 @@ async def test_metrics_pipeline_dispatches_ping(monkeypatch) -> None:
         lambda *_: None,
     )
 
-    # --- spy on ping.record ---
-    called = {"ping": False}
+    recorded: list[object] = []
+    monkeypatch.setattr(metrics.ping, "record", recorded.append)
+    monkeypatch.setattr(metrics.bitswap, "record", recorded.append)
 
-    def fake_ping_record(event):
-        called["ping"] = True
+    ping = PingEvent(
+        peer_id=ID.from_string("12D3KooWRcqGSY7VJKZihipeo3NMikpWb185DxA5ZQreJ364ihEx"),
+        rtts=[100],
+        failure_error=None,
+    )
+    bitswap = BitswapEvent()
+    bitswap.block_received = True
 
-    metrics.ping.record = fake_ping_record
+    send_channel, recv_channel = trio.open_memory_channel[object](2)
+    async with send_channel:
+        send_channel.send_nowait(ping)
+        send_channel.send_nowait(bitswap)
+    await metrics.start_prometheus_server(recv_channel)
 
-    send_channel, recv_channel = trio.open_memory_channel(1)
-
-    async def run():
-        await metrics.start_prometheus_server(recv_channel)
-
-    async with trio.open_nursery() as nursery:
-        nursery.start_soon(run)
-
-        event = PingEvent(
-            peer_id=ID.from_string(
-                "12D3KooWRcqGSY7VJKZihipeo3NMikpWb185DxA5ZQreJ364ihEx"
-            ),
-            rtts=[100],
-            failure_error=None,
-        )
-
-        await send_channel.send(event)
-
-        # give event loop time
-        await trio.sleep(0.1)
-
-        nursery.cancel_scope.cancel()
-
-    assert called["ping"] is True
+    assert recorded == [ping, bitswap]

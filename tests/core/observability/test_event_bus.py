@@ -165,3 +165,15 @@ async def test_bridge_ignores_closed_channel() -> None:
     # Must not raise.
     bus.emit(SampleEvent())
     bus.emit(SampleEvent())
+
+
+@pytest.mark.trio
+async def test_bridge_drops_off_thread_event_even_when_buffer_has_space() -> None:
+    send_channel, recv_channel = trio.open_memory_channel(1)
+    bus = EventBus()
+    bus.register_listener(ChannelBridgeListener(send_channel))
+
+    await trio.to_thread.run_sync(bus.emit, SampleEvent())
+
+    with pytest.raises(trio.WouldBlock):
+        recv_channel.receive_nowait()

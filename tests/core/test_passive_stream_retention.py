@@ -16,6 +16,7 @@ from libp2p.stream_muxer.mplex.mplex import Mplex
 from libp2p.transport.quic.config import QUICTransportConfig
 from libp2p.transport.quic.connection import QUICConnection
 from libp2p.transport.quic.stream import QUICStream, StreamDirection
+from tests.utils.factories import SwarmFactory
 
 
 @pytest.mark.trio
@@ -68,7 +69,9 @@ async def test_mplex_local_reset_releases_both_registries(cancel_send):
 @pytest.mark.trio
 @pytest.mark.parametrize("reset_timing", ["before", "during", "after"])
 @pytest.mark.parametrize("direction", [Direction.INBOUND, Direction.OUTBOUND])
-async def test_quic_remote_reset_releases_swarm_ownership(reset_timing, direction):
+async def test_quic_remote_reset_releases_swarm_ownership(
+    reset_timing, direction, monkeypatch
+):
     opened, closed, removed = [], [], []
     released, slots = [], []
 
@@ -91,14 +94,19 @@ async def test_quic_remote_reset_releases_swarm_ownership(reset_timing, directio
         peer_id=ID(b"peer"),
         remote_peer_id=lambda: ID(b"peer"),
     )
-    swarm: Any = SimpleNamespace(
-        notify_opened_stream=notify_opened,
-        notify_closed_stream=notify_closed,
-        _resource_manager=SimpleNamespace(
+    swarm = SwarmFactory()
+    monkeypatch.setattr(swarm, "notify_opened_stream", notify_opened)
+    monkeypatch.setattr(swarm, "notify_closed_stream", notify_closed)
+    monkeypatch.setattr(swarm, "_notify", notify)
+    monkeypatch.setattr(
+        swarm,
+        "_resource_manager",
+        SimpleNamespace(
             release_stream=lambda peer, direct: released.append((peer, direct))
         ),
-        _stream_semaphore=SimpleNamespace(release=lambda: slots.append(True)),
-        _notify=notify,
+    )
+    monkeypatch.setattr(
+        swarm, "_stream_semaphore", SimpleNamespace(release=lambda: slots.append(True))
     )
     conn = SwarmConn(parent, swarm)
     for index in range(100):

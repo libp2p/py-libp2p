@@ -40,7 +40,6 @@ from libp2p.abc import (
     ITransport,
 )
 from libp2p.events import (
-    ChannelBridgeListener,
     EventBus,
 )
 from libp2p.rcmgr import ResourceManager
@@ -604,6 +603,7 @@ def new_swarm(
     :param tls_server_config: TLS server context for WebSocket transport.
     :param resource_manager: optional resource manager for connection/stream limits.
     :param psk: optional pre-shared key for PSK encryption.
+    :param event_bus: optional observability bus for the swarm.
     :return: a Swarm instance implementing INetworkService.
 
     Examples::
@@ -834,7 +834,8 @@ def new_host(
     transports: Sequence[ITransport] | None = None,
     # NEW: convenience flags
     enable_tcp: bool = True,
-    enable_websocket: bool = False
+    enable_websocket: bool = False,
+    event_bus: EventBus | None = None,
 ) -> IHost:
     """
     Create a new libp2p host based on the given parameters.
@@ -894,15 +895,15 @@ def new_host(
         are bypassed.
     :param enable_tcp: include a TCP transport when auto-building (default True).
     :param enable_websocket: include a WebSocket transport when auto-building.
+    :param event_bus: optional observability bus shared by the host and swarm.
     :return: return a host instance
     """
 
     if not enable_quic and quic_transport_opt is not None:
         logger.warning("QUIC config provided but QUIC not enabled, ignoring QUIC config")
 
-    # Event bus (INotifee-style listener fan-out). Created unconditionally;
-    # with zero listeners, emit() is a near-free no-op.
-    event_bus = EventBus()
+    if event_bus is None:
+        event_bus = EventBus()
 
     # Metric emit/consume endpoints (legacy channel pipeline). When metrics
     # are enabled we bridge bus events into the legacy recv channel so the
@@ -911,7 +912,6 @@ def new_host(
     metric_send_channel, metric_recv_channel = None, None
     if enable_metrics:
         metric_send_channel, metric_recv_channel = trio.open_memory_channel(100)
-        event_bus.register_listener(ChannelBridgeListener(metric_send_channel))
 
     # Enable automatic protection by default: if no resource manager is supplied,
     # create a default instance so connections/streams are guarded out of the box.
@@ -982,6 +982,7 @@ def new_host(
             enable_upnp=enable_upnp,
             bootstrap=bootstrap,
             resource_manager=resource_manager,
+            metric_recv_channel=metric_recv_channel,
             event_bus=event_bus,
             bootstrap_allow_ipv6=bootstrap_allow_ipv6,
             bootstrap_dns_timeout=bootstrap_dns_timeout,

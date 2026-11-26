@@ -3,9 +3,10 @@ from __future__ import annotations
 from collections.abc import (
     Sequence,
 )
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import multiaddr
+import trio
 
 from libp2p.abc import (
     INetworkService,
@@ -48,6 +49,7 @@ class RoutedHost(BasicHost):
         resource_manager: ResourceManager | None = None,
         event_bus: EventBus | None = None,
         *,
+        metric_recv_channel: trio.MemoryReceiveChannel[Any] | None = None,
         bootstrap_allow_ipv6: bool = False,
         bootstrap_dns_timeout: float = 10.0,
         bootstrap_dns_max_retries: int = 3,
@@ -81,6 +83,7 @@ class RoutedHost(BasicHost):
             enable_upnp=enable_upnp,
             bootstrap=bootstrap,
             resource_manager=resource_manager,
+            metric_recv_channel=metric_recv_channel,
             event_bus=event_bus,
             bootstrap_allow_ipv6=bootstrap_allow_ipv6,
             bootstrap_dns_timeout=bootstrap_dns_timeout,

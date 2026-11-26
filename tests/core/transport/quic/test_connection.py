@@ -1050,32 +1050,53 @@ async def test_transmit_returns_quietly_once_teardown_cleared_quic() -> None:
     conn._handle_connection_error.assert_not_called()
 
 
+@pytest.fixture
+def quic_connection_caplog(caplog):
+    target = logging.getLogger(QUICConnection.__module__)
+    # libp2p can disable propagation to pytest's root handler.
+    target.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.DEBUG, logger=target.name):
+            yield caplog
+    finally:
+        target.removeHandler(caplog.handler)
+
+
 @pytest.mark.trio
-async def test_handle_connection_error_ignores_error_after_close(caplog) -> None:
+async def test_handle_connection_error_ignores_error_after_close(
+    quic_connection_caplog,
+) -> None:
     """A task racing close() must not log ERROR or try to close again."""
     conn = Mock(spec=QUICConnection)
     conn._closed = True
     conn.close = AsyncMock()
 
-    with caplog.at_level(logging.ERROR):
-        await QUICConnection._handle_connection_error(conn, RuntimeError("boom"))
+    await QUICConnection._handle_connection_error(conn, RuntimeError("boom"))
 
     conn.close.assert_not_awaited()
-    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
+    assert any(
+        r.levelno == logging.DEBUG and "already-closed connection" in r.getMessage()
+        for r in quic_connection_caplog.records
+    )
+    assert not any(r.levelno >= logging.ERROR for r in quic_connection_caplog.records)
 
 
 @pytest.mark.trio
-async def test_handle_connection_error_still_closes_an_open_connection(caplog) -> None:
+async def test_handle_connection_error_still_closes_an_open_connection(
+    quic_connection_caplog,
+) -> None:
     """Real connection errors must keep logging and tearing the connection down."""
     conn = Mock(spec=QUICConnection)
     conn._closed = False
     conn.close = AsyncMock()
 
-    with caplog.at_level(logging.ERROR):
-        await QUICConnection._handle_connection_error(conn, RuntimeError("boom"))
+    await QUICConnection._handle_connection_error(conn, RuntimeError("boom"))
 
     conn.close.assert_awaited_once()
-    assert any(r.levelno >= logging.ERROR for r in caplog.records)
+    assert any(
+        r.levelno == logging.ERROR and "Connection error: boom" in r.getMessage()
+        for r in quic_connection_caplog.records
+    )
 
 
 @pytest.mark.trio

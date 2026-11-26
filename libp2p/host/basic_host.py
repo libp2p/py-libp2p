@@ -78,6 +78,7 @@ from libp2p.identity.update import (
     update_peerstore_from_identify,
 )
 from libp2p.metrics.identity import IdentityEvent
+from libp2p.network.swarm import Swarm
 from libp2p.peer.id import (
     ID,
 )
@@ -311,9 +312,8 @@ class BasicHost(IHost):
         self._network.set_stream_handler(self._swarm_stream_handler)
         self.peerstore = self._network.peerstore
 
-        # Event bus (INotifee-style listener fan-out). Created unconditionally
-        # — with zero listeners, emit() is a no-op, so it is near-free even
-        # when metrics are disabled.
+        if event_bus is None and isinstance(network, Swarm):
+            event_bus = network.get_event_bus()
         self._event_bus = event_bus if event_bus is not None else EventBus()
 
         # Coordinate negotiate_timeout with transport config if available

@@ -1,5 +1,5 @@
 """
-INotifee-style event bus for libp2p.
+Synchronous observability bus for libp2p.
 
 Modules emit typed event objects whenever something happens — a Kad-DHT
 lookup completes, a Bitswap block arrives, mDNS discovers a peer, a pubsub
@@ -7,26 +7,24 @@ message is published — and any number of listeners can subscribe to be
 notified. The Prometheus metrics exporter is one such listener; logging,
 tracing and user code can register additional ones.
 
-This mirrors the existing INotifee fan-out in ``libp2p/network/swarm.py``:
-every listener is notified of every event, and a failing listener can never
-affect the emitter or the other listeners (each listener's exceptions are
-isolated and logged).
+The bus is separate from the swarm's async ``INotifee`` lifecycle callbacks.
+Each bus listener receives every event, with exceptions isolated and logged.
 
 Design notes
 ------------
-- **Synchronous, non-blocking fan-out.** ``emit`` invokes each listener
-  inline on the caller's path (like go-libp2p's ``event.Bus``). Listeners
+- **Synchronous fan-out.** ``emit`` invokes each listener
+  inline on the caller's path. Listeners
   must be fast — prometheus counter increments are — and must not perform
   blocking I/O. This keeps protocol hot paths free of queues and backpressure.
 - **Thread-safe.** ``register_listener`` / ``remove_listener`` / ``emit``
   may be called from any thread, which matters for discovery modules whose
-  zeroconf callbacks run on a non-trio thread.
+  zeroconf callbacks run on a non-trio thread. Listeners may be called
+  concurrently and must synchronize any shared mutable state.
 """
 
 from abc import ABC, abstractmethod
 import logging
 import threading
-import traceback
 from typing import Any
 
 import trio
@@ -131,16 +129,13 @@ class ChannelBridgeListener(IEventListener):
 
     def handle_event(self, event: Any) -> None:
         try:
-            self._send_channel.send_nowait(event)
-        except trio.WouldBlock:
-            pass  # consumer is slow — drop (metrics are loss-tolerant)
-        except trio.ClosedResourceError:
-            pass
+            # send_nowait can mutate the buffer off-thread without raising
+            # when no Trio task is waiting to receive.
+            trio.lowlevel.current_trio_token()
         except RuntimeError:
-            # Trio channel used from a non-trio thread (e.g. zeroconf
-            # callback): cannot forward — drop.
-            logger.debug("Dropping event %s: bridge used off the trio thread", event)
-        except Exception:
-            logger.debug(
-                "Dropping event %s on bridge: %s", event, traceback.format_exc()
-            )
+            logger.debug("Dropping event %s: bridge used off the Trio thread", event)
+            return
+        try:
+            self._send_channel.send_nowait(event)
+        except (trio.WouldBlock, trio.ClosedResourceError, trio.BrokenResourceError):
+            pass

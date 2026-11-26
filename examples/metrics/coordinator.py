@@ -50,7 +50,7 @@ class ExampleValidator(Validator):
 class Node:
     def __init__(self, listen_addrs: list[multiaddr.Multiaddr], dht_role: str):
         # Create a libp2p-host
-        self.host = new_host(listen_addrs=listen_addrs, enable_metrics=True)
+        self.host = new_host(listen_addrs=listen_addrs)
 
         # PING
         self.host.set_stream_handler(PING_ID, handle_ping)
