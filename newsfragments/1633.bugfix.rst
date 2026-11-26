@@ -1,5 +1,0 @@
-Bound inbound pubsub subscription state per peer: enforce
-``max_subscriptions_per_peer`` / ``max_subscriptions_per_rpc`` and inbound RPC
-size limits, track per-peer subscription counts, and drop empty ``peer_topics``
-entries on unsubscribe and disconnect
-(`GHSA-3p7x-v3jj-qxj7 <https://github.com/libp2p/py-libp2p/security/advisories/GHSA-3p7x-v3jj-qxj7>`__).

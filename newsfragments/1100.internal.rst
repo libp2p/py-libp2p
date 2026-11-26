@@ -1,1 +1,0 @@
-Replaced coincurve and fastecdsa with cryptography for secp256k1 and P-256 keys, since coincurve 21.0.0 cannot be installed on Python 3.14 and later. Signatures are unchanged: deterministic (RFC 6979) and in low-S form. Installing py-libp2p no longer needs GMP, CMake or pkg-config, which were only used to build coincurve and fastecdsa from source.

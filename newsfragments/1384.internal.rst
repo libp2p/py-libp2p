@@ -1,1 +1,0 @@
-Moved the iterative Kademlia lookup loop out of ``PeerRouting.find_closest_peers_network`` into a reusable ``Lookup`` engine in ``libp2p.kad_dht.lookup``, with no change in behaviour, as the first step of the #1384 Part 2 plan.
