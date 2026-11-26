@@ -5,11 +5,14 @@ This provides a synchronous SQLite-based datastore for persistent storage.
 """
 
 from collections.abc import Iterator
+import logging
 from pathlib import Path
 import sqlite3
 import threading
 
 from .base_sync import IBatchingDatastoreSync, IBatchSync
+
+logger = logging.getLogger(__name__)
 
 
 class SQLiteBatchSync(IBatchSync):
@@ -104,10 +107,21 @@ class SQLiteDatastoreSync(IBatchingDatastoreSync):
                     cursor.execute(
                         "PRAGMA synchronous=NORMAL"
                     )  # Balance between safety and performance
-                    cursor.execute("PRAGMA cache_size=10000")  # Increase cache size
+                    cursor.execute("PRAGMA cache_size=1000")  # Bounded 4MB cache size
                     cursor.execute(
                         "PRAGMA temp_store=MEMORY"
                     )  # Use memory for temp storage
+
+                    # Let SQLite return freed pages to the filesystem for
+                    # databases created from now on.  Existing databases keep
+                    # their layout until compact() runs (VACUUM).
+                    cursor.execute("PRAGMA auto_vacuum=INCREMENTAL")
+
+                    # Keep the write-ahead log from staying at the size of the
+                    # largest batch of deletes it ever held: after a
+                    # checkpoint SQLite truncates it down to this limit
+                    # instead of keeping the pages for reuse forever.
+                    cursor.execute("PRAGMA journal_size_limit=8388608")
 
                     # Create table if it doesn't exist
                     cursor.execute("""
@@ -187,6 +201,52 @@ class SQLiteDatastoreSync(IBatchingDatastoreSync):
             for row in cursor:
                 yield row[0], row[1]
 
+    def query_keys(
+        self, prefix: bytes = b"", limit: int | None = None, random_order: bool = False
+    ) -> Iterator[bytes]:
+        """
+        Query only keys (omitting value blobs) with optional prefix,
+        random ordering, and limit. Significantly faster and lighter on memory
+        than query().
+        """
+        self._ensure_connection()
+        if self.connection is None:
+            raise ValueError("SQLite connection is not initialized")
+
+        with self._lock:
+            cursor = self.connection.cursor()
+            order_clause = " ORDER BY RANDOM()" if random_order else ""
+            limit_clause = f" LIMIT {int(limit)}" if limit is not None else ""
+            if prefix:
+                query = (
+                    "SELECT key FROM datastore WHERE substr(key, 1, ?) = ?"
+                    f"{order_clause}{limit_clause}"
+                )
+                cursor.execute(query, (len(prefix), prefix))
+            else:
+                cursor.execute(f"SELECT key FROM datastore{order_clause}{limit_clause}")
+
+            for row in cursor:
+                yield row[0]
+
+    def count(self, prefix: bytes = b"") -> int:
+        """Count keys matching an optional prefix without fetching rows."""
+        self._ensure_connection()
+        if self.connection is None:
+            raise ValueError("SQLite connection is not initialized")
+
+        with self._lock:
+            cursor = self.connection.cursor()
+            if prefix:
+                cursor.execute(
+                    "SELECT count(*) FROM datastore WHERE substr(key, 1, ?) = ?",
+                    (len(prefix), prefix),
+                )
+            else:
+                cursor.execute("SELECT count(*) FROM datastore")
+            row = cursor.fetchone()
+            return int(row[0]) if row else 0
+
     def batch(self) -> IBatchSync:
         """Create a new batch for atomic operations."""
         self._ensure_connection()
@@ -202,6 +262,85 @@ class SQLiteDatastoreSync(IBatchingDatastoreSync):
 
         with self._lock:
             self.connection.commit()
+
+    def checkpoint(self, truncate: bool = True) -> bool:
+        """
+        Move committed WAL pages into the database file.
+
+        A bulk delete writes every touched page to the ``-wal`` sidecar; if
+        nothing checkpoints afterwards the sidecar stays as large as the
+        biggest batch for the life of the file.  With ``truncate`` the WAL is
+        also reset to zero bytes so the disk space is actually returned.
+
+        Returns:
+            True if the checkpoint completed without a busy reader/writer.
+
+        """
+        self._ensure_connection()
+        if self.connection is None:
+            raise ValueError("SQLite connection is not initialized")
+
+        with self._lock:
+            try:
+                self.connection.commit()
+                cursor = self.connection.cursor()
+                mode = "TRUNCATE" if truncate else "PASSIVE"
+                row = cursor.execute(f"PRAGMA wal_checkpoint({mode})").fetchone()
+            except sqlite3.Error as e:
+                logger.debug("WAL checkpoint failed: %s", e)
+                return False
+            # (busy, log_pages, checkpointed_pages): busy != 0 means the
+            # checkpoint was blocked and the WAL could not be reset.
+            return not row or int(row[0]) == 0
+
+    def compact(self, min_free_bytes: int = 16 * 1024 * 1024) -> bool:
+        """
+        Reclaim free pages with VACUUM when enough space has been freed.
+
+        Deleting rows leaves the pages in SQLite's freelist so future writes
+        reuse them, but the file itself never shrinks.  Running this after a
+        large prune returns the space to the filesystem.  It is a no-op until
+        ``min_free_bytes`` worth of pages are free, so periodic callers stay
+        cheap.
+
+        Returns:
+            True if the database was vacuumed.
+
+        """
+        self._ensure_connection()
+        if self.connection is None:
+            raise ValueError("SQLite connection is not initialized")
+
+        with self._lock:
+            cursor = self.connection.cursor()
+            freelist = cursor.execute("PRAGMA freelist_count").fetchone()
+            page_size = cursor.execute("PRAGMA page_size").fetchone()
+            free_bytes = int(freelist[0]) * int(page_size[0]) if freelist else 0
+
+            # The WAL can be much larger than the database after a bulk
+            # delete; drain it even when the database itself needs no VACUUM.
+            self.connection.commit()
+            if free_bytes < min_free_bytes:
+                cursor.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                self.connection.commit()
+                return False
+
+            # VACUUM cannot run inside an open transaction.
+            cursor.execute("VACUUM")
+            self.connection.commit()
+            # A large prune writes every touched page to the WAL, so the -wal
+            # file can be much bigger than the database itself.  Checkpointing
+            # with TRUNCATE moves those pages into the database and resets the
+            # WAL, otherwise the freed disk space just moves from the .db file
+            # to the sidecar.
+            cursor.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            self.connection.commit()
+            logger.info(
+                "Compacted SQLite datastore %s (freed about %.1f MiB)",
+                self.path,
+                free_bytes / (1024 * 1024),
+            )
+            return True
 
     def close(self) -> None:
         """

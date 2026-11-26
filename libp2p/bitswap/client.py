@@ -35,11 +35,13 @@ from .config import (
     DEFAULT_PRIORITY,
     MAX_BLOCK_SIZE,
     MAX_MESSAGE_SIZE,
+    MAX_PEER_WANTLIST_ENTRIES,
 )
 from .errors import (
     BlockTooLargeError,
     MessageTooLargeError,
 )
+from .events import BitswapEvent
 from .message_queue import BitswapMessageQueue
 from .messages import create_message
 from .pb.bitswap_pb2 import Message
@@ -74,6 +76,7 @@ class BitswapClient(INotifee):
         protocol_version: str = BITSWAP_PROTOCOL_V120,
         provider_query_manager: ProviderQueryManager | None = None,
         presence_ttl: float = 60.0,
+        max_broadcast_peers: int = -1,
     ) -> None:
         """
         Initialize a Bitswap client.
@@ -84,6 +87,8 @@ class BitswapClient(INotifee):
             protocol_version: The Bitswap protocol version string to prefer
             provider_query_manager: Optional manager to handle DHT provider queries
             presence_ttl: Time-to-live for block presence tracking (default 60s)
+            max_broadcast_peers: Hard cap on peers receiving each broadcast
+                (-1 = unlimited, matching go-libp2p's default)
 
         """
         self.host = host
@@ -92,6 +97,8 @@ class BitswapClient(INotifee):
         self.provider_query_manager: ProviderQueryManager | None = (
             provider_query_manager
         )
+        self.max_broadcast_peers = max_broadcast_peers
+        self._broadcast_cursor = 0
 
         self.protocol_handlers: dict[str, "IBitswapExtension"] = {}
         self.supported_protocols: list[str] = list(BITSWAP_PROTOCOLS)
@@ -112,11 +119,27 @@ class BitswapClient(INotifee):
 
         self._message_queues: dict[PeerID, BitswapMessageQueue] = {}
 
+        # Live broadcast wants (like go-libp2p's broadcastWants) and, per
+        # peer, the set of wants already sent — so re-broadcasts never
+        # duplicate and newly connected peers can be caught up immediately.
+        self._broadcast_wants: set[CIDObject] = set()
+        self._wants_sent_to_peer: dict[PeerID, set[CIDObject]] = {}
+
         self._nursery: trio.Nursery | None = None
         self._started = False
         self._cancel_scope: trio.CancelScope | None = None
         self._presence_cleanup_started = False
         self._notifee_registered = False
+
+        # Register stream handlers immediately instead of waiting for start().
+        # The host's listener may already be accepting connections by the time
+        # start() runs, and wants arriving before registration hit an
+        # unregistered protocol and were silently dropped.
+        for protocol in self.supported_protocols:
+            self.host.set_stream_handler(
+                TProtocol(protocol),
+                self._handle_stream,
+            )
 
     def get_or_create_message_queue(self, peer_id: PeerID) -> BitswapMessageQueue:
         """Get existing persistent MessageQueue for a peer or create a new one."""
@@ -153,12 +176,9 @@ class BitswapClient(INotifee):
         if self._started:
             return
 
-        # Set stream handler for all supported Bitswap protocols
-        for protocol in self.supported_protocols:
-            self.host.set_stream_handler(
-                TProtocol(protocol),
-                self._handle_stream,
-            )
+        # Stream handlers for all supported Bitswap protocols are registered in
+        # __init__ (before any listener starts), closing the init window in
+        # which inbound wants were dropped.
 
         self._started = True
         self._cancel_scope = trio.CancelScope()
@@ -240,7 +260,71 @@ class BitswapClient(INotifee):
         """No-op — Bitswap does not track stream close events."""
 
     async def connected(self, network: Any, conn: Any) -> None:
-        """No-op — per-peer state is created lazily on demand."""
+        """
+        Send live broadcast wants or initial wantlist hello to newly connected peer.
+        """
+        peer_id = None
+        try:
+            if hasattr(conn, "muxed_conn") and conn.muxed_conn is not None:
+                peer_id = getattr(conn.muxed_conn, "peer_id", None)
+            if peer_id is None and hasattr(conn, "peer_id"):
+                peer_id = conn.peer_id
+            if peer_id is None and hasattr(conn, "get_remote_peer"):
+                peer_id = conn.get_remote_peer()
+        except Exception:
+            return
+
+        if peer_id is None:
+            return
+
+        # Tag peer with bitswap weight
+        try:
+            if hasattr(self.host, "conn_manager"):
+                self.host.conn_manager.tag_peer(peer_id, "bitswap", 50)
+            elif hasattr(self.host, "get_network"):
+                self.host.get_network().tag_peer(peer_id, "bitswap", 50)
+        except Exception:
+            pass
+
+        if self._broadcast_wants:
+            sent = self._wants_sent_to_peer.setdefault(peer_id, set())
+            unsent = [c for c in self._broadcast_wants if c not in sent]
+            if not unsent:
+                return
+
+            logger.info(
+                f"New peer {peer_id}: sending {len(unsent)} live broadcast wants"
+            )
+            try:
+                if self._nursery:
+                    self._nursery.start_soon(
+                        self._send_wantlist_to_peer, peer_id, unsent
+                    )
+                else:
+                    await self._send_wantlist_to_peer(peer_id, unsent)
+            except Exception as e:
+                logger.debug(f"Failed to catch up peer {peer_id}: {e}")
+        elif self._started:
+            # Send initial empty full wantlist hello to establish Bitswap session
+            try:
+                if self._nursery:
+                    self._nursery.start_soon(self._send_initial_wantlist_hello, peer_id)
+                else:
+                    await self._send_initial_wantlist_hello(peer_id)
+            except Exception as e:
+                logger.debug(f"Failed to send initial wantlist hello to {peer_id}: {e}")
+
+    async def _send_initial_wantlist_hello(self, peer_id: PeerID) -> bool:
+        """Send an initial empty full wantlist to a newly connected peer."""
+        try:
+            msg_queue = self.get_or_create_message_queue(peer_id)
+            msg_queue.add_wants([], want_infos={}, full_wantlist=True)
+            if not msg_queue._started:
+                return await msg_queue.flush()
+            return True
+        except Exception as e:
+            logger.debug(f"Failed to send initial wantlist hello to {peer_id}: {e}")
+            return False
 
     async def disconnected(self, network: Any, conn: Any) -> None:
         """
@@ -286,15 +370,23 @@ class BitswapClient(INotifee):
         wantlists, negotiated protocols, presence and peer stats for every
         peer they have ever talked to.
         """
+        try:
+            if hasattr(self.host, "conn_manager"):
+                self.host.conn_manager.untag_peer(peer_id, "bitswap")
+            elif hasattr(self.host, "get_network"):
+                self.host.get_network().untag_peer(peer_id, "bitswap")
+        except Exception:
+            pass
+
         self._peer_wantlists.pop(peer_id, None)
         self._peer_protocols.pop(peer_id, None)
         self._peer_pending_bytes.pop(peer_id, None)
         self.peer_manager.remove_peer(peer_id)
         self.presence_manager.remove_peer(peer_id)
+        self._wants_sent_to_peer.pop(peer_id, None)
         queue = self._message_queues.pop(peer_id, None)
         if queue is not None and self._nursery is not None:
             self._nursery.start_soon(queue.stop)
-        logger.debug(f"Cleaned up per-peer state for {peer_id}")
         logger.debug(f"Cleaned up per-peer state for {peer_id}")
 
     def new_session(self) -> BitswapSession:
@@ -367,6 +459,14 @@ class BitswapClient(INotifee):
             f"(priority={priority}, type={'Have' if want_type else 'Block'})"
         )
 
+        # Emit wantlist-add metric event
+        event = BitswapEvent()
+        event.want_add = True
+        event.cid = format_cid_for_display(cid_obj)
+        event.priority = priority
+        event.want_type = "have" if want_type else "block"
+        self.host.get_event_bus().emit(event)
+
     async def have_block(self, cid: CIDInput, peer_id: PeerID | None = None) -> bool:
         """
         Check if a peer has a block (v1.2.0 feature).
@@ -388,18 +488,17 @@ class BitswapClient(INotifee):
         if await self.block_store.has_block(cid_obj):
             return True
 
-        # Add to wantlist with Have type
-        await self.want_block(cid_obj, want_type=1, send_dont_have=True)
-
-        # Send wantlist to peer(s)
-        if peer_id:
-            await self._send_wantlist_to_peer(peer_id, [cid_obj])
-        else:
-            await self._broadcast_wantlist([cid_obj])
-
-        # Wait for Have/DontHave response via presence manager
         result = False
         try:
+            # Add to wantlist with Have type
+            await self.want_block(cid_obj, want_type=1, send_dont_have=True)
+
+            # Send wantlist to peer(s)
+            if peer_id:
+                await self._send_wantlist_to_peer(peer_id, [cid_obj])
+            else:
+                await self._broadcast_wantlist([cid_obj])
+
             with trio.fail_after(5.0):
                 while True:
                     # Check if presence manager recorded a Have from any peer
@@ -433,12 +532,19 @@ class BitswapClient(INotifee):
 
         """
         cid_obj = parse_cid(cid)
+        self.peer_manager.cancel_pending_request(cid_obj)
 
         if cid_obj in self._wantlist:
             del self._wantlist[cid_obj]
             logger.debug(
                 f"Removed {format_cid_for_display(cid_obj, max_len=16)} from wantlist"
             )
+
+            # Emit wantlist-cancel metric event
+            event = BitswapEvent()
+            event.want_cancel = True
+            event.cid = format_cid_for_display(cid_obj)
+            self.host.get_event_bus().emit(event)
 
             # Send cancel message to all peers
             await self._broadcast_cancel(cid_obj)
@@ -492,36 +598,64 @@ class BitswapClient(INotifee):
                 }
             msg_queue.add_wants(cids, want_infos=want_infos, full_wantlist=False)
             if not msg_queue._started:
-                await msg_queue.flush()
+                ok = await msg_queue.flush()
+                if not ok:
+                    # flush() requeued the wants; start a worker so they are
+                    # retried (with backoff) instead of being lost forever.
+                    if self._nursery is not None:
+                        msg_queue.start(self._nursery)
+                    return False
                 if self._nursery is None and msg_queue._stream is not None:
                     await self._read_responses_from_stream(
                         msg_queue._stream, peer_id, list(cids)
                     )
+            self._wants_sent_to_peer.setdefault(peer_id, set()).update(cids)
             return True
         except Exception as e:
             logger.error(f"Failed to send wantlist to peer {peer_id}: {e}")
             return False
 
     async def _broadcast_wantlist(self, cids: list[CIDObject]) -> None:
-        """Broadcast wantlist to all connected peers, with backpressure."""
-        import random
+        """
+        Broadcast wantlist to all connected peers (go-libp2p semantics).
+
+        Sends to every connected peer that has not already received the want
+        (per-peer tracking), so re-broadcasts only reach peers that are still
+        missing it. An optional cap (``max_broadcast_peers``) bounds fan-out
+        per broadcast; when active, a rotating cursor guarantees every peer
+        is eventually covered.
+        """
+        for cid in cids:
+            self._broadcast_wants.add(cid)
 
         peers = list(self.host.get_network().connections.keys())
 
-        # Limit broadcast to a maximum number of peers to provide backpressure
-        # and prevent overwhelming the network or triggering GO_AWAY.
-        MAX_BROADCAST_PEERS = 20
-        if len(peers) > MAX_BROADCAST_PEERS:
-            peers = random.sample(peers, MAX_BROADCAST_PEERS)
+        if self.max_broadcast_peers >= 0 and len(peers) > self.max_broadcast_peers:
+            start = self._broadcast_cursor % len(peers)
+            peers = peers[start:] + peers[:start]
+            peers = peers[: self.max_broadcast_peers]
+            self._broadcast_cursor = start + self.max_broadcast_peers
 
         for peer_id in peers:
+            sent = self._wants_sent_to_peer.setdefault(peer_id, set())
+            unsent = [c for c in cids if c not in sent]
+            if not unsent:
+                continue
             if self._nursery:
-                self._nursery.start_soon(self._send_wantlist_to_peer, peer_id, cids)
+                self._nursery.start_soon(self._send_wantlist_to_peer, peer_id, unsent)
             else:
-                await self._send_wantlist_to_peer(peer_id, cids)
+                await self._send_wantlist_to_peer(peer_id, unsent)
 
     async def _broadcast_cancel(self, cid: CIDObject) -> None:
-        """Broadcast a cancel message to all connected peers via MessageQueue."""
+        """
+        Broadcast a cancel message to all connected peers via MessageQueue.
+
+        Also forget the cancelled CID everywhere so a future want for it is
+        re-sent (mirrors go-libp2p's broadcast-cancel bookkeeping).
+        """
+        self._broadcast_wants.discard(cid)
+        for sent in self._wants_sent_to_peer.values():
+            sent.discard(cid)
         peers = list(self.host.get_network().connections.keys())
         for peer_id in peers:
             try:
@@ -549,6 +683,12 @@ class BitswapClient(INotifee):
                 if want_type == 1:  # Have request (v1.2.0)
                     msg_queue.add_presences([(cid, True)])
                 else:  # Block request
+                    block_event = BitswapEvent()
+                    block_event.block_sent = True
+                    block_event.cid = format_cid_for_display(cid)
+                    block_event.peer_id = str(peer_id)
+                    block_event.size_bytes = len(data)
+                    self.host.get_event_bus().emit(block_event)
                     peer_protocol = (
                         msg_queue.negotiated_protocol
                         or self._peer_protocols.get(peer_id, BITSWAP_PROTOCOL_V100)
@@ -669,6 +809,11 @@ class BitswapClient(INotifee):
             self._peer_protocols[peer_id] = str(protocol)
 
         STREAM_IDLE_TIMEOUT = 60.0
+        # Subsequent reads on the same stream use a shorter timeout.
+        # Provider response streams send one message then close; if the
+        # stream EOF doesn't propagate immediately (Yamux FIN latency),
+        # using the full 60 s timeout causes a 60 s hang per block request.
+        SUBSEQUENT_READ_TIMEOUT = 5.0
 
         try:
             try:
@@ -686,7 +831,7 @@ class BitswapClient(INotifee):
 
             while True:
                 try:
-                    with trio.fail_after(STREAM_IDLE_TIMEOUT):
+                    with trio.fail_after(SUBSEQUENT_READ_TIMEOUT):
                         msg = await self._read_message(stream)
                 except trio.TooSlowError:
                     break
@@ -755,6 +900,20 @@ class BitswapClient(INotifee):
         if msg.pendingBytes > 0:
             self._peer_pending_bytes[peer_id] = msg.pendingBytes
 
+        # Emit message-received metric event
+        kind = "wantlist" if msg.HasField("wantlist") else "blocks"
+        if msg.HasField("wantlist") and (msg.blocks or msg.payload):
+            kind = "mixed"
+        elif msg.blockPresences:
+            kind = "presence"
+        event = BitswapEvent()
+        event.peer_id = str(peer_id)
+        event.message_received = True
+        event.kind = kind
+        event.entries = len(msg.wantlist.entries) if msg.HasField("wantlist") else 0
+        event.msg_bytes = len(msg.SerializeToString())
+        self.host.get_event_bus().emit(event)
+
     async def _process_wantlist(
         self, wantlist: Message.Wantlist, peer_id: PeerID, stream: INetStream
     ) -> None:
@@ -803,6 +962,12 @@ class BitswapClient(INotifee):
                     if has_block:
                         data = await self.block_store.get_block(entry_cid)
                         if data:
+                            block_event = BitswapEvent()
+                            block_event.block_sent = True
+                            block_event.cid = format_cid_for_display(entry_cid)
+                            block_event.peer_id = str(peer_id)
+                            block_event.size_bytes = len(data)
+                            self.host.get_event_bus().emit(block_event)
                             if peer_protocol == BITSWAP_PROTOCOL_V100:
                                 blocks_to_send_v100.append(data)
                             else:
@@ -814,19 +979,64 @@ class BitswapClient(INotifee):
             except Exception:
                 continue
 
-        # If stream is writable, write responses immediately on this existing stream
-        # (0 new streams!).
+        # Bound adversarial incremental wantlists: entries are only removed by
+        # a cancel, a full wantlist, or disconnect, so a peer that never
+        # cancels could otherwise grow this dict without limit.
+        while len(peer_wantlist) > MAX_PEER_WANTLIST_ENTRIES:
+            peer_wantlist.pop(next(iter(peer_wantlist)))
+
+        # Send responses on a NEW stream to the requester (matches go-bitswap
+        # server behavior: SendMessage opens a fresh stream, and the requester
+        # only reads messages on streams WE open). Inline-on-the-request-
+        # stream responses are invisible to go-bitswap clients.
         if blocks_to_send_v100 or blocks_to_send_v110 or presences_to_send:
             try:
-                await self._send_wantlist_responses_inline(
-                    stream,
+                await self._send_wantlist_responses_on_new_stream(
                     peer_id,
                     blocks_to_send_v100,
                     blocks_to_send_v110,
                     presences_to_send,
                 )
             except Exception as e:
-                logger.debug(f"Failed to respond inline on stream: {e}")
+                logger.debug(f"Failed to respond on new stream: {e}")
+                try:
+                    await self._send_wantlist_responses_inline(
+                        stream,
+                        peer_id,
+                        blocks_to_send_v100,
+                        blocks_to_send_v110,
+                        presences_to_send,
+                    )
+                except Exception as e2:
+                    logger.debug(f"Failed to respond to wantlist: {e2}")
+
+    async def _send_wantlist_responses_on_new_stream(
+        self,
+        peer_id: PeerID,
+        blocks_to_send_v100: list[bytes],
+        blocks_to_send_v110: list[tuple[bytes, bytes]],
+        presences_to_send: list[tuple[CIDObject, bool]],
+    ) -> None:
+        """Respond by opening a NEW stream to the requester (go-bitswap style)."""
+        protocol = self._peer_protocols.get(peer_id, BITSWAP_PROTOCOL_V100)
+        stream = await self.host.new_stream(peer_id, [TProtocol(protocol)])
+        try:
+            if blocks_to_send_v100:
+                await self._send_blocks_in_batches_v100(
+                    blocks_to_send_v100, peer_id, stream
+                )
+            if blocks_to_send_v110:
+                await self._send_blocks_in_batches_v110(
+                    blocks_to_send_v110, peer_id, stream
+                )
+            if presences_to_send:
+                presence_msg = create_message(block_presences=presences_to_send)
+                await self._write_message(stream, presence_msg)
+        finally:
+            try:
+                await stream.close()
+            except Exception:
+                pass
 
     async def _send_wantlist_responses_inline(
         self,
@@ -965,6 +1175,14 @@ class BitswapClient(INotifee):
                 await self.block_store.put_block(matched_cid, block_data)
                 logger.info("  ✓ Stored successfully")
 
+                # Emit block-received metric event
+                block_event = BitswapEvent()
+                block_event.peer_id = str(peer_id)
+                block_event.block_received = True
+                block_event.cid = format_cid_for_display(matched_cid)
+                block_event.size_bytes = len(block_data)
+                self.host.get_event_bus().emit(block_event)
+
                 # Record delivery for peer scoring
                 self.peer_manager.record_delivery(peer_id, matched_cid, len(block_data))
 
@@ -1032,6 +1250,14 @@ class BitswapClient(INotifee):
                 f"Received and stored block {format_cid_for_display(cid, max_len=16)} "
                 f"(v1.1.0+)"
             )
+
+            # Emit block-received metric event
+            block_event = BitswapEvent()
+            block_event.peer_id = str(peer_id)
+            block_event.block_received = True
+            block_event.cid = format_cid_for_display(cid)
+            block_event.size_bytes = len(data)
+            self.host.get_event_bus().emit(block_event)
 
             # Record delivery for peer scoring
             self.peer_manager.record_delivery(peer_id, cid, len(data))

@@ -290,13 +290,12 @@ class ConnectionPruner:
                 )
                 continue
 
-            # 1. Skip connections that currently have active multiplexed streams
-            # (never interrupt live traffic)
+            # 1. Preserve connections with open streams, including idle ones.
             try:
                 streams = connection.get_streams()
-                if streams and len(streams) > 0:
+                if streams:
                     logger.debug(
-                        "Skipping connection to %s - has %d active streams",
+                        "Skipping connection to %s - has %d open streams",
                         conn_peer_id,
                         len(streams),
                     )

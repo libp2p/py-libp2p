@@ -137,3 +137,20 @@ def test_ceritified_addr_book():
     expected_addrs = set(new_addrs)
     actual_addrs = set(store.addrs(peer_id))
     assert actual_addrs == expected_addrs
+
+
+def test_add_addrs_is_capped_per_peer():
+    """A peer advertising unbounded addresses keeps only the newest ones."""
+    from libp2p.peer.peerdata import MAX_ADDRS_PER_PEER, PeerData
+
+    data = PeerData()
+    addrs = [
+        Multiaddr(f"/ip4/10.0.0.1/tcp/{1000 + i}")
+        for i in range(MAX_ADDRS_PER_PEER + 200)
+    ]
+    for addr in addrs:
+        data.add_addrs([addr])
+
+    assert len(data.addrs) == MAX_ADDRS_PER_PEER
+    assert data.addrs[-1] == addrs[-1]
+    assert addrs[0] not in data.addrs

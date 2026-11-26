@@ -9,6 +9,7 @@ from libp2p.peer.id import ID as PeerID
 from .cid import CIDObject, format_cid_for_display, parse_cid
 from .config import DEFAULT_TIMEOUT
 from .errors import TimeoutError as BitswapTimeoutError
+from .events import BitswapEvent
 
 if TYPE_CHECKING:
     from .cid import CIDInput
@@ -16,8 +17,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("libp2p.bitswap.session")
 
-# How often to rebroadcast WANT_HAVE for undiscovered blocks (seconds)
-REBROADCAST_INTERVAL = 5.0
+# How often to rebroadcast WANT_HAVE for undiscovered blocks (seconds).
+# 30s matches go-bitswap's cadence; the previous 5s interval produced a
+# wantlist message storm on slow/undeveloped lookups.
+REBROADCAST_INTERVAL = 30.0
 # How many peers to race in parallel for a single block
 MAX_PARALLEL_RACE = 3
 
@@ -40,6 +43,14 @@ class BitswapSession:
         self._pending_requests: dict[CIDObject, set[trio.Event]] = {}
         # Track peers that have provided data
         self.active_peers: set[PeerID] = set()
+        # Providers discovered by background DHT re-queries (CID -> peer IDs)
+        self._discovered_providers: dict[CIDObject, list[PeerID]] = {}
+
+        # Emit session-created metric event
+        event = BitswapEvent()
+        event.session_new = True
+        event.cid = str(session_id)
+        client.host.get_event_bus().emit(event)
 
     async def get_block(
         self,
@@ -55,30 +66,123 @@ class BitswapSession:
         if data is not None:
             return data
 
+        retry_scope: trio.CancelScope | None = None
+
         # 2. Try DHT discovery if peer_id is not given
         if peer_id is None and self.client.provider_query_manager is not None:
+            # A real DHT walk on the public network routinely takes longer
+            # than the old fixed 5s cap; give discovery a meaningful share
+            # of the remaining budget (but never eat the whole timeout).
+            discovery_budget = min(max(2.0, timeout * 0.5), 20.0)
             try:
                 providers = (
                     await self.client.provider_query_manager.find_providers_single(
-                        cid, timeout=min(5.0, timeout / 2)
+                        cid, timeout=discovery_budget
                     )
                 )
-                if providers:
-                    peer_id = providers[0]
-                    logger.debug(
-                        "Session %s: DHT discovered provider %s for %s",
-                        self.id,
-                        peer_id,
-                        format_cid_for_display(cid_obj, max_len=12),
-                    )
             except Exception as exc:
+                providers = []
                 logger.debug(
-                    "Session %s: Provider query failed, falling back to broadcast: %s",
+                    "Session %s: Provider query failed, falling back to "
+                    "broadcast + background retry: %s",
                     self.id,
                     exc,
                 )
+            if providers:
+                peer_id = providers[0]
+                logger.debug(
+                    "Session %s: DHT discovered provider %s for %s",
+                    self.id,
+                    peer_id,
+                    format_cid_for_display(cid_obj, max_len=12),
+                )
+            else:
+                # No provider yet: keep re-querying in the background while
+                # the request proceeds via broadcast. A provider found later
+                # is dialed directly, which fixes fetches that previously
+                # failed forever after a single timed-out lookup.
+                deadline = time.time() + timeout
+                if self.client._nursery is not None:
+                    scope = trio.CancelScope()
+                    retry_scope = scope
 
-        return await self._request_block(cid_obj, peer_id, timeout)
+                    self.client._nursery.start_soon(
+                        self._scoped_provider_discovery, scope, cid_obj, deadline
+                    )
+                else:
+                    logger.debug(
+                        "Session %s: No nursery; skipping background provider "
+                        "re-query for %s",
+                        self.id,
+                        format_cid_for_display(cid_obj, max_len=12),
+                    )
+
+        try:
+            result = await self._request_block(cid_obj, peer_id, timeout)
+        finally:
+            # This background lookup belongs to this fetch, not to the entire
+            # client service. Do not retain the session/socket or repopulate a
+            # completed request's provider cache after its want was cancelled.
+            if retry_scope is not None:
+                retry_scope.cancel()
+        return result
+
+    async def _scoped_provider_discovery(
+        self, scope: trio.CancelScope, cid: CIDObject, deadline: float
+    ) -> None:
+        with scope:
+            await self._retry_provider_discovery(cid, deadline)
+
+    async def _dial_provider(self, peer_id: PeerID) -> bool:
+        """Dial a provider peer if we have its addresses and are not connected."""
+        try:
+            if self.client.host.get_network().connections.get(peer_id):
+                return True
+            addrs = self.client.host.get_peerstore().addrs(peer_id)
+            if not addrs:
+                return False
+            from libp2p.peer.peerinfo import PeerInfo
+
+            info = PeerInfo(peer_id=peer_id, addrs=addrs)
+            await self.client.host.connect(info)
+            logger.info(f"Session {self.id}: Dialed provider {peer_id}")
+            return True
+        except Exception as e:
+            logger.debug(f"Session {self.id}: Failed to dial provider {peer_id}: {e}")
+            return False
+
+    async def _retry_provider_discovery(self, cid: CIDObject, deadline: float) -> None:
+        """
+        Background worker: keep re-querying the DHT for a CID until the
+        session deadline. Runs only until providers are found; discovered
+        providers are recorded and dialed lazily by ``_request_block``.
+        """
+        provider_query_manager = self.client.provider_query_manager
+        if provider_query_manager is None:
+            return
+        while getattr(self.client, "_started", True):
+            if time.time() >= deadline:
+                return
+            if self._discovered_providers.get(cid):
+                return
+            await trio.sleep(5.0)
+            if time.time() >= deadline:
+                return
+            if self._discovered_providers.get(cid):
+                return
+            try:
+                providers = await provider_query_manager.find_providers_single(
+                    cid, timeout=min(10.0, max(1.0, deadline - time.time()))
+                )
+            except Exception:
+                continue
+            if providers:
+                self._discovered_providers[cid] = providers
+                logger.info(
+                    f"Session {self.id}: Background discovery found "
+                    f"{len(providers)} provider(s) for "
+                    f"{format_cid_for_display(cid, max_len=12)}"
+                )
 
     async def _request_block(
         self, cid: CIDObject, peer_id: PeerID | None, timeout: float
@@ -107,7 +211,11 @@ class BitswapSession:
 
         start_time = time.time()
         retry_interval = 1.0
-        last_rebroadcast = 0.0
+        # Fire the first WANT-HAVE broadcast immediately (go-libp2p
+        # semantics): waiting a full REBROADCAST_INTERVAL before the first
+        # broadcast leaves connected peers un-asked and stalls fetches
+        # when the DHT finds no provider.
+        last_rebroadcast = -REBROADCAST_INTERVAL
         requested_from: set[PeerID] = set()
         # Track peers we've sent WANT_BLOCK to (for parallel racing)
         block_requested_from: set[PeerID] = set()
@@ -138,6 +246,13 @@ class BitswapSession:
                     have_peers.add(peer_id)
                     untried_block_peers.add(peer_id)
 
+                # Late-discovered providers (background DHT re-query) are
+                # candidates too; they get dialed right before the WANT-BLOCK.
+                for late_pid in self._discovered_providers.get(cid, ()):
+                    if late_pid not in block_requested_from:
+                        have_peers.add(late_pid)
+                        untried_block_peers.add(late_pid)
+
                 if untried_block_peers and result is None:
                     # Phase 2: Send WANT-BLOCK to available peers (parallel racing)
                     targets = list(untried_block_peers)[:MAX_PARALLEL_RACE]
@@ -152,6 +267,18 @@ class BitswapSession:
                             targets = targets[:MAX_PARALLEL_RACE]
 
                     for target in targets:
+                        # The provider may not be connected yet — dial before
+                        # sending so the WANT-BLOCK actually reaches it. If the
+                        # dial fails (no addresses / unreachable provider), do
+                        # not create per-peer queue state: a peer that never
+                        # connects never emits the disconnect that cleans it.
+                        if not await self._dial_provider(target):
+                            logger.debug(
+                                f"Session {self.id}: Skipping unreachable "
+                                f"provider {target} for WANT-BLOCK"
+                            )
+                            block_requested_from.add(target)
+                            continue
                         await self.client.want_block(
                             cid, want_type=0, send_dont_have=True
                         )
@@ -160,6 +287,22 @@ class BitswapSession:
                         )
                         await self.client._send_wantlist_to_peer(target, [cid])
                         block_requested_from.add(target)
+
+                    # Even with a candidate provider in hand, keep broadcasting
+                    # WANT-HAVE to connected peers on the rebroadcast schedule:
+                    # the DHT record may point at an unreachable/dead peer, and
+                    # a connected peer holding the block is strictly better.
+                    now = time.time()
+                    if (now - last_rebroadcast) >= REBROADCAST_INTERVAL:
+                        await self.client.want_block(
+                            cid, want_type=1, send_dont_have=True
+                        )
+                        logger.debug(
+                            f"Session {self.id}: Broadcasting WANT-HAVE "
+                            f"(rebroadcast={True}, racing provider dials)"
+                        )
+                        await self.client._broadcast_wantlist([cid])
+                        last_rebroadcast = now
 
                 elif not have_peers:
                     # No peers known to have the block yet — broadcast WANT-HAVE
@@ -227,6 +370,9 @@ class BitswapSession:
                 if not self._pending_requests[cid]:
                     del self._pending_requests[cid]
 
+            # Background discovery for this CID is done: the want is
+            # cancelled, so a late provider finding is useless.
+            self._discovered_providers.pop(cid, None)
             self.client.sim.remove_session_interest(self, cid)
             await self.client.cancel_want(cid)
             self.client.presence_manager.remove_dont_have(cid)
@@ -263,11 +409,15 @@ class BitswapSession:
         cid_objs = [parse_cid(c) for c in cids]
 
         remaining: list[CIDObject] = []
+        seen_cids: set[CIDObject] = set()
         for cid_obj in cid_objs:
             data = await self.client.block_store.get_block(cid_obj)
             if data is not None:
                 results[cid_obj.buffer] = data
-            else:
+            elif cid_obj not in seen_cids:
+                # Duplicate CIDs would register multiple events but only the
+                # last one is tracked for cleanup, orphaning the earlier ones.
+                seen_cids.add(cid_obj)
                 remaining.append(cid_obj)
 
         if not remaining:
@@ -287,7 +437,11 @@ class BitswapSession:
 
             start_time = time.time()
             retry_interval = 1.0
-            last_rebroadcast = 0.0
+            # Fire the first WANT-HAVE broadcast immediately (go-libp2p
+            # semantics): waiting a full REBROADCAST_INTERVAL before the first
+            # broadcast leaves connected peers un-asked and stalls fetches
+            # when the DHT finds no provider.
+            last_rebroadcast = -REBROADCAST_INTERVAL
             requested_from: dict[CIDObject, set[PeerID]] = {cid: set() for cid in batch}
             block_requested_from: dict[CIDObject, set[PeerID]] = {
                 cid: set() for cid in batch
@@ -361,6 +515,12 @@ class BitswapSession:
                                     requested_from[cid].add(peer_id)
 
                     for p, b_cids in to_peer.items():
+                        if not await self._dial_provider(p):
+                            logger.debug(
+                                f"Session {self.id}: Skipping unreachable "
+                                f"provider {p} for batch WANT-BLOCK"
+                            )
+                            continue
                         logger.debug(
                             f"Session {self.id}: Batch sending WANT-BLOCK "
                             f"to {p} for {len(b_cids)} CIDs"

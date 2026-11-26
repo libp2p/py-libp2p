@@ -248,6 +248,9 @@ class TestAutoConnectorStartStop:
             def get_total_connections(self):
                 return 0
 
+            def get_connected_peer_count(self):
+                return 0
+
             def get_connections(self, peer_id):
                 return []
 
@@ -292,6 +295,9 @@ class TestAutoConnectorStartStop:
                 self.connection_config = ConnectionConfig()
 
             def get_total_connections(self):
+                return 0
+
+            def get_connected_peer_count(self):
                 return 0
 
             async def dial_peer(self, peer_id):

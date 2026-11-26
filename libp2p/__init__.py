@@ -39,6 +39,9 @@ from libp2p.abc import (
     ISecureTransport,
     ITransport,
 )
+from libp2p.events import (
+    EventBus,
+)
 from libp2p.rcmgr import ResourceManager
 from libp2p.crypto.keys import (
     KeyPair,
@@ -552,6 +555,7 @@ def new_swarm(
     resource_manager: ResourceManager | None = None,
     psk: str | None = None,
     metric_send_channel: trio.MemorySendChannel[Any] | None = None,
+    event_bus: EventBus | None = None,
 ) -> INetworkService:
     """
     Create a swarm instance with multi-transport support.
@@ -599,6 +603,7 @@ def new_swarm(
     :param tls_server_config: TLS server context for WebSocket transport.
     :param resource_manager: optional resource manager for connection/stream limits.
     :param psk: optional pre-shared key for PSK encryption.
+    :param event_bus: optional observability bus for the swarm.
     :return: a Swarm instance implementing INetworkService.
 
     Examples::
@@ -772,6 +777,7 @@ def new_swarm(
         connection_config=connection_config,
         psk=psk,
         metric_send_channel=metric_send_channel,
+        event_bus=event_bus,
         transport_manager=transport_manager,
     )
 
@@ -828,7 +834,8 @@ def new_host(
     transports: Sequence[ITransport] | None = None,
     # NEW: convenience flags
     enable_tcp: bool = True,
-    enable_websocket: bool = False
+    enable_websocket: bool = False,
+    event_bus: EventBus | None = None,
 ) -> IHost:
     """
     Create a new libp2p host based on the given parameters.
@@ -859,6 +866,8 @@ def new_host(
     :param listen_addrs: optional list of multiaddrs to listen on.  **All**
         addresses are inspected to determine which transports to create.
     :param enable_mDNS: whether to enable mDNS discovery
+    :param enable_metrics: expose the legacy metrics receive channel.
+        New applications can attach metrics directly through the host event bus.
     :param bootstrap: optional list of bootstrap peer addresses as strings
     :param enable_quic: optional choice to use QUIC for transport
     :param enable_autotls: optional choice to use AutoTLS for security
@@ -888,13 +897,20 @@ def new_host(
         are bypassed.
     :param enable_tcp: include a TCP transport when auto-building (default True).
     :param enable_websocket: include a WebSocket transport when auto-building.
+    :param event_bus: optional observability bus shared by the host and swarm.
     :return: return a host instance
     """
 
     if not enable_quic and quic_transport_opt is not None:
         logger.warning("QUIC config provided but QUIC not enabled, ignoring QUIC config")
 
-    # Metric emit/consume endpoints
+    if event_bus is None:
+        event_bus = EventBus()
+
+    # Metric emit/consume endpoints (legacy channel pipeline). When metrics
+    # are enabled we bridge bus events into the legacy recv channel so the
+    # old ``Metrics.start_prometheus_server(recv_channel)`` consumer keeps
+    # working unchanged.
     metric_send_channel, metric_recv_channel = None, None
     if enable_metrics:
         metric_send_channel, metric_recv_channel = trio.open_memory_channel(100)
@@ -953,6 +969,7 @@ def new_host(
         resource_manager=resource_manager,
         psk=psk,
         metric_send_channel=metric_send_channel,
+        event_bus=event_bus,
         # NEW: forward multi-transport params
         transports=transports,
         enable_tcp=enable_tcp,
@@ -967,6 +984,8 @@ def new_host(
             enable_upnp=enable_upnp,
             bootstrap=bootstrap,
             resource_manager=resource_manager,
+            metric_recv_channel=metric_recv_channel,
+            event_bus=event_bus,
             bootstrap_allow_ipv6=bootstrap_allow_ipv6,
             bootstrap_dns_timeout=bootstrap_dns_timeout,
             bootstrap_dns_max_retries=bootstrap_dns_max_retries,
@@ -982,6 +1001,7 @@ def new_host(
         negotiate_timeout=negotiate_timeout,
         resource_manager=resource_manager,
         metric_recv_channel=metric_recv_channel,
+        event_bus=event_bus,
         bootstrap_allow_ipv6=bootstrap_allow_ipv6,
         bootstrap_dns_timeout=bootstrap_dns_timeout,
         bootstrap_dns_max_retries=bootstrap_dns_max_retries,

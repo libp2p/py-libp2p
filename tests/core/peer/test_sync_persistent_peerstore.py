@@ -18,6 +18,10 @@ from libp2p.peer.persistent import (
     create_sync_memory_peerstore,
     create_sync_sqlite_peerstore,
 )
+from libp2p.peer.persistent.datastore.memory_sync import MemoryDatastoreSync
+from libp2p.peer.persistent.datastore.sqlite_sync import SQLiteDatastoreSync
+from libp2p.peer.persistent.serialization import serialize_addresses
+from libp2p.peer.persistent.sync.peerstore import SyncPersistentPeerStore
 
 # ============================================================================
 # Fixtures
@@ -382,3 +386,330 @@ def test_memory_not_persistent(peer_id, addr):
     assert len(addrs) == 0
 
     peerstore2.close()
+
+
+def test_sync_peerstore_lru_cache_eviction(tmp_path):
+    """Test that SyncPersistentPeerStore bounds cache and protects local ID."""
+    from libp2p.crypto.ed25519 import create_new_key_pair
+    from libp2p.peer.persistent.datastore.sqlite_sync import SQLiteDatastoreSync
+    from libp2p.peer.persistent.sync.peerstore import SyncPersistentPeerStore
+
+    db_path = tmp_path / "lru_peerstore.db"
+    datastore = SQLiteDatastoreSync(str(db_path))
+    # Cap memory cache to 5 peers
+    store = SyncPersistentPeerStore(datastore, max_cached_peers=5)
+
+    # 1. Add local peer identity
+    local_key_pair = create_new_key_pair()
+    local_id = ID.from_pubkey(local_key_pair.public_key)
+    store.add_key_pair(local_id, local_key_pair)
+
+    assert local_id in store.peer_data_map
+    assert store.privkey(local_id) == local_key_pair.private_key
+
+    # 2. Add 10 remote peers
+    remote_peers = []
+    for i in range(10):
+        key_pair = create_new_key_pair()
+        pid = ID.from_pubkey(key_pair.public_key)
+        remote_peers.append(pid)
+        store.add_addrs(pid, [Multiaddr(f"/ip4/10.0.0.{i + 1}/tcp/4001")], ttl=3600)
+        store.add_protocols(pid, [f"/proto/{i}"])
+
+    # In-memory cache must not exceed max_cached_peers (5)
+    assert len(store.peer_data_map) == 5
+
+    # Local peer identity must NEVER be evicted
+    assert local_id in store.peer_data_map
+    assert store.privkey(local_id) == local_key_pair.private_key
+
+    # 3. Oldest evicted peers can still be retrieved (reloaded from SQLite on demand)
+    oldest_pid = remote_peers[0]
+    assert oldest_pid not in store.peer_data_map  # Was evicted from RAM
+    # Reading it should transparently load from datastore
+    addrs = store.addrs(oldest_pid)
+    assert len(addrs) == 1
+    assert str(addrs[0]) == "/ip4/10.0.0.1/tcp/4001"
+    assert "/proto/0" in store.get_protocols(oldest_pid)
+
+    # Now oldest_pid is loaded back into RAM cache
+    assert oldest_pid in store.peer_data_map
+    assert len(store.peer_data_map) == 5
+    # Local identity still preserved
+    assert local_id in store.peer_data_map
+
+    store.close()
+
+
+def test_sync_peerstore_lru_access_order():
+    """Test that accessing a peer refreshes its LRU position."""
+    from libp2p.crypto.ed25519 import create_new_key_pair
+    from libp2p.peer.persistent.datastore.memory_sync import MemoryDatastoreSync
+    from libp2p.peer.persistent.sync.peerstore import SyncPersistentPeerStore
+
+    datastore = MemoryDatastoreSync()
+    store = SyncPersistentPeerStore(datastore, max_cached_peers=3)
+
+    peers = []
+    for i in range(3):
+        kp = create_new_key_pair()
+        pid = ID.from_pubkey(kp.public_key)
+        peers.append(pid)
+        store.add_addrs(pid, [Multiaddr(f"/ip4/192.168.1.{i + 1}/tcp/4001")], ttl=3600)
+
+    # Memory cache has peers[0], peers[1], peers[2]
+    assert list(store.peer_data_map.keys()) == peers
+
+    # Access peers[0] (should move to MRU)
+    _ = store.addrs(peers[0])
+    assert list(store.peer_data_map.keys()) == [peers[1], peers[2], peers[0]]
+
+    # Add a 4th peer -> should evict peers[1] (oldest), keeping peers[0] and peers[2]
+    kp4 = create_new_key_pair()
+    pid4 = ID.from_pubkey(kp4.public_key)
+    store.add_addrs(pid4, [Multiaddr("/ip4/192.168.1.4/tcp/4001")], ttl=3600)
+
+    assert len(store.peer_data_map) == 3
+    assert peers[1] not in store.peer_data_map
+    assert peers[0] in store.peer_data_map
+    assert peers[2] in store.peer_data_map
+    assert pid4 in store.peer_data_map
+
+    store.close()
+
+
+def test_sync_peerstore_count_peers(tmp_path):
+    from libp2p.crypto.ed25519 import create_new_key_pair
+    from libp2p.peer.persistent.datastore.sqlite_sync import SQLiteDatastoreSync
+    from libp2p.peer.persistent.sync.peerstore import SyncPersistentPeerStore
+
+    db_path = tmp_path / "count_peerstore.db"
+    datastore = SQLiteDatastoreSync(path=db_path)
+    store = SyncPersistentPeerStore(datastore)
+
+    assert store.count_peers() == 0
+
+    for i in range(5):
+        kp = create_new_key_pair()
+        pid = ID.from_pubkey(kp.public_key)
+        store.add_addrs(pid, [Multiaddr(f"/ip4/192.168.1.{i + 1}/tcp/4001")], ttl=3600)
+
+    assert store.count_peers() == 5
+    store.close()
+
+
+def test_sync_peerstore_bounds_persisted_peers(tmp_path):
+    """Evicting peers from the cache must also bound the datastore rows."""
+    from libp2p.peer.persistent.datastore.sqlite_sync import SQLiteDatastoreSync
+    from libp2p.peer.persistent.sync.peerstore import SyncPersistentPeerStore
+
+    datastore = SQLiteDatastoreSync(path=tmp_path / "bounded_peerstore.db")
+    store = SyncPersistentPeerStore(
+        datastore, max_cached_peers=50, max_stored_peers=200
+    )
+
+    for i in range(1000):
+        store.add_addrs(
+            ID(b"peer-%08d" % i),
+            [Multiaddr(f"/ip4/10.0.0.1/tcp/{1000 + i}")],
+            ttl=3600,
+        )
+
+    rows = datastore.count(store.ADDR_PREFIX)
+    assert rows <= 200 + store.DATASTORE_PRUNE_INTERVAL
+    store.close()
+
+
+def test_sync_peerstore_trim_legacy_backlog(tmp_path):
+    """enforce_datastore_limit() drains rows written by an older build."""
+    from libp2p.peer.persistent.datastore.sqlite_sync import SQLiteDatastoreSync
+    from libp2p.peer.persistent.sync.peerstore import SyncPersistentPeerStore
+
+    db_path = tmp_path / "legacy_peerstore.db"
+    datastore = SQLiteDatastoreSync(path=db_path)
+    # An unbounded legacy store: every peer keeps its rows.
+    legacy = SyncPersistentPeerStore(
+        datastore, max_cached_peers=500, max_stored_peers=500
+    )
+    for i in range(500):
+        legacy.add_addrs(
+            ID(b"legacy-%08d" % i),
+            [Multiaddr(f"/ip4/10.0.0.2/tcp/{2000 + i}")],
+            ttl=3600,
+        )
+    assert datastore.count(legacy.ADDR_PREFIX) == 500
+
+    # Restart with a smaller cap: the cache is empty, so the backlog is visible.
+    store = SyncPersistentPeerStore(
+        datastore, max_cached_peers=100, max_stored_peers=100
+    )
+    removed = store.enforce_datastore_limit()
+    assert removed == 400
+    assert datastore.count(store.ADDR_PREFIX) == 100
+    store.close()
+
+
+def test_sync_peerstore_caps_addresses_loaded_from_datastore(tmp_path):
+    """Rows written before the per-peer cap must be truncated on load."""
+    from libp2p.peer.peerdata import MAX_ADDRS_PER_PEER
+    from libp2p.peer.persistent.datastore.sqlite_sync import SQLiteDatastoreSync
+    from libp2p.peer.persistent.serialization import serialize_addresses
+    from libp2p.peer.persistent.sync.peerstore import SyncPersistentPeerStore
+
+    datastore = SQLiteDatastoreSync(path=tmp_path / "legacy_addrs.db")
+    pid = ID(b"legacy-addresses")
+    addrs = [
+        Multiaddr(f"/ip4/10.0.0.1/tcp/{1000 + i}")
+        for i in range(MAX_ADDRS_PER_PEER + 200)
+    ]
+    datastore.put(b"addr:" + pid.to_bytes(), serialize_addresses(addrs))
+
+    store = SyncPersistentPeerStore(datastore)
+    loaded = store.addrs(pid)
+    assert len(loaded) == MAX_ADDRS_PER_PEER
+    assert loaded[-1] == addrs[-1]
+    assert addrs[0] not in loaded
+    store.close()
+
+
+def test_sync_peerstore_prunes_peers_without_addresses(tmp_path):
+    """Peers that only have protocol/key rows must also be pruned."""
+    from libp2p.peer.persistent.datastore.sqlite_sync import SQLiteDatastoreSync
+    from libp2p.peer.persistent.sync.peerstore import SyncPersistentPeerStore
+
+    datastore = SQLiteDatastoreSync(path=tmp_path / "addrless_peerstore.db")
+    legacy = SyncPersistentPeerStore(
+        datastore, max_cached_peers=500, max_stored_peers=500
+    )
+    # No addresses at all: only an identify-style protocol row per peer.
+    for i in range(500):
+        legacy.add_protocols(ID(b"addrless-%08d" % i), ["/ipfs/id/1.0.0"])
+    assert datastore.count(b"protocol:") == 500
+
+    store = SyncPersistentPeerStore(datastore, max_cached_peers=50, max_stored_peers=50)
+    removed = store.enforce_datastore_limit()
+    assert removed == 450
+    assert datastore.count(b"protocol:") == 50
+    store.close()
+
+
+def test_sqlite_compact_truncates_wal(tmp_path):
+    """A big delete + compact must not leave a huge WAL sidecar behind."""
+    from libp2p.peer.persistent.datastore.sqlite_sync import SQLiteDatastoreSync
+
+    db_path = tmp_path / "wal_peerstore.db"
+    datastore = SQLiteDatastoreSync(path=db_path)
+    payload = b"x" * 2048
+    for i in range(4000):
+        datastore.put(b"addr:" + (b"%08d" % i), payload)
+    datastore.sync(b"")
+
+    batch = datastore.batch()
+    for i in range(4000):
+        batch.delete(b"addr:" + (b"%08d" % i))
+    batch.commit()
+    datastore.sync(b"")
+
+    assert datastore.compact(min_free_bytes=0) is True
+    wal_size = db_path.with_suffix(".db-wal").stat().st_size
+    assert wal_size == 0
+    datastore.close()
+
+
+def test_sqlite_compact_truncates_wal_without_vacuum(tmp_path):
+    """compact() drains the WAL even when no VACUUM is needed."""
+    from libp2p.peer.persistent.datastore.sqlite_sync import SQLiteDatastoreSync
+
+    db_path = tmp_path / "wal_no_vacuum.db"
+    datastore = SQLiteDatastoreSync(path=db_path)
+    for i in range(500):
+        datastore.put(b"key:" + (b"%08d" % i), b"y" * 1024)
+    datastore.sync(b"")
+    wal_path = db_path.parent / (db_path.name + "-wal")
+    assert wal_path.stat().st_size > 0
+
+    # min_free_bytes well above what the freelist holds -> no VACUUM.
+    assert datastore.compact(min_free_bytes=1 << 40) is False
+    assert datastore.checkpoint() is True
+    assert wal_path.stat().st_size == 0
+    datastore.close()
+
+
+@pytest.fixture(params=["memory", "sqlite"])
+def datastore(request, tmp_path):
+    backend = (
+        MemoryDatastoreSync()
+        if request.param == "memory"
+        else SQLiteDatastoreSync(tmp_path / "peers.db")
+    )
+    yield backend
+    backend.close()
+
+
+def test_address_expiry_survives_cache_eviction(monkeypatch, datastore):
+    clock = [1000]
+    monkeypatch.setattr("libp2p.peer.peerdata.time.time", lambda: clock[0])
+    store = SyncPersistentPeerStore(datastore, max_cached_peers=1)
+    peer, other = ID(b"peer"), ID(b"other")
+    store.add_addrs(peer, [Multiaddr("/ip4/127.0.0.1/tcp/4001")], ttl=1)
+    store.add_addrs(other, [Multiaddr("/ip4/127.0.0.1/tcp/4002")], ttl=1)
+    assert peer not in store.peer_data_map
+    clock[0] = 1002
+    with pytest.raises(PeerStoreError, match="expired"):
+        store.addrs(peer)
+
+
+@pytest.mark.parametrize("field", ["addresses", "protocols", "metadata"])
+def test_cleared_records_do_not_reappear_after_eviction(field, datastore):
+    store = SyncPersistentPeerStore(datastore, max_cached_peers=1)
+    peer, other = ID(b"peer"), ID(b"other")
+    if field == "addresses":
+        store.add_addrs(peer, [Multiaddr("/ip4/127.0.0.1/tcp/4001")], ttl=0)
+        store.clear_addrs(peer)
+    elif field == "protocols":
+        store.add_protocols(peer, ["/test/1.0.0"])
+        store.clear_protocol_data(peer)
+    else:
+        store.put(peer, "test", "value")
+        store.clear_metadata(peer)
+    store.add_protocols(other, ["/test/1.0.0"])
+    assert peer not in store.peer_data_map
+    if field == "addresses":
+        assert store.addrs(peer) == []
+    elif field == "protocols":
+        assert store.get_protocols(peer) == []
+    else:
+        with pytest.raises(PeerStoreError):
+            store.get(peer, "test")
+
+
+def test_expiry_survives_sqlite_reopen(monkeypatch, tmp_path):
+    clock = [1000]
+    monkeypatch.setattr("libp2p.peer.peerdata.time.time", lambda: clock[0])
+    path = tmp_path / "peers.db"
+    peer = ID(b"peer")
+    store = SyncPersistentPeerStore(SQLiteDatastoreSync(path))
+    store.add_addrs(peer, [Multiaddr("/ip4/127.0.0.1/tcp/4001")], ttl=1)
+    store.close()
+    clock[0] = 1002
+    reopened = SyncPersistentPeerStore(SQLiteDatastoreSync(path))
+    try:
+        with pytest.raises(PeerStoreError, match="expired"):
+            reopened.addrs(peer)
+    finally:
+        reopened.close()
+
+
+def test_permanent_and_legacy_addresses_remain_valid(monkeypatch, datastore):
+    clock = [1000]
+    monkeypatch.setattr("libp2p.peer.peerdata.time.time", lambda: clock[0])
+    store = SyncPersistentPeerStore(datastore, max_cached_peers=1)
+    permanent, legacy = ID(b"permanent"), ID(b"legacy")
+    addr = Multiaddr("/ip4/127.0.0.1/tcp/4001")
+    store.add_addrs(permanent, [addr], ttl=0)
+    # Existing databases have address records without optional expiry metadata.
+    datastore.put(store._get_addr_key(legacy), serialize_addresses([addr]))
+    assert store.addrs(legacy) == [addr]
+    clock[0] = 100000
+    assert store.addrs(permanent) == [addr]
+    assert store.addrs(legacy) == [addr]

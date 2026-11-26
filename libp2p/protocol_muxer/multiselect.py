@@ -79,7 +79,6 @@ class Multiselect(IMultiselectMuxer):
                 logger.debug("Multiselect.negotiate: performing handshake")
                 await self.handshake(communicator)
                 logger.debug("Multiselect.negotiate: handshake done, waiting for cmds")
-
                 while True:
                     try:
                         command = await communicator.read()

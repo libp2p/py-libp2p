@@ -4,6 +4,7 @@ import pytest
 import trio
 
 from libp2p import generate_new_rsa_identity
+from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.peer.id import ID
 from libp2p.security.exceptions import HandshakeFailure
 from libp2p.security.tls import certificate as certmod
@@ -25,6 +26,23 @@ from tests.utils.factories import (
 
 def test_tls_handshake_failure_extends_central_handshake_failure() -> None:
     assert issubclass(TLSHandshakeFailure, HandshakeFailure)
+
+
+def test_trusting_a_peer_invalidates_both_cached_contexts() -> None:
+    transport = TLSTransport(create_new_key_pair())
+    peer = TLSTransport(create_new_key_pair())
+    contexts = {
+        server_side: transport.create_ssl_context(server_side)
+        for server_side in (True, False)
+    }
+
+    transport.trust_peer_cert_pem(peer.get_certificate_pem())
+
+    for server_side, original in contexts.items():
+        updated = transport.create_ssl_context(server_side)
+        assert updated is not original
+        assert updated.cert_store_stats()["x509"] == int(server_side)
+        assert transport.create_ssl_context(server_side) is updated
 
 
 def _mock_tls_reader_writer_no_cert() -> MagicMock:

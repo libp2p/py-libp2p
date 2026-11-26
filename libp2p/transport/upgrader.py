@@ -65,10 +65,14 @@ class TransportUpgrader:
                 authenticated_peer_id = secure_conn.get_remote_peer()
                 if authenticated_peer_id != peer_id:
                     await secure_conn.close()
-                    raise SecurityUpgradeFailure(
+                    failure = SecurityUpgradeFailure(
                         f"Peer ID mismatch: expected {peer_id}, "
                         f"got {authenticated_peer_id}"
                     )
+                    failure.protocol_id = getattr(
+                        secure_conn, "negotiated_security_protocol", None
+                    )
+                    raise failure
                 return secure_conn
             return await self.security_multistream.secure_inbound(raw_conn)
         except (MultiselectError, MultiselectClientError) as error:
@@ -76,9 +80,11 @@ class TransportUpgrader:
                 "failed to negotiate the secure protocol"
             ) from error
         except HandshakeFailure as error:
-            raise SecurityUpgradeFailure(
+            failure = SecurityUpgradeFailure(
                 "handshake failed when upgrading to secure connection"
-            ) from error
+            )
+            failure.protocol_id = error.protocol_id
+            raise failure from error
 
     async def upgrade_connection(self, conn: ISecureConn, peer_id: ID) -> IMuxedConn:
         """Upgrade secured connection to a muxed connection."""

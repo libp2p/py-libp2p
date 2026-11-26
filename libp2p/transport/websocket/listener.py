@@ -367,6 +367,7 @@ class WebsocketListener(IListener):
                 ws,
                 is_secure=self._is_wss,
                 max_buffered_amount=self._config.max_message_size,
+                close_timeout=self._config.close_timeout,
             )
 
             # Track connection

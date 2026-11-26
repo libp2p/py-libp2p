@@ -81,6 +81,8 @@ class RateLimitConfig:
 
     def __post_init__(self) -> None:
         """Validate configuration parameters."""
+        if min(self.max_peers, self.max_connections, self.max_protocols) <= 0:
+            raise ValueError("Entity tracking limits must be positive")
         if self.refill_rate <= 0:
             raise ValueError("refill_rate must be positive")
         if self.capacity <= 0:
@@ -340,6 +342,20 @@ class RateLimiter:
 
         # Get entity key
         entity_key = self._get_entity_key(peer_id, connection_id, protocol, endpoint)
+
+        # All strategies must enforce the same entity bound. Window strategies
+        # do not use _get_or_create_token_bucket(), so its eviction cannot help
+        # them. Drop every piece of state belonging to an evicted entity.
+        if (
+            entity_key not in self._last_request_times
+            and len(self._last_request_times) >= self._get_max_entities()
+        ):
+            oldest = min(
+                self._last_request_times, key=self._last_request_times.__getitem__
+            )
+            self._last_request_times.pop(oldest, None)
+            self._token_buckets.pop(oldest, None)
+            self._window_counts.pop(oldest, None)
 
         # Update last request time
         self._last_request_times[entity_key] = current_time

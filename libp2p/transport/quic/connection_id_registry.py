@@ -14,7 +14,7 @@ This class encapsulates the four synchronized dictionaries that track:
 from collections import defaultdict
 import logging
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import trio
 
@@ -24,6 +24,14 @@ if TYPE_CHECKING:
     from .connection import QUICConnection
 
 logger = logging.getLogger(__name__)
+
+
+def close_pending_quic_connection(conn: "QuicConnection") -> None:
+    """Close a pending connection after its routing references are removed."""
+    try:
+        conn.close()
+    except Exception:
+        logger.debug("Failed to close pending QUIC connection", exc_info=True)
 
 
 class ConnectionIDRegistry:
@@ -57,6 +65,11 @@ class ConnectionIDRegistry:
         # Pending connections: Connection ID -> QuicConnection (aioquic)
         self._pending: dict[bytes, "QuicConnection"] = {}
         self._pending_created_at: dict[bytes, float] = {}
+
+        # Bidirectional mapping between host routing CID (in _pending)
+        # and initial DCID (in _initial_connection_ids)
+        self._host_cid_to_initial_dcid: dict[bytes, bytes] = {}
+        self._initial_dcid_to_host_cid: dict[bytes, bytes] = {}
 
         # Connection ID -> address mapping
         self._connection_id_to_addr: dict[bytes, tuple[str, int]] = {}
@@ -117,6 +130,30 @@ class ConnectionIDRegistry:
         if len(times) >= 100:
             times.pop(0)
         times.append(duration)
+
+    def _record_sequence(self, sequence: int) -> None:
+        # Exact low sequences plus an overflow bucket keep telemetry bounded.
+        # Routing still uses the full sequence in _connection_sequences.
+        bucket = sequence if 0 <= sequence < 128 else -1
+        self._sequence_distribution[bucket] += 1
+
+    def _cleanup_address_mappings(
+        self, cid: bytes, linked_cid: bytes | None = None
+    ) -> None:
+        """Clean up forward and reverse address mappings for cid and its linked CID."""
+        target_cids = {cid}
+        if linked_cid:
+            target_cids.add(linked_cid)
+
+        addrs_to_check: set[tuple[str, int]] = set()
+        for c in target_cids:
+            addr = self._connection_id_to_addr.pop(c, None)
+            if addr:
+                addrs_to_check.add(addr)
+
+        for addr in addrs_to_check:
+            if self._addr_to_connection_id.get(addr) in target_cids:
+                self._addr_to_connection_id.pop(addr, None)
 
     async def find_by_connection_id(  # pyrefly: ignore[bad-return]
         self, connection_id: bytes, is_initial: bool = False
@@ -426,7 +463,7 @@ class ConnectionIDRegistry:
                 self._connection_sequences[connection][sequence] = connection_id
 
                 # Track sequence in distribution for performance metrics
-                self._sequence_distribution[sequence] += 1
+                self._record_sequence(sequence)
 
                 # Initialize sequence counter if not already set
                 if connection_id not in self._connection_sequence_counters:
@@ -460,6 +497,7 @@ class ConnectionIDRegistry:
         quic_conn: "QuicConnection",
         addr: tuple[str, int],
         sequence: int = 0,
+        initial_dcid: bytes | None = None,
     ) -> None:
         """
         Register a pending (handshaking) connection.
@@ -469,6 +507,7 @@ class ConnectionIDRegistry:
             quic_conn: The aioquic QuicConnection instance
             addr: Remote address (host, port) tuple
             sequence: Sequence number for this Connection ID (default: 0)
+            initial_dcid: Optional initial destination Connection ID from client
 
         """
         call_start = time.time()
@@ -489,22 +528,58 @@ class ConnectionIDRegistry:
                         self._pending_created_at,
                         key=lambda k: self._pending_created_at[k],
                     )
-                    self._pending.pop(oldest_cid, None)
+                    evicted_conn = self._pending.pop(oldest_cid, None)
                     self._pending_created_at.pop(oldest_cid, None)
-                    self._initial_connection_ids.pop(oldest_cid, None)
-                    oldest_addr = self._connection_id_to_addr.pop(oldest_cid, None)
-                    if (
-                        oldest_addr
-                        and self._addr_to_connection_id.get(oldest_addr) == oldest_cid
-                    ):
-                        self._addr_to_connection_id.pop(oldest_addr, None)
                     self._connection_id_sequences.pop(oldest_cid, None)
                     self._connection_sequence_counters.pop(oldest_cid, None)
+
+                    # Remove linked initial DCID if oldest_cid is host CID
+                    linked_init_dcid = self._host_cid_to_initial_dcid.pop(
+                        oldest_cid, None
+                    )
+                    linked_host_cid = None
+                    if linked_init_dcid:
+                        self._initial_dcid_to_host_cid.pop(linked_init_dcid, None)
+                        init_conn = self._initial_connection_ids.pop(
+                            linked_init_dcid, None
+                        )
+                        if init_conn and not evicted_conn:
+                            evicted_conn = init_conn
+                        self._pending_created_at.pop(linked_init_dcid, None)
+                        self._connection_id_sequences.pop(linked_init_dcid, None)
+                    else:
+                        # oldest_cid might itself be an initial DCID
+                        linked_host_cid = self._initial_dcid_to_host_cid.pop(
+                            oldest_cid, None
+                        )
+                        if linked_host_cid:
+                            self._host_cid_to_initial_dcid.pop(linked_host_cid, None)
+                            h_conn = self._pending.pop(linked_host_cid, None)
+                            if h_conn and not evicted_conn:
+                                evicted_conn = h_conn
+                            self._pending_created_at.pop(linked_host_cid, None)
+                            self._connection_id_sequences.pop(linked_host_cid, None)
+                            self._connection_sequence_counters.pop(
+                                linked_host_cid, None
+                            )
+                        init_conn = self._initial_connection_ids.pop(oldest_cid, None)
+                        if init_conn and not evicted_conn:
+                            evicted_conn = init_conn
+
+                    self._cleanup_address_mappings(
+                        oldest_cid, linked_init_dcid or linked_host_cid
+                    )
+
+                    if evicted_conn:
+                        close_pending_quic_connection(evicted_conn)
 
                 self._pending[connection_id] = quic_conn
                 self._pending_created_at[connection_id] = time.time()
                 self._connection_id_to_addr[connection_id] = addr
                 self._addr_to_connection_id[addr] = connection_id
+                if initial_dcid:
+                    self._host_cid_to_initial_dcid[connection_id] = initial_dcid
+                    self._initial_dcid_to_host_cid[initial_dcid] = connection_id
 
                 # Track sequence number (will be moved to connection sequences
                 # when promoted)
@@ -581,7 +656,7 @@ class ConnectionIDRegistry:
                 # Track sequence number
                 self._connection_id_sequences[new_connection_id] = sequence
                 # Update sequence distribution
-                self._sequence_distribution[sequence] += 1
+                self._record_sequence(sequence)
 
                 # If connection is already promoted, also map new Connection ID
                 # to the connection
@@ -770,62 +845,140 @@ class ConnectionIDRegistry:
 
         """
         async with self._lock:
-            self._pending.pop(connection_id, None)
+            conn = self._pending.pop(connection_id, None)
             self._pending_created_at.pop(connection_id, None)
-            addr = self._connection_id_to_addr.pop(connection_id, None)
-            if addr:
-                if self._addr_to_connection_id.get(addr) == connection_id:
-                    del self._addr_to_connection_id[addr]
-
-            # Clean up sequence mapping
             self._connection_id_sequences.pop(connection_id, None)
+            self._connection_sequence_counters.pop(connection_id, None)
+
+            # Clean up linked initial DCID if applicable
+            init_dcid = self._host_cid_to_initial_dcid.pop(connection_id, None)
+            if init_dcid:
+                self._initial_dcid_to_host_cid.pop(init_dcid, None)
+                iconn = self._initial_connection_ids.pop(init_dcid, None)
+                if iconn and not conn:
+                    conn = iconn
+                self._pending_created_at.pop(init_dcid, None)
+                self._connection_id_sequences.pop(init_dcid, None)
+
+            self._cleanup_address_mappings(connection_id, init_dcid)
+
+            if conn:
+                close_pending_quic_connection(conn)
 
     async def remove_by_address(self, addr: tuple[str, int]) -> bytes | None:
         """
-        Remove connection by address.
+        Remove a connection and every Connection ID that routes to it.
+
+        The caller resolves the connection object before calling this method,
+        so the return value is informational. All aliases are purged: removing
+        only the address' current CID used to leave sibling CIDs (including
+        initial-DCID aliases) in ``_connections``, which kept the connection,
+        its aioquic state and its streams reachable indefinitely.
 
         Args:
             addr: Remote address (host, port) tuple
 
         Returns:
-            The Connection ID that was associated with this address, or None
+            The primary Connection ID that was associated with this address,
+            or None if the address is unknown.
 
         """
         async with self._lock:
             connection_id = self._addr_to_connection_id.pop(addr, None)
-            if connection_id:
-                connection = self._connections.get(connection_id)
-                self._initial_connection_ids.pop(connection_id, None)
-                self._connections.pop(connection_id, None)
-                self._pending.pop(connection_id, None)
-                self._connection_id_to_addr.pop(connection_id, None)
-                self._connection_id_sequences.pop(connection_id, None)
-                self._connection_sequence_counters.pop(connection_id, None)
-                # Clean up reverse mapping
-                if connection:
-                    # Remove from address->connections set
-                    conns = self._addr_to_connections.get(addr)
-                    if conns:
-                        conns.discard(connection)
-                        if not conns:
-                            self._addr_to_connections.pop(addr, None)
+            connection = None
+            if connection_id is not None:
+                connection = self._connections.get(connection_id) or self._pending.get(
+                    connection_id
+                )
 
-                    # Remove per-connection mappings.
-                    self._connection_addresses.pop(connection, None)
-                    self._connection_primary_cid.pop(connection, None)
-                    self._connection_cid_counts.pop(connection, None)
-                    self._connection_sequences.pop(connection, None)
+            if connection is None:
+                # Fall back to the reverse index when the forward mapping is
+                # missing or stale.
+                conns = self._addr_to_connections.get(addr)
+                if not conns:
+                    return None
+                connection = next(iter(conns))
+                if connection_id is None:
+                    connection_id = self._connection_primary_cid.get(connection)
+                    if connection_id is None:
+                        connection_id = next(
+                            (
+                                cid
+                                for cid, conn in self._connections.items()
+                                if conn is connection
+                            ),
+                            None,
+                        )
+                if connection_id is None:
+                    return None
 
-                    # Remove any leftover initial_connection_ids pointing
-                    # to this connection.
-                    raw_quic = getattr(connection, "_quic", None)
-                    if raw_quic:
-                        for k, v in list(self._initial_connection_ids.items()):
-                            if v is raw_quic:
-                                self._initial_connection_ids.pop(k, None)
-                                self._pending_created_at.pop(k, None)
-                                self._connection_id_to_addr.pop(k, None)
-                                self._connection_id_sequences.pop(k, None)
+            if connection_id is None:
+                return None
+
+            # The per-connection maps below are keyed by the QUICConnection
+            # wrapper.  A connection resolved from `_pending` is a raw aioquic
+            # object, so those lookups simply miss; the cast only narrows the
+            # type used for keying, it does not change runtime behaviour.
+            wrapper = cast("QUICConnection", connection)
+
+            # Expand to every CID that routes to this connection object so no
+            # alias outlives the removal.
+            cids_to_remove: set[bytes] = {connection_id}
+            cids_to_remove.update(
+                cid for cid, conn in self._connections.items() if conn is connection
+            )
+            cids_to_remove.update(
+                cid for cid, conn in self._pending.items() if conn is connection
+            )
+            cids_to_remove.update(self._connection_sequences.get(wrapper, {}).values())
+            raw_quic = getattr(connection, "_quic", None) or getattr(
+                connection, "quic_connection", None
+            )
+            if raw_quic is not None:
+                cids_to_remove.update(
+                    cid
+                    for cid, owner in self._initial_connection_ids.items()
+                    if owner is raw_quic
+                )
+            # Include linked initial destination CIDs in both directions.
+            for cid in list(cids_to_remove):
+                linked_init = self._host_cid_to_initial_dcid.get(cid)
+                linked_host = self._initial_dcid_to_host_cid.get(cid)
+                if linked_init:
+                    cids_to_remove.add(linked_init)
+                if linked_host:
+                    cids_to_remove.add(linked_host)
+
+            for cid in cids_to_remove:
+                self._initial_connection_ids.pop(cid, None)
+                self._connections.pop(cid, None)
+                self._pending.pop(cid, None)
+                self._pending_created_at.pop(cid, None)
+                self._connection_id_to_addr.pop(cid, None)
+                self._connection_id_sequences.pop(cid, None)
+                self._connection_sequence_counters.pop(cid, None)
+                linked_init = self._host_cid_to_initial_dcid.pop(cid, None)
+                if linked_init:
+                    self._initial_dcid_to_host_cid.pop(linked_init, None)
+                linked_host = self._initial_dcid_to_host_cid.pop(cid, None)
+                if linked_host:
+                    self._host_cid_to_initial_dcid.pop(linked_host, None)
+
+            # Drop address indexes that still point at a removed CID.
+            for other_addr, other_cid in list(self._addr_to_connection_id.items()):
+                if other_cid in cids_to_remove:
+                    self._addr_to_connection_id.pop(other_addr, None)
+            for other_addr, conns in list(self._addr_to_connections.items()):
+                conns.discard(wrapper)
+                if not conns:
+                    self._addr_to_connections.pop(other_addr, None)
+
+            # Remove per-connection mappings.
+            self._connection_addresses.pop(wrapper, None)
+            self._connection_primary_cid.pop(wrapper, None)
+            self._connection_cid_counts.pop(wrapper, None)
+            self._connection_sequences.pop(wrapper, None)
+
             return connection_id
 
     async def promote_pending(
@@ -852,6 +1005,30 @@ class ConnectionIDRegistry:
             # Remove from pending
             self._pending.pop(connection_id, None)
             self._pending_created_at.pop(connection_id, None)
+
+            # Sweep any initial CIDs pointing to this connection's quic_conn
+            quic_conn = getattr(connection, "_quic", None) or getattr(
+                connection, "quic_connection", None
+            )
+            if quic_conn is not None:
+                for k, v in list(self._initial_connection_ids.items()):
+                    if v is quic_conn:
+                        self._initial_connection_ids.pop(k, None)
+                        self._pending_created_at.pop(k, None)
+                        self._connection_id_to_addr.pop(k, None)
+                        self._connection_id_sequences.pop(k, None)
+                        linked_h = self._initial_dcid_to_host_cid.pop(k, None)
+                        if linked_h:
+                            self._host_cid_to_initial_dcid.pop(linked_h, None)
+
+            # Unlink bidirectional mappings
+            init_dcid = self._host_cid_to_initial_dcid.pop(connection_id, None)
+            if init_dcid:
+                self._initial_dcid_to_host_cid.pop(init_dcid, None)
+                self._initial_connection_ids.pop(init_dcid, None)
+                self._pending_created_at.pop(init_dcid, None)
+                self._connection_id_to_addr.pop(init_dcid, None)
+                self._connection_id_sequences.pop(init_dcid, None)
 
             # Add to established (may already exist, that's OK)
             if connection_id in self._connections:
@@ -972,6 +1149,20 @@ class ConnectionIDRegistry:
                 if conn == connection:
                     cids_to_remove.add(cid)
 
+            raw_quic = getattr(connection, "_quic", None)
+            if raw_quic:
+                # A connection can end while its handshake is still pending,
+                # before any CID was promoted. Those entries are keyed only by
+                # the aioquic object, not by a registered QUICConnection.
+                cids_to_remove.update(
+                    cid
+                    for cid, pending in self._initial_connection_ids.items()
+                    if pending is raw_quic
+                )
+                cids_to_remove.update(
+                    cid for cid, pending in self._pending.items() if pending is raw_quic
+                )
+
             for cid in cids_to_remove:
                 self._connections.pop(cid, None)
                 self._initial_connection_ids.pop(cid, None)
@@ -982,6 +1173,16 @@ class ConnectionIDRegistry:
                 addr = self._connection_id_to_addr.pop(cid, None)
                 if addr and self._addr_to_connection_id.get(addr) == cid:
                     self._addr_to_connection_id.pop(addr, None)
+
+                # Unlink the host-CID <-> initial-DCID pair. These maps are not
+                # keyed by connection, so an aborted handshake would otherwise
+                # leave both entries behind forever.
+                linked_initial = self._host_cid_to_initial_dcid.pop(cid, None)
+                if linked_initial:
+                    self._initial_dcid_to_host_cid.pop(linked_initial, None)
+                linked_host = self._initial_dcid_to_host_cid.pop(cid, None)
+                if linked_host:
+                    self._host_cid_to_initial_dcid.pop(linked_host, None)
 
             addr = self._connection_addresses.pop(connection, None)
             if addr:
@@ -996,21 +1197,6 @@ class ConnectionIDRegistry:
             self._connection_primary_cid.pop(connection, None)
             self._connection_cid_counts.pop(connection, None)
             self._connection_sequences.pop(connection, None)
-
-            raw_quic = getattr(connection, "_quic", None)
-            if raw_quic:
-                for k, v in list(self._initial_connection_ids.items()):
-                    if v is raw_quic:
-                        self._initial_connection_ids.pop(k, None)
-                        self._pending_created_at.pop(k, None)
-                        self._connection_id_to_addr.pop(k, None)
-                        self._connection_id_sequences.pop(k, None)
-                for k, v in list(self._pending.items()):
-                    if v is raw_quic:
-                        self._pending.pop(k, None)
-                        self._pending_created_at.pop(k, None)
-                        self._connection_id_to_addr.pop(k, None)
-                        self._connection_id_sequences.pop(k, None)
 
     async def cleanup_stale_address_mapping(self, addr: tuple[str, int]) -> None:
         """
@@ -1060,6 +1246,8 @@ class ConnectionIDRegistry:
                 if now - created_at > max_age
             ]
             stale_conns = set()
+            removed_cids = set(stale_cids)
+
             for cid in stale_cids:
                 conn = self._pending.pop(cid, None)
                 if conn:
@@ -1068,21 +1256,53 @@ class ConnectionIDRegistry:
                 if init_conn:
                     stale_conns.add(init_conn)
                 self._pending_created_at.pop(cid, None)
-                addr = self._connection_id_to_addr.pop(cid, None)
-                if addr and self._addr_to_connection_id.get(addr) == cid:
-                    self._addr_to_connection_id.pop(addr, None)
                 self._connection_id_sequences.pop(cid, None)
                 self._connection_sequence_counters.pop(cid, None)
 
+                # Unlink bidirectional mappings
+                linked_init = self._host_cid_to_initial_dcid.pop(cid, None)
+                if linked_init:
+                    self._initial_dcid_to_host_cid.pop(linked_init, None)
+                    iconn = self._initial_connection_ids.pop(linked_init, None)
+                    if iconn:
+                        stale_conns.add(iconn)
+                    self._pending_created_at.pop(linked_init, None)
+                    self._connection_id_sequences.pop(linked_init, None)
+                    removed_cids.add(linked_init)
+
+                linked_host = self._initial_dcid_to_host_cid.pop(cid, None)
+                if linked_host:
+                    self._host_cid_to_initial_dcid.pop(linked_host, None)
+                    hconn = self._pending.pop(linked_host, None)
+                    if hconn:
+                        stale_conns.add(hconn)
+                    self._pending_created_at.pop(linked_host, None)
+                    self._connection_id_sequences.pop(linked_host, None)
+                    self._connection_sequence_counters.pop(linked_host, None)
+                    removed_cids.add(linked_host)
+
+                self._cleanup_address_mappings(cid, linked_init or linked_host)
+
             # Sweep any orphan initial_connection_ids pointing to stale connections
-            if stale_conns:
-                for k, v in list(self._initial_connection_ids.items()):
-                    if v in stale_conns:
-                        self._initial_connection_ids.pop(k, None)
-                        self._pending_created_at.pop(k, None)
-                        self._connection_id_to_addr.pop(k, None)
-                        self._connection_id_sequences.pop(k, None)
-            return stale_cids
+            # or created more than max_age ago
+            for k, v in list(self._initial_connection_ids.items()):
+                created = self._pending_created_at.get(k, 0.0)
+                if v in stale_conns or (created > 0.0 and now - created > max_age):
+                    self._initial_connection_ids.pop(k, None)
+                    self._pending_created_at.pop(k, None)
+                    self._connection_id_to_addr.pop(k, None)
+                    self._connection_id_sequences.pop(k, None)
+                    stale_conns.add(v)
+                    removed_cids.add(k)
+                    linked_h = self._initial_dcid_to_host_cid.pop(k, None)
+                    if linked_h:
+                        self._host_cid_to_initial_dcid.pop(linked_h, None)
+
+            # Close the pending connections whose routing entries were removed.
+            for conn in stale_conns:
+                close_pending_quic_connection(conn)
+
+            return list(removed_cids)
 
     async def get_all_pending_cids(self) -> list[bytes]:
         """
@@ -1095,12 +1315,24 @@ class ConnectionIDRegistry:
         async with self._lock:
             return list(self._pending.keys())
 
+    async def get_all_initial_cids(self) -> list[bytes]:
+        """
+        Get all Connection IDs for initial pending connections.
+
+        Returns:
+            List of initial Connection IDs
+
+        """
+        async with self._lock:
+            return list(self._initial_connection_ids.keys())
+
     async def register_initial_connection_id(
         self,
         connection_id: bytes,
         quic_conn: "QuicConnection",
         addr: tuple[str, int],
         sequence: int = 0,
+        host_cid: bytes | None = None,
     ) -> None:
         """
         Register an initial destination Connection ID for a pending connection.
@@ -1113,16 +1345,28 @@ class ConnectionIDRegistry:
             quic_conn: The aioquic QuicConnection instance
             addr: Remote address (host, port) tuple
             sequence: Sequence number for this Connection ID (default: 0)
+            host_cid: Optional server host Connection ID
 
         """
         async with self._lock:
             # Cap initial_connection_ids to prevent unbounded accumulation
             if len(self._initial_connection_ids) >= 256:
                 oldest_k = next(iter(self._initial_connection_ids))
-                self._initial_connection_ids.pop(oldest_k, None)
+                evicted_conn = self._initial_connection_ids.pop(oldest_k, None)
                 self._pending_created_at.pop(oldest_k, None)
-                self._connection_id_to_addr.pop(oldest_k, None)
                 self._connection_id_sequences.pop(oldest_k, None)
+                linked_host_cid = self._initial_dcid_to_host_cid.pop(oldest_k, None)
+                if linked_host_cid:
+                    self._host_cid_to_initial_dcid.pop(linked_host_cid, None)
+                    p_conn = self._pending.pop(linked_host_cid, None)
+                    if p_conn and not evicted_conn:
+                        evicted_conn = p_conn
+                    self._pending_created_at.pop(linked_host_cid, None)
+                    self._connection_id_sequences.pop(linked_host_cid, None)
+                    self._connection_sequence_counters.pop(linked_host_cid, None)
+                self._cleanup_address_mappings(oldest_k, linked_host_cid)
+                if evicted_conn:
+                    close_pending_quic_connection(evicted_conn)
 
             self._initial_connection_ids[connection_id] = quic_conn
             self._pending_created_at[connection_id] = time.time()
@@ -1130,6 +1374,9 @@ class ConnectionIDRegistry:
             self._addr_to_connection_id[addr] = connection_id
             # Track sequence number
             self._connection_id_sequences[connection_id] = sequence
+            if host_cid:
+                self._host_cid_to_initial_dcid[host_cid] = connection_id
+                self._initial_dcid_to_host_cid[connection_id] = host_cid
 
     async def remove_initial_connection_id(self, connection_id: bytes) -> None:
         """
@@ -1141,12 +1388,21 @@ class ConnectionIDRegistry:
         """
         async with self._lock:
             self._initial_connection_ids.pop(connection_id, None)
+            self._pending_created_at.pop(connection_id, None)
+            self._connection_id_sequences.pop(connection_id, None)
+            h_cid = self._initial_dcid_to_host_cid.pop(connection_id, None)
+            if h_cid:
+                self._host_cid_to_initial_dcid.pop(h_cid, None)
             addr = self._connection_id_to_addr.pop(connection_id, None)
             if addr:
                 if self._addr_to_connection_id.get(addr) == connection_id:
-                    del self._addr_to_connection_id[addr]
-            # Clean up sequence mapping
-            self._connection_id_sequences.pop(connection_id, None)
+                    if h_cid and (h_cid in self._pending or h_cid in self._connections):
+                        self._addr_to_connection_id[addr] = h_cid
+                    else:
+                        self._addr_to_connection_id.pop(addr, None)
+                elif h_cid and self._addr_to_connection_id.get(addr) == h_cid:
+                    if h_cid not in self._pending and h_cid not in self._connections:
+                        self._addr_to_connection_id.pop(addr, None)
 
     async def get_sequence_for_connection_id(self, connection_id: bytes) -> int | None:
         """
@@ -1315,6 +1571,7 @@ class ConnectionIDRegistry:
             "tracked_sequences": len(self._connection_id_sequences),
             "fallback_routing_count": self._fallback_routing_count,
             "sequence_distribution": dict(self._sequence_distribution),  # type: ignore
+            "sequence_distribution_overflow_bucket": -1,
             "lock_stats": self.get_lock_stats(),
         }
         if self._debug_timing and self._operation_timings:

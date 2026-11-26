@@ -49,13 +49,13 @@ async def main() -> None:
                     print("Gossipsub and Pubsub services started !!")
                     print(f"DHT service started with {node.dht.mode} mode")
 
-                    # METRICS
+                    # Record events from the host's observability bus and
+                    # expose the Prometheus scrape endpoint over HTTP.
                     metrics = Metrics()
-                    metrics_recv_channel = node.host.get_metrics_recv_channel()
+                    metrics.attach(node.host.get_event_bus())
+                    port = metrics.start_http_server()
+                    print(f"Prometheus metrics visible at: http://localhost:{port}")
 
-                    nursery.start_soon(
-                        metrics.start_prometheus_server, metrics_recv_channel
-                    )
                     nursery.start_soon(node.command_executor, nursery)
                     await trio.sleep(1)
 

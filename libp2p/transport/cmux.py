@@ -195,6 +195,11 @@ class DemultiplexedListener(IListener):
             await handler(stream)
         except Exception as exc:
             logger.debug("DemultiplexedListener: handler error: %s", exc)
+        finally:
+            try:
+                await stream.aclose()
+            except Exception:
+                pass
 
     async def close(self) -> None:
         """Close this demultiplexed listener and remove it from PortDemultiplexer."""

@@ -3,9 +3,11 @@ from typing import (
     cast,
 )
 
+from multiaddr import Multiaddr
 from noise.connection import NoiseConnection as NoiseState
 
 from libp2p.abc import (
+    ConnectionType,
     IRawConnection,
 )
 from libp2p.io.abc import (
@@ -100,6 +102,23 @@ class BaseNoiseMsgReadWriter(EncryptedMsgReadWriter):
         ):
             return self.read_writer.read_write_closer.get_remote_address()
         return None
+
+    def get_connection_type(self) -> ConnectionType:
+        # Delegate to the underlying connection if possible
+        closer = getattr(self.read_writer, "read_write_closer", None)
+        get_connection_type = getattr(closer, "get_connection_type", None)
+        if get_connection_type is not None:
+            return get_connection_type()
+
+        return ConnectionType.UNKNOWN
+
+    def get_transport_addresses(self) -> list[Multiaddr]:
+        # Delegate to the underlying connection if possible
+        closer = getattr(self.read_writer, "read_write_closer", None)
+        get_transport_addresses = getattr(closer, "get_transport_addresses", None)
+        if get_transport_addresses is not None:
+            return get_transport_addresses()
+        return []
 
 
 class NoiseHandshakeReadWriter(BaseNoiseMsgReadWriter):

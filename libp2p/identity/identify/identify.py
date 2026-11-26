@@ -17,6 +17,7 @@ from libp2p.custom_types import (
     StreamHandlerFn,
     TProtocol,
 )
+from libp2p.metrics.identity import IdentityEvent
 from libp2p.network.stream.exceptions import (
     StreamClosed,
     StreamReset,
@@ -185,6 +186,66 @@ def _prefer_circuit_addr(
     return fallback
 
 
+def _observed_multiaddr_for(
+    host: IHost, stream: INetStream, peer_id: PeerID
+) -> Multiaddr | None:
+    """Return the address the remote peer should see for us, if any."""
+    observed_multiaddr: Multiaddr | None = None
+    try:
+        remote_address = stream.get_remote_address()
+        # Convert to multiaddr
+        if remote_address:
+            observed_multiaddr = _remote_address_to_multiaddr(remote_address)
+
+        # On relayed connections the raw socket remote is the relay's
+        # own address. Reporting it as the peer's observed address
+        # poisons strict peers: they record it as *their* external and
+        # advertise the relay back in DCUtR (undialable). Report the
+        # circuit address instead, which peers filter (matching
+        # go/rust behavior).
+        observed_multiaddr = _prefer_circuit_addr(host, peer_id, observed_multiaddr)
+
+    except Exception as e:
+        logger.error("Error getting remote address: %s", e)
+        return None
+    return observed_multiaddr
+
+
+async def _build_identify_response(
+    host: IHost, stream: INetStream, peer_id: PeerID
+) -> bytes:
+    """
+    Serialize the signed identify response for an inbound request.
+
+    Kept separate from the handler so the handler can release the stream when
+    this step raises or is cancelled: preparation happens before the send
+    block's cleanup and used to leave the muxed stream owned.
+    """
+    observed_multiaddr = _observed_multiaddr_for(host, stream, peer_id)
+
+    # Under heavy parallel test load, listeners may not yet appear in
+    # get_addrs() when the identify stream opens immediately after connect.
+    deadline = trio.current_time() + 0.5
+    while not host.get_addrs() and trio.current_time() < deadline:
+        await trio.sleep(0.01)
+
+    protobuf = _mk_identify_protobuf(host, observed_multiaddr)
+    return protobuf.SerializeToString()
+
+
+async def _close_identify_stream(stream: INetStream) -> None:
+    """Release an identify stream, shielding teardown from cancellation."""
+    with trio.CancelScope() as scope:
+        scope.shield = True
+        try:
+            await stream.close()
+        except Exception:
+            try:
+                await stream.reset()
+            except Exception:
+                pass
+
+
 def identify_handler_for(
     host: IHost, use_varint_format: bool = True
 ) -> StreamHandlerFn:
@@ -194,36 +255,21 @@ def identify_handler_for(
             stream.muxed_conn.peer_id
         )  # remote peer_id is in class Mplex (mplex.py )
 
-        observed_multiaddr: Multiaddr | None = None
-        # Get the remote address
         try:
-            remote_address = stream.get_remote_address()
-            # Convert to multiaddr
-            if remote_address:
-                observed_multiaddr = _remote_address_to_multiaddr(remote_address)
-
-            # On relayed connections the raw socket remote is the relay's
-            # own address. Reporting it as the peer's observed address
-            # poisons strict peers: they record it as *their* external and
-            # advertise the relay back in DCUtR (undialable). Report the
-            # circuit address instead, which peers filter (matching
-            # go/rust behavior).
-            observed_multiaddr = _prefer_circuit_addr(host, peer_id, observed_multiaddr)
-
-        except Exception as e:
-            logger.error("Error getting remote address: %s", e)
-            remote_address = None
-
-        # Under heavy parallel test load, listeners may not yet appear in
-        # get_addrs() when the identify stream opens immediately after connect.
-        deadline = trio.current_time() + 0.5
-        while not host.get_addrs() and trio.current_time() < deadline:
-            await trio.sleep(0.01)
-
-        protobuf = _mk_identify_protobuf(host, observed_multiaddr)
-        response = protobuf.SerializeToString()
+            response = await _build_identify_response(host, stream, peer_id)
+        except BaseException:
+            # Cancellation derives from BaseException, so it would otherwise
+            # skip the send block's cleanup and leave the stream to the muxer.
+            await _close_identify_stream(stream)
+            raise
 
         try:
+            # Per the Identify spec the requester only reads: it never sends
+            # on this stream.  Do not try to read here — waiting for data that
+            # will not arrive held every inbound identify handler (and its
+            # stream) open for the full read timeout, slowing each exchange
+            # and pinning a stream per pending request.  The stream is closed
+            # in ``finally`` below, which releases the muxer-side state.
             if use_varint_format:
                 # Send length-prefixed protobuf message (new format)
                 # Combine length prefix and response into a single write to avoid races
@@ -234,10 +280,28 @@ def identify_handler_for(
                 # Send raw protobuf message (old format for backward compatibility)
                 await stream.write(response)
             logger.debug("successfully handled request for %s from %s", ID, peer_id)
+            event = IdentityEvent()
+            event.identify = True
+            event.direction = "inbound"
+            event.peer_id = str(peer_id)
+            event.success = True
+            host.get_event_bus().emit(event)
         except (StreamClosed, StreamReset):
             logger.debug("Fail to respond to %s request: stream closed or reset", ID)
+            event = IdentityEvent()
+            event.identify = True
+            event.direction = "inbound"
+            event.peer_id = str(peer_id)
+            event.success = False
+            host.get_event_bus().emit(event)
         except MuxedStreamError:
             logger.debug("Fail to respond to %s request: muxed stream error", ID)
+            event = IdentityEvent()
+            event.identify = True
+            event.direction = "inbound"
+            event.peer_id = str(peer_id)
+            event.success = False
+            host.get_event_bus().emit(event)
             try:
                 await stream.reset()
             except Exception:
@@ -250,14 +314,17 @@ def identify_handler_for(
                 type(e),
                 traceback.format_exc(),
             )
+            event = IdentityEvent()
+            event.identify = True
+            event.direction = "inbound"
+            event.peer_id = str(peer_id)
+            event.success = False
+            host.get_event_bus().emit(event)
             try:
                 await stream.reset()
             except Exception:
                 pass
         finally:
-            try:
-                await stream.close()
-            except Exception:
-                pass
+            await _close_identify_stream(stream)
 
     return handle_identify

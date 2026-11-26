@@ -22,6 +22,10 @@ from libp2p.abc import (
     INetwork,
     INotifee,
 )
+from libp2p.events import IEventListener
+from libp2p.metrics.muxer import MuxerEvent
+from libp2p.metrics.transport import ListenConn
+from libp2p.network.exceptions import SwarmException
 from libp2p.tools.utils import connect_swarm
 from tests.utils.factories import (
     SwarmFactory,
@@ -68,6 +72,18 @@ class MyNotifee(INotifee):
         self.events.append(Event.ListenClose)
 
 
+class LifecycleListener(IEventListener):
+    def __init__(self) -> None:
+        self.connections: list[ListenConn] = []
+        self.streams: list[MuxerEvent] = []
+
+    def handle_event(self, event: object) -> None:
+        if isinstance(event, ListenConn):
+            self.connections.append(event)
+        if isinstance(event, MuxerEvent) and (event.stream_open or event.stream_close):
+            self.streams.append(event)
+
+
 @pytest.mark.trio
 async def test_notify(security_protocol):
     # Helper to wait for specific event
@@ -86,6 +102,9 @@ async def test_notify(security_protocol):
 
     # Create two swarms, but do not listen yet
     async with SwarmFactory.create_batch_and_listen(2) as swarms:
+        lifecycle = LifecycleListener()
+        swarms[0].get_event_bus().register_listener(lifecycle)
+
         # Register notifees before listening
         notifee_0_0 = MyNotifee(events_0_0)
         notifee_0_1 = MyNotifee(events_0_1)
@@ -128,9 +147,42 @@ async def test_notify(security_protocol):
         assert await wait_for_event(events_1_1, Event.ClosedStream, 1.0)
         assert await wait_for_event(events_1_1, Event.Disconnected, 1.0)
 
+        streams = [
+            (e.stream_open, e.stream_close, e.direction) for e in lifecycle.streams
+        ]
+        assert streams == [
+            (True, False, "outbound"),
+            (False, True, "outbound"),
+        ]
+
         # Note: ListenClose events are triggered when swarm closes during cleanup
         # The test framework automatically closes listeners, triggering ListenClose
         # notifications
+
+
+@pytest.mark.trio
+async def test_connection_closed_during_connected_notifee_is_reported_once():
+    class ClosingNotifee(MyNotifee):
+        async def connected(self, network: INetwork, conn: INetConn) -> None:
+            await super().connected(network, conn)
+            await conn.close()
+
+    async with SwarmFactory.create_batch_and_listen(2) as (dialer, listener):
+        events: list[Event] = []
+        lifecycle = LifecycleListener()
+        dialer.register_notifee(ClosingNotifee(events))
+        dialer.get_event_bus().register_listener(lifecycle)
+        addr = next(iter(listener.listeners.values())).get_addrs()[0]
+
+        with pytest.raises(SwarmException, match="closed during notify_connected"):
+            await dialer._dial_addr_single_attempt(addr, listener.get_peer_id())
+
+        assert events == [Event.Connected, Event.Disconnected]
+        assert [(e.conn_open, e.conn_close) for e in lifecycle.connections] == [
+            (True, False),
+            (False, True),
+        ]
+        assert dialer.get_connections() == []
 
 
 async def wait_for_event(events_list, event, timeout=1.0):

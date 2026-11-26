@@ -463,12 +463,14 @@ class ObservedAddrManager:
 
     def _update_local_addr_rests(self, local_addrs: list[Multiaddr]) -> None:
         """Extract rest suffixes from local addresses for later inference."""
+        current: set[str] = set()
         for addr in local_addrs:
             result = extract_thin_waist(addr)
             if result is None:
                 continue
             tw, rest = result
             tw_str = str(tw)
+            current.add(tw_str)
 
             # Also store for wildcard-matched versions.
             # We match by port+transport, so store under the canonical
@@ -477,6 +479,15 @@ class ObservedAddrManager:
                 self._local_addr_rests[tw_str] = set()
             if rest:
                 self._local_addr_rests[tw_str].add(rest)
+
+        # Forget suffixes for local thin waists we no longer listen on.  This
+        # map is keyed by listen address/port and was only ever added to, so a
+        # host that changes its listen addresses kept one entry per old port
+        # for the life of the manager.  Skip pruning on an empty address list:
+        # that is a transient state, not evidence the listener is gone.
+        if current:
+            for stale in set(self._local_addr_rests) - current:
+                del self._local_addr_rests[stale]
 
 
 def has_consistent_transport(tw_a: Multiaddr, tw_b: Multiaddr) -> bool:

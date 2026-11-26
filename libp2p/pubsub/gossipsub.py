@@ -7,6 +7,7 @@ from collections.abc import (
     Iterable,
     Sequence,
 )
+import hashlib
 import logging
 import random
 import statistics
@@ -84,6 +85,29 @@ logger = logging.getLogger(__name__)
 
 _MAX_PENDING_GRAFT_PRUNE_PER_PEER = 64
 
+# Upper bound on retained equivocation fingerprints.  Entries are evicted on
+# insert, so the dict cannot outgrow this between heartbeats.
+MAX_EQUIVOCATION_ENTRIES = 1000
+
+
+def _message_fingerprint(msg: rpc_pb2.Message) -> bytes:
+    """Digest the content used to detect equivocation (data + topic list)."""
+    digest = hashlib.sha256()
+    digest.update(len(msg.data).to_bytes(8, "big"))
+    digest.update(msg.data)
+    for topic in msg.topicIDs:
+        encoded = topic.encode()
+        digest.update(len(encoded).to_bytes(4, "big"))
+        digest.update(encoded)
+    return digest.digest()
+
+
+# A remote peer controls the PRUNE backoff duration and topic IDs. Clamp the
+# duration and bound the topic map so a peer cannot pin arbitrary topics for
+# years or grow back_off without limit on a long-lived connection.
+_MAX_BACKOFF_SECONDS = 24 * 60 * 60
+_MAX_BACKOFF_TOPICS = 10_000
+
 
 class GossipSub(IPubsubRouter, Service):
     protocols: list[TProtocol]
@@ -145,8 +169,8 @@ class GossipSub(IPubsubRouter, Service):
     message_rate_limits: dict[ID, dict[str, list[float]]]  # peer -> topic -> timestamps
     max_messages_per_topic_per_second: float
     equivocation_detection: dict[
-        bytes, rpc_pb2.Message
-    ]  # msg_id (from_id + seqno) -> first_msg
+        bytes, bytes
+    ]  # msg_id (from_id + seqno) -> content fingerprint
     eclipse_protection_enabled: bool
     min_mesh_diversity_ips: int  # Minimum number of different IPs in mesh
 
@@ -804,11 +828,38 @@ class GossipSub(IPubsubRouter, Service):
         )
 
     def _notify_mesh_peer_added(self, peer_id: ID, topic: str) -> None:
-        """Wake any ``wait_for_mesh`` waiter for this peer/topic."""
+        """
+        Wake any ``wait_for_mesh`` waiter for this peer/topic and tag peer.
+        """
         key = (peer_id, topic)
         event = self._mesh_peer_events.pop(key, None)
         if event is not None:
             event.set()
+        try:
+            host = getattr(self, "host", None)
+            conn_manager = getattr(host, "conn_manager", None)
+            if conn_manager is not None:
+                conn_manager.tag_peer(peer_id, f"pubsub:{topic}", 100)
+            else:
+                get_network = getattr(host, "get_network", None)
+                if get_network is not None:
+                    get_network().tag_peer(peer_id, f"pubsub:{topic}", 100)
+        except Exception:
+            pass
+
+    def _notify_mesh_peer_removed(self, peer_id: ID, topic: str) -> None:
+        """Untag peer when pruned or removed from mesh."""
+        try:
+            host = getattr(self, "host", None)
+            conn_manager = getattr(host, "conn_manager", None)
+            if conn_manager is not None:
+                conn_manager.untag_peer(peer_id, f"pubsub:{topic}")
+            else:
+                get_network = getattr(host, "get_network", None)
+                if get_network is not None:
+                    get_network().untag_peer(peer_id, f"pubsub:{topic}")
+        except Exception:
+            pass
 
     async def wait_for_mesh(
         self, peer_id: ID, topic_id: str, timeout: float = 5.0
@@ -827,9 +878,17 @@ class GossipSub(IPubsubRouter, Service):
         """
         if topic_id in self.mesh and peer_id in self.mesh[topic_id]:
             return
-        event = self._mesh_peer_events.setdefault((peer_id, topic_id), trio.Event())
-        with trio.fail_after(timeout):
-            await event.wait()
+        key = (peer_id, topic_id)
+        event = self._mesh_peer_events.setdefault(key, trio.Event())
+        try:
+            with trio.fail_after(timeout):
+                await event.wait()
+        finally:
+            if (
+                event.statistics().tasks_waiting == 0
+                and self._mesh_peer_events.get(key) is event
+            ):
+                self._mesh_peer_events.pop(key, None)
 
     async def on_peer_subscribed(self, peer_id: ID, topic: str) -> None:
         """
@@ -885,7 +944,9 @@ class GossipSub(IPubsubRouter, Service):
         logger.debug("removing peer %s", peer_id)
 
         for topic in self.mesh:
-            self.mesh[topic].discard(peer_id)
+            if peer_id in self.mesh[topic]:
+                self.mesh[topic].discard(peer_id)
+                self._notify_mesh_peer_removed(peer_id, topic)
         for topic in self.fanout:
             self.fanout[topic].discard(peer_id)
 
@@ -1235,6 +1296,7 @@ class GossipSub(IPubsubRouter, Service):
             # Add backoff BEFORE emitting PRUNE to avoid races where a GRAFT
             # could be processed before the backoff is recorded locally.
             self._add_back_off(peer, topic, True)
+            self._notify_mesh_peer_removed(peer, topic)
             await self.emit_prune(topic, peer, self.do_px, True)
 
         # Forget mesh[topic]
@@ -1442,6 +1504,7 @@ class GossipSub(IPubsubRouter, Service):
                 for peer in peers_to_remove:
                     # Remove peer from mesh[topic]
                     self.mesh[topic].discard(peer)
+                    self._notify_mesh_peer_removed(peer, topic)
                     if self.scorer is not None:
                         self.scorer.on_leave_mesh(peer, topic)
 
@@ -1469,16 +1532,16 @@ class GossipSub(IPubsubRouter, Service):
         if self.pubsub is None:
             raise NoPubsubAttached
 
-        # Skip if no peers have subscribed to the topic
-        if topic not in self.pubsub.peer_topics:
-            return current_peers, False
-
         # For fanout topics, check if we should remove the topic
         if is_fanout:
             if self.time_since_last_publish.get(topic, 0) + self.time_to_live < int(
                 time.time()
             ):
                 return set(), True
+
+        # Skip if no peers have subscribed to the topic
+        if topic not in self.pubsub.peer_topics:
+            return current_peers, False
 
         # Check if peers are still in the topic and remove the ones that are not
         in_topic_peers: set[ID] = {
@@ -1528,6 +1591,7 @@ class GossipSub(IPubsubRouter, Service):
             )
             if should_remove:
                 del self.fanout[topic]
+                self.time_since_last_publish.pop(topic, None)
             else:
                 self.fanout[topic] = updated_peers
 
@@ -1624,7 +1688,23 @@ class GossipSub(IPubsubRouter, Service):
         :param backoff_duration: duration of back off in seconds, if 0, use default
         """
         if topic not in self.back_off:
+            if len(self.back_off) >= _MAX_BACKOFF_TOPICS:
+                logger.debug(
+                    "Ignoring backoff for new topic %s: %d topics already tracked",
+                    topic,
+                    len(self.back_off),
+                )
+                return
             self.back_off[topic] = dict()
+
+        if backoff_duration > _MAX_BACKOFF_SECONDS:
+            logger.debug(
+                "Clamping backoff for topic %s from %ds to %ds",
+                topic,
+                backoff_duration,
+                _MAX_BACKOFF_SECONDS,
+            )
+            backoff_duration = _MAX_BACKOFF_SECONDS
 
         backoff_till = int(time.time())
         if backoff_duration > 0:
@@ -1653,6 +1733,8 @@ class GossipSub(IPubsubRouter, Service):
             return True
         else:
             del self.back_off[topic][peer]
+            if not self.back_off[topic]:
+                del self.back_off[topic]
             return False
 
     def _prune_idontwant_entries(self) -> None:
@@ -1910,6 +1992,7 @@ class GossipSub(IPubsubRouter, Service):
         # Remove sender from mesh if topic exists in mesh
         if topic in self.mesh:
             self.mesh[topic].discard(sender_peer_id)
+            self._notify_mesh_peer_removed(sender_peer_id, topic)
             if self.scorer is not None:
                 self.scorer.on_leave_mesh(sender_peer_id, topic)
 
@@ -2656,9 +2739,11 @@ class GossipSub(IPubsubRouter, Service):
             total_deliveries = 0
             successful_deliveries = 0
 
-            for topic, delivery_times in self.recent_message_deliveries.items():
+            for topic, delivery_times in list(self.recent_message_deliveries.items()):
                 # Clean old entries
                 delivery_times[:] = [t for t in delivery_times if t > cutoff_time]
+                if not delivery_times:
+                    del self.recent_message_deliveries[topic]
 
                 # Count deliveries (simplified - in real implementation,
                 # track success/failure separately)
@@ -2913,19 +2998,26 @@ class GossipSub(IPubsubRouter, Service):
         :return: True if message is valid, False if equivocation detected
         """
         msg_key = msg.from_id + msg.seqno
+        fingerprint = _message_fingerprint(msg)
 
-        if msg_key in self.equivocation_detection:
-            existing_msg = self.equivocation_detection[msg_key]
+        known = self.equivocation_detection.get(msg_key)
+        if known is not None:
             # Check if content differs (equivocation)
-            if existing_msg.data != msg.data or existing_msg.topicIDs != msg.topicIDs:
+            if known != fingerprint:
                 logger.warning("Equivocation detected from peer %s", ID(msg.from_id))
                 # Severely penalize equivocating peer
                 if self.scorer is not None:
                     self.scorer.penalize_equivocation(ID(msg.from_id), 100.0)
                 return False
-        else:
-            # Store first occurrence
-            self.equivocation_detection[msg_key] = msg
+            return True
+
+        # Store only a fingerprint: keeping the whole first message retains up
+        # to a full RPC payload per entry (attacker controlled), and the table
+        # used to be bounded only by the heartbeat sweep.
+        self.equivocation_detection[msg_key] = fingerprint
+        while len(self.equivocation_detection) > MAX_EQUIVOCATION_ENTRIES:
+            oldest = next(iter(self.equivocation_detection))
+            del self.equivocation_detection[oldest]
 
         return True
 
@@ -3461,6 +3553,7 @@ class GossipSub(IPubsubRouter, Service):
 
         # Perform replacement: mutate mesh and emit PRUNE/GRAFT
         self.mesh[topic].discard(worst_peer)
+        self._notify_mesh_peer_removed(worst_peer, topic)
         self.mesh[topic].add(best_replacement)
         self._notify_mesh_peer_added(best_replacement, topic)
 
@@ -3492,6 +3585,7 @@ class GossipSub(IPubsubRouter, Service):
             self.mesh[topic].add(worst_peer)
             self._notify_mesh_peer_added(worst_peer, topic)
             self.mesh[topic].discard(best_replacement)
+            self._notify_mesh_peer_removed(best_replacement, topic)
             if self.scorer is not None:
                 self.scorer.on_join_mesh(worst_peer, topic)
                 self.scorer.on_leave_mesh(best_replacement, topic)
@@ -3534,6 +3628,32 @@ class GossipSub(IPubsubRouter, Service):
         Periodic cleanup of security-related data structures.
         """
         current_time = time.time()
+
+        # Health computation can be disabled or return early with no mesh.
+        # Ownership expiry must still run on every heartbeat.
+        cutoff = current_time - 60.0
+        self.recent_peer_connections[:] = [
+            t for t in self.recent_peer_connections if t > cutoff
+        ]
+        self.recent_peer_disconnections[:] = [
+            t for t in self.recent_peer_disconnections if t > cutoff
+        ]
+        for topic, timestamps in list(self.recent_message_deliveries.items()):
+            timestamps[:] = [t for t in timestamps if t > cutoff]
+            if not timestamps:
+                del self.recent_message_deliveries[topic]
+        for topic, published in list(self.time_since_last_publish.items()):
+            if published + self.time_to_live < current_time:
+                del self.time_since_last_publish[topic]
+
+        # A departed peer may never be checked by _check_back_off again.
+        # Preserve live bans across reconnects, then expire them on heartbeat.
+        for topic, peers in list(self.back_off.items()):
+            for peer, deadline in list(peers.items()):
+                if deadline <= current_time:
+                    del peers[peer]
+            if not peers:
+                del self.back_off[topic]
 
         # Clean up old equivocation detection entries
         # Note: Message objects don't have _timestamp, so we'll just clear old entries

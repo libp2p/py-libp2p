@@ -30,11 +30,21 @@ from libp2p.custom_types import (
 from libp2p.io.abc import (
     ReadWriteCloser,
 )
+from libp2p.metrics.relay import RelayEvent
 from libp2p.network.connection.raw_connection import (
     RawConnection,
 )
+from libp2p.network.stream.exceptions import (
+    StreamClosed,
+    StreamEOF,
+    StreamReset,
+)
 from libp2p.peer.id import (
     ID,
+)
+from libp2p.stream_muxer.exceptions import (
+    MuxedStreamEOF,
+    MuxedStreamReset,
 )
 from libp2p.stream_muxer.mplex.exceptions import (
     MplexStreamEOF,
@@ -275,7 +285,15 @@ class CircuitV2Protocol(Service):
                 )
                 await trio.sleep(backoff_time * retries)
                 continue
-            except (MplexStreamEOF, MplexStreamReset):
+            except (
+                StreamEOF,
+                StreamReset,
+                StreamClosed,
+                MuxedStreamEOF,
+                MuxedStreamReset,
+                MplexStreamEOF,
+                MplexStreamReset,
+            ):
                 # Stream closed/reset - no point retrying
                 logger.debug("Stream closed/reset during read")
                 return None
@@ -345,6 +363,17 @@ class CircuitV2Protocol(Service):
                     )
                     await write_delimited_msg(stream, response)
                     await trio.sleep(0.5)
+                    break
+                except (
+                    StreamEOF,
+                    StreamReset,
+                    StreamClosed,
+                    MuxedStreamEOF,
+                    MuxedStreamReset,
+                    MplexStreamEOF,
+                    MplexStreamReset,
+                ):
+                    logger.debug("Hop stream from %s closed/reset", remote_id)
                     break
                 except Exception as e:
                     logger.error(
@@ -466,6 +495,7 @@ class CircuitV2Protocol(Service):
         """
         try:
             # Create raw connection with proper circuit relay multiaddr
+            setattr(stream, "_keep_open", True)
             peer_id = ID(remote_peer_id)
             relay_peer_id = self.host.get_id()
             # Construct circuit relay multiaddr: /p2p/{relay}/p2p-circuit/p2p/{remote}
@@ -527,7 +557,8 @@ class CircuitV2Protocol(Service):
             logger.debug("Handling reservation request from peer %s", peer_id)
 
             # Check if peer already has a reservation
-            if self.resource_manager.has_reservation(peer_id):
+            is_refresh = self.resource_manager.has_reservation(peer_id)
+            if is_refresh:
                 logger.debug("Peer %s already has a reservation — refreshing", peer_id)
                 self.resource_manager.refresh_reservation(peer_id)
                 status_code = StatusCode.OK
@@ -622,8 +653,20 @@ class CircuitV2Protocol(Service):
 
                 logger.debug("Reservation response sent successfully")
 
+                reserve_event = RelayEvent()
+                reserve_event.reservation = True
+                reserve_event.side = "relay"
+                reserve_event.peer_id = str(peer_id)
+                reserve_event.action = "refreshed" if is_refresh else "granted"
+                self.host.get_event_bus().emit(reserve_event)
+
         except Exception as e:
             logger.error("Error handling reservation request: %s", str(e))
+            reserve_event = RelayEvent()
+            reserve_event.reservation = True
+            reserve_event.side = "relay"
+            reserve_event.action = "failed"
+            self.host.get_event_bus().emit(reserve_event)
             if cast(INetStreamWithExtras, stream).is_open():
                 try:
                     # Send error response
@@ -735,6 +778,13 @@ class CircuitV2Protocol(Service):
             self._active_relays[peer_id] = (stream, dst_stream)
             logger.debug("Connection established for peer %s", peer_id)
 
+            hop_event = RelayEvent()
+            hop_event.hop_connect = True
+            hop_event.side = "relay"
+            hop_event.peer_id = str(peer_id)
+            hop_event.success = True
+            self.host.get_event_bus().emit(hop_event)
+
             # Update reservation connection count (C1: released in finally)
             reservation = self.resource_manager.get_reservation(peer_id)
             connection_tracked = False
@@ -800,6 +850,11 @@ class CircuitV2Protocol(Service):
 
         except (trio.TooSlowError, ConnectionError) as e:
             logger.error("Error establishing relay connection: %s", str(e))
+            hop_event = RelayEvent()
+            hop_event.hop_connect = True
+            hop_event.side = "relay"
+            hop_event.success = False
+            self.host.get_event_bus().emit(hop_event)
             logger.debug("Sending CONNECTION_FAILED status to source")
             await self._send_status(
                 stream,
@@ -811,6 +866,11 @@ class CircuitV2Protocol(Service):
                 await dst_stream.reset()
         except Exception as e:
             logger.error("Unexpected error in connect handler: %s", str(e))
+            hop_event = RelayEvent()
+            hop_event.hop_connect = True
+            hop_event.side = "relay"
+            hop_event.success = False
+            self.host.get_event_bus().emit(hop_event)
             await self._send_status(
                 stream,
                 StatusCode.CONNECTION_FAILED,
@@ -926,8 +986,26 @@ class CircuitV2Protocol(Service):
                 try:
                     with trio.fail_after(self.write_timeout):
                         await dst_stream.write(data)
+                    bytes_event = RelayEvent()
+                    bytes_event.bytes_forwarded = True
+                    bytes_event.amount = bytes_transferred
+                    self.host.get_event_bus().emit(bytes_event)
                 except trio.TooSlowError:
                     logger.error("Timeout writing to destination stream")
+                    break
+                except (
+                    StreamEOF,
+                    StreamReset,
+                    StreamClosed,
+                    MuxedStreamEOF,
+                    MuxedStreamReset,
+                    MplexStreamEOF,
+                    MplexStreamReset,
+                ):
+                    logger.debug(
+                        "Relayed stream for peer %s closed/reset",
+                        peer_id,
+                    )
                     break
                 except Exception as e:
                     logger.error("Error writing to destination stream: %s", str(e))

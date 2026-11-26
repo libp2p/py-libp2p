@@ -416,6 +416,7 @@ class Mplex(IMuxedConn):
         if is_local_closed:
             async with self.streams_lock:
                 self.streams.pop(stream_id, None)
+                self.streams_msg_channels.pop(stream_id, None)
 
     async def _handle_reset(self, stream_id: StreamID) -> None:
         async with self.streams_lock:

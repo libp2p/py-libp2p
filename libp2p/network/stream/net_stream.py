@@ -39,6 +39,10 @@ from .exceptions import (
     StreamReset,
 )
 
+# Bound for best-effort muxed-stream teardown. Cleanup is shielded from caller
+# cancellation, so it must not be able to block a cancelled task indefinitely.
+_CLOSE_CLEANUP_TIMEOUT = 2.0
+
 
 class StreamState(Enum):
     INIT = auto()
@@ -309,13 +313,37 @@ class NetStream(INetStream):
             raise
 
     async def close(self) -> None:
-        """Close stream completely and clean up resources."""
-        await self.muxed_stream.close()
-        await self.set_state(StreamState.CLOSE_BOTH)
-        await self.remove()
+        """
+        Close stream completely and clean up resources.
+
+        Teardown is shielded from caller cancellation (e.g. a DHT lookup
+        timeout firing inside a ``finally`` block) and bounded by
+        ``_CLOSE_CLEANUP_TIMEOUT``. The network owner is always removed, so a
+        cancelled close can no longer strand the wrapper and the underlying
+        transport stream in their registries.
+        """
+        with trio.CancelScope() as close_scope:
+            close_scope.shield = True
+            try:
+                with trio.move_on_after(_CLOSE_CLEANUP_TIMEOUT):
+                    # Mark reads abandoned before awaiting the muxed close.
+                    # Yamux uses this to bound the transport entry's lifetime
+                    # when the peer never sends FIN.
+                    close_read = getattr(self.muxed_stream, "close_read", None)
+                    if callable(close_read):
+                        await cast(Callable[[], Awaitable[None]], close_read)()
+                    await self.muxed_stream.close()
+            finally:
+                await self.set_state(StreamState.CLOSE_BOTH)
+                await self.remove()
+        # Cleanup is shielded, so a cancellation that arrived during teardown
+        # was deferred. Re-check it so an enclosing timeout still behaves as a
+        # timeout instead of being silently swallowed.
+        await trio.lowlevel.checkpoint_if_cancelled()
 
     async def close_read(self) -> None:
         """Close the stream for reading only."""
+        remove = False
         async with self._state_lock:
             if self._state == StreamState.ERROR:
                 raise StreamError(
@@ -325,6 +353,17 @@ class NetStream(INetStream):
                 self._state = StreamState.CLOSE_READ
             elif self._state == StreamState.CLOSE_WRITE:
                 self._state = StreamState.CLOSE_BOTH
+                remove = True
+
+        # Propagate the half-close to the muxed stream. Yamux needs this to
+        # stamp read abandonment; without it a local write-half close leaves
+        # the transport entry alive forever when the peer never sends FIN.
+        close_read = getattr(self.muxed_stream, "close_read", None)
+        try:
+            if callable(close_read):
+                await cast(Callable[[], Awaitable[None]], close_read)()
+        finally:
+            if remove:
                 await self.remove()
 
     async def close_write(self) -> None:
@@ -347,33 +386,49 @@ class NetStream(INetStream):
         else:
             await self.muxed_stream.close()
 
+        remove = False
         async with self._state_lock:
             if self._state == StreamState.OPEN:
                 self._state = StreamState.CLOSE_WRITE
             elif self._state == StreamState.CLOSE_READ:
                 self._state = StreamState.CLOSE_BOTH
-                await self.remove()
+                remove = True
+        if remove:
+            await self.remove()
 
     async def reset(self) -> None:
-        """Reset stream."""
+        """
+        Reset stream.
+
+        As with :meth:`close`, cleanup is shielded from caller cancellation so
+        that a cancelled reset cannot leave the network wrapper registered.
+        """
         # Allow reset even from ERROR state for cleanup purposes
-        try:
-            await self.muxed_stream.reset()
-        except Exception:
-            # If reset fails, we still want to mark the stream as reset
-            # This allows cleanup to proceed even if the underlying stream is broken
-            pass
-        async with self._state_lock:
-            self._state = StreamState.RESET
-        await self.remove()
+        with trio.CancelScope() as reset_scope:
+            reset_scope.shield = True
+            try:
+                with trio.move_on_after(_CLOSE_CLEANUP_TIMEOUT):
+                    try:
+                        await self.muxed_stream.reset()
+                    except Exception:
+                        # If reset fails, we still want to mark the stream as
+                        # reset. This allows cleanup to proceed even if the
+                        # underlying stream is broken.
+                        pass
+            finally:
+                await self.set_state(StreamState.RESET)
+                await self.remove()
+        await trio.lowlevel.checkpoint_if_cancelled()
 
     async def remove(self) -> None:
         """
         Remove the stream from the connection and notify swarm that stream was closed.
         """
         if self.swarm_conn is not None:
-            self.swarm_conn.remove_stream(self)
-            await self.swarm_conn.swarm.notify_closed_stream(self)
+            conn = self.swarm_conn
+            self.swarm_conn = None
+            conn.remove_stream(self)
+            await conn.swarm.notify_closed_stream(self)
 
     def get_remote_address(self) -> tuple[str, int] | None:
         """Delegate to the underlying muxed stream."""

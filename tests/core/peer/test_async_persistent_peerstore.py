@@ -18,6 +18,7 @@ from libp2p.peer.persistent import (
     create_async_memory_peerstore,
     create_async_sqlite_peerstore,
 )
+from tests.utils.factories import IDFactory
 
 # ============================================================================
 # Fixtures
@@ -292,6 +293,15 @@ async def test_clear_metrics(async_memory_peerstore, peer_id):
 # ============================================================================
 # Stream Tests
 # ============================================================================
+
+
+@pytest.mark.trio
+async def test_peer_data_cache_is_bounded(async_memory_peerstore):
+    """Looking up many peers must not grow the in-memory cache forever."""
+    async_memory_peerstore.max_cached_peers = 10
+    for _ in range(25):
+        await async_memory_peerstore.get_protocols_async(IDFactory())
+    assert len(async_memory_peerstore.peer_data_map) <= 10
 
 
 @pytest.mark.trio

@@ -1,6 +1,7 @@
 from collections.abc import (
     Sequence,
 )
+from itertools import chain
 import time
 
 from multiaddr import (
@@ -24,6 +25,17 @@ is changes). This must be a normalized (0-1) value.
 1 is 100% change, 0 is no change.
 """
 LATENCY_EWMA_SMOOTHING = 0.1
+
+"""
+Hard cap on the number of addresses retained per peer.
+
+A peer can keep advertising new addresses (new listen ports on every
+restart, several transports, several hosts).  Without a cap the per-peer
+address list grows for the lifetime of the process, and the persisted
+address blob grows with it.  Keeping the most recently seen addresses is
+what dialing needs; older ones are stale by definition.
+"""
+MAX_ADDRS_PER_PEER = 1000
 
 
 class PeerData(IPeerData):
@@ -58,13 +70,13 @@ class PeerData(IPeerData):
         """
         :param protocols: protocols to add
         """
-        self.protocols.extend(list(protocols))
+        self.protocols[:] = dict.fromkeys(chain(self.protocols, protocols))
 
     def set_protocols(self, protocols: Sequence[str]) -> None:
         """
         :param protocols: protocols to set
         """
-        self.protocols = list(protocols)
+        self.protocols = list(dict.fromkeys(protocols))
 
     def remove_protocols(self, protocols: Sequence[str]) -> None:
         """
@@ -100,10 +112,18 @@ class PeerData(IPeerData):
     def add_addrs(self, addrs: Sequence[Multiaddr]) -> None:
         """
         :param addrs: multiaddresses to add
+
+        Addresses are ordered by recency: re-adding an existing address moves
+        it to the end, and the oldest entries are dropped once
+        ``MAX_ADDRS_PER_PEER`` is exceeded so a peer cannot grow this list
+        without bound.
         """
         for addr in addrs:
-            if addr not in self.addrs:
-                self.addrs.append(addr)
+            if addr in self.addrs:
+                self.addrs.remove(addr)
+            self.addrs.append(addr)
+        if len(self.addrs) > MAX_ADDRS_PER_PEER:
+            del self.addrs[:-MAX_ADDRS_PER_PEER]
 
     def get_addrs(self) -> list[Multiaddr]:
         """

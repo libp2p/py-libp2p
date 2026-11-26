@@ -24,6 +24,7 @@ class MockMuxedConn:
     def __init__(self):
         self.sent_messages = []
         self.streams: dict[StreamID, MplexStream] = {}
+        self.streams_msg_channels: dict[StreamID, Any] = {}
         self.streams_lock = trio.Lock()
         self.is_unavailable = False
 

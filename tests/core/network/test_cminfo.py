@@ -11,6 +11,7 @@ Covers:
 from __future__ import annotations
 
 import time
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -91,7 +92,8 @@ class TestPrunerLastTrimTime:
         assert pruner._last_trim_time is None
 
     @pytest.mark.trio
-    async def test_last_trim_time_set_after_prune(self):
+    @pytest.mark.parametrize("has_idle_stream", [False, True])
+    async def test_last_trim_time_set_after_prune(self, has_idle_stream):
         """_last_trim_time is set after connections are closed in a prune cycle."""
         pruner = self._make_pruner()
 
@@ -100,6 +102,11 @@ class TestPrunerLastTrimTime:
         mock_conn.muxed_conn.peer_id = MagicMock()
         mock_conn.is_closed = False
         mock_conn.close = AsyncMock()
+        mock_conn.get_streams.return_value = (
+            [SimpleNamespace(_timeline=SimpleNamespace(last_activity=0))]
+            if has_idle_stream
+            else []
+        )
         # _created_at far in the past so grace period doesn't protect it
         mock_conn._created_at = time.time() - 9999
 
@@ -118,8 +125,12 @@ class TestPrunerLastTrimTime:
         await pruner._maybe_prune_connections()
         after = time.time()
 
-        assert pruner._last_trim_time is not None
-        assert before <= pruner._last_trim_time <= after
+        if has_idle_stream:
+            mock_conn.close.assert_not_awaited()
+            assert pruner._last_trim_time is None
+        else:
+            assert pruner._last_trim_time is not None
+            assert before <= pruner._last_trim_time <= after
 
     @pytest.mark.trio
     async def test_last_trim_time_not_set_below_watermark(self):

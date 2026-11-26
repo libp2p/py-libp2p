@@ -32,6 +32,13 @@ async def test_swarm_conn_close(swarm_conn_pair):
     assert conn_0 not in conn_0.swarm.connections.values()
     assert conn_1 not in conn_1.swarm.connections.values()
 
+    # Wait for the stream-handling nurseries to exit cleanly
+    with trio.fail_after(2.0):
+        while conn_0._nursery is not None or conn_1._nursery is not None:
+            await trio.sleep(0.01)
+    assert conn_0._nursery is None
+    assert conn_1._nursery is None
+
 
 @pytest.mark.trio
 async def test_swarm_conn_streams(swarm_conn_pair):

@@ -1,3 +1,4 @@
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import logging
@@ -111,6 +112,7 @@ class P2PWebSocketConnection(ReadWriteCloser):
         max_buffer: int = 4 * 1024 * 1024,
         is_secure: bool = False,
         max_buffered_amount: int = 8 * 1024 * 1024,
+        close_timeout: float = 5.0,
     ) -> None:
         """
         Initialize a new WebSocket connection.
@@ -126,8 +128,12 @@ class P2PWebSocketConnection(ReadWriteCloser):
             max_buffer: Maximum buffer size in bytes
             is_secure: Whether this is a secure connection
             max_buffered_amount: Maximum buffered amount for flow control
+            close_timeout: Maximum time to wait for a close handshake
 
         """
+        if close_timeout <= 0:
+            raise ValueError("close_timeout must be positive")
+        self._close_timeout = close_timeout
         self._ws = ws_connection
         self._ws_connection = ws_connection
         self._local_addr = local_addr
@@ -142,6 +148,8 @@ class P2PWebSocketConnection(ReadWriteCloser):
 
         # State management
         self._closed = False
+        self._close_finished = False
+        self._on_close: Callable[[], Awaitable[None]] | None = None
         self._read_lock = trio.Lock()
         self._write_lock = trio.Lock()
         self._close_lock = trio.Lock()
@@ -482,6 +490,14 @@ class P2PWebSocketConnection(ReadWriteCloser):
                 self._closed = True
                 raise IOException(f"Write failed: {str(e)}") from e
 
+    async def _notify_closed(self) -> None:
+        callback, self._on_close = self._on_close, None
+        if callback is not None:
+            with trio.move_on_after(5) as scope:
+                scope.shield = True
+                await callback()
+        self._close_finished = True
+
     async def close(self) -> None:
         """
         Close the WebSocket connection. This method is idempotent.
@@ -490,15 +506,21 @@ class P2PWebSocketConnection(ReadWriteCloser):
         """
         async with self._close_lock:
             if self._closed:
+                # A remote EOF may have set this flag before close() runs.
+                await self._notify_closed()
                 return  # Already closed
 
             logger.debug("WebSocket connection closing")
             self._closed = True
             try:
-                await self._ws_connection.aclose()
+                # A peer may never acknowledge our close frame. Bound the
+                # handshake so tracking and the private reader are released.
+                with trio.move_on_after(self._close_timeout):
+                    await self._ws_connection.aclose()
             except Exception as e:
                 logger.error(f"WebSocket close error: {e}")
             finally:
+                await self._notify_closed()
                 logger.debug("WebSocket connection closed")
 
     def is_closed(self) -> bool:
