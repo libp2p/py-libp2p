@@ -1,4 +1,9 @@
-"""Tests for pubsub subscription flood protections (GHSA-4f8r-922h-2vgv)."""
+"""
+Tests for pubsub subscription flood protections.
+
+Covers GHSA-3p7x-v3jj-qxj7 (py-libp2p) and its js-libp2p sibling
+GHSA-4f8r-922h-2vgv.
+"""
 
 from collections.abc import Callable
 from typing import cast
@@ -8,6 +13,7 @@ import trio
 
 from libp2p.abc import INetStream
 from libp2p.pubsub.pb import rpc_pb2
+from libp2p.pubsub.rpc_queue import DefaultMaxSubscriptionsPerPeer
 from libp2p.tools.utils import connect
 from libp2p.utils import encode_varint_prefixed
 from tests.utils.factories import IDFactory, PubsubFactory, net_stream_pair_factory
@@ -173,6 +179,39 @@ async def test_per_peer_subscription_limit_enforced():
         )
         assert len(pubsub.peer_topics) == limit
         assert "peer-topic-overflow" not in pubsub.peer_topics
+
+
+@pytest.mark.trio
+async def test_default_per_peer_subscription_limit_rejects_flood():
+    """Default ``DefaultMaxSubscriptionsPerPeer`` must bound subscription floods."""
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs:
+        peer_id = IDFactory()
+        pubsub = pubsubs[0]
+        assert pubsub.max_subscriptions_per_peer == DefaultMaxSubscriptionsPerPeer
+
+        for i in range(DefaultMaxSubscriptionsPerPeer):
+            pubsub.handle_subscription(
+                peer_id,
+                rpc_pb2.RPC.SubOpts(subscribe=True, topicid=f"default-topic-{i}"),
+            )
+        assert len(pubsub.peer_topics) == DefaultMaxSubscriptionsPerPeer
+        assert (
+            pubsub._peer_subscription_count[peer_id] == DefaultMaxSubscriptionsPerPeer
+        )
+
+        pubsub.handle_subscription(
+            peer_id,
+            rpc_pb2.RPC.SubOpts(subscribe=True, topicid="default-topic-overflow"),
+        )
+        assert len(pubsub.peer_topics) == DefaultMaxSubscriptionsPerPeer
+        assert "default-topic-overflow" not in pubsub.peer_topics
+
+        # Disconnect must release the capped topic keys (GHSA-3p7x / GHSA-g43j).
+        pubsub.peers[peer_id] = cast(INetStream, object())
+        pubsub._handle_dead_peer(peer_id)
+        assert len(pubsub.peer_topics) == 0
+        assert peer_id not in pubsub.peers
+        assert peer_id not in pubsub._peer_subscription_count
 
 
 @pytest.mark.trio
