@@ -2,3 +2,11 @@ Released retained connection, stream, and task state across QUIC, stream
 multiplexers, WebSocket, pubsub, Bitswap, and Kad-DHT. Bounded peerstore and
 swarm bookkeeping, reclaimed inbound connection slots after disconnect, and
 improved auto-connector recovery after peer churn.
+
+Persistent peerstores now prune older uncached peers on writes when the
+datastore exceeds the configured ``max_stored_peers`` limit. It defaults to
+``max_records`` (10,000 unless configured).
+
+Kad-DHT preserves existing local provider publications at capacity.
+When all slots hold local publications, new publications are refused until
+a local key is removed with ``unprovide()``.

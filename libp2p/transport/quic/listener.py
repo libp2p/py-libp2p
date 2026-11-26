@@ -27,7 +27,7 @@ from libp2p.transport.quic.security import (
 
 from .config import QUICTransportConfig
 from .connection import QUICConnection
-from .connection_id_registry import ConnectionIDRegistry
+from .connection_id_registry import ConnectionIDRegistry, close_pending_quic_connection
 from .exceptions import QUICListenError
 from .utils import (
     create_quic_multiaddr,
@@ -747,9 +747,7 @@ class QUICListener(IListener):
                         await self._registry.remove_initial_connection_id(initial_dcid)
                     except Exception:
                         pass
-                from .connection_id_registry import _purge_quic_conn
-
-                _purge_quic_conn(quic_conn)
+                close_pending_quic_connection(quic_conn)
             return None
 
     async def _handle_short_header_packet(

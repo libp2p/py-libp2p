@@ -861,8 +861,9 @@ def test_remove_stream_finishes_a_stream_whose_send_half_was_never_closed() -> N
 
 def test_remove_stream_does_not_fin_a_stream_that_was_already_reset() -> None:
     """A reset send half is already terminal; only the receive half is stopped."""
-    quic_stream = _unfinished_quic_stream(_reset_error_code=0)
+    quic_stream = _unfinished_quic_stream()
     quic = Mock()
+    quic.can_send_stream_data.return_value = False
     quic._streams = {4: quic_stream}
     quic._streams_queue = []
     conn = Mock(spec=QUICConnection)

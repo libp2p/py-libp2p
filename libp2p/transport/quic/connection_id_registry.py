@@ -26,34 +26,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _purge_quic_conn(conn: Any) -> None:
-    """Explicitly tear down and clear internal buffers of an aioquic QuicConnection."""
-    if conn is None:
-        return
+def close_pending_quic_connection(conn: "QuicConnection") -> None:
+    """Close a pending connection after its routing references are removed."""
     try:
-        if hasattr(conn, "close"):
-            conn.close()
+        conn.close()
     except Exception:
-        pass
-    for attr in (
-        "_events",
-        "_streams",
-        "_streams_finished",
-        "_datagrams_pending",
-        "_network_paths",
-        "_host_cids",
-        "_peer_cid_available",
-    ):
-        try:
-            val = getattr(conn, attr, None)
-            if val is not None and hasattr(val, "clear"):
-                val.clear()
-        except Exception:
-            pass
-    try:
-        conn._quic_logger = None
-    except Exception:
-        pass
+        logger.debug("Failed to close pending QUIC connection", exc_info=True)
 
 
 class ConnectionIDRegistry:
@@ -593,7 +571,7 @@ class ConnectionIDRegistry:
                     )
 
                     if evicted_conn:
-                        _purge_quic_conn(evicted_conn)
+                        close_pending_quic_connection(evicted_conn)
 
                 self._pending[connection_id] = quic_conn
                 self._pending_created_at[connection_id] = time.time()
@@ -885,7 +863,7 @@ class ConnectionIDRegistry:
             self._cleanup_address_mappings(connection_id, init_dcid)
 
             if conn:
-                _purge_quic_conn(conn)
+                close_pending_quic_connection(conn)
 
     async def remove_by_address(self, addr: tuple[str, int]) -> bytes | None:
         """
@@ -1000,9 +978,6 @@ class ConnectionIDRegistry:
             self._connection_primary_cid.pop(wrapper, None)
             self._connection_cid_counts.pop(wrapper, None)
             self._connection_sequences.pop(wrapper, None)
-
-            if raw_quic is not None:
-                _purge_quic_conn(raw_quic)
 
             return connection_id
 
@@ -1323,9 +1298,9 @@ class ConnectionIDRegistry:
                     if linked_h:
                         self._host_cid_to_initial_dcid.pop(linked_h, None)
 
-            # Purge underlying aioquic connection objects to free memory
+            # Close the pending connections whose routing entries were removed.
             for conn in stale_conns:
-                _purge_quic_conn(conn)
+                close_pending_quic_connection(conn)
 
             return list(removed_cids)
 
@@ -1391,7 +1366,7 @@ class ConnectionIDRegistry:
                     self._connection_sequence_counters.pop(linked_host_cid, None)
                 self._cleanup_address_mappings(oldest_k, linked_host_cid)
                 if evicted_conn:
-                    _purge_quic_conn(evicted_conn)
+                    close_pending_quic_connection(evicted_conn)
 
             self._initial_connection_ids[connection_id] = quic_conn
             self._pending_created_at[connection_id] = time.time()

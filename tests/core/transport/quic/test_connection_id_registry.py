@@ -947,16 +947,13 @@ async def test_reset_stats(registry, mock_connection):
 
 
 @pytest.mark.trio
-async def test_linked_initial_dcid_eviction_and_purge(
+async def test_pending_close_removes_linked_initial_dcid(
     registry, mock_pending_connection
 ):
-    """Test evicting pending connection purges linked initial DCID and buffers."""
+    """Removing a pending connection drops both routing entries and closes it."""
     host_cid = b"host_cid_1"
     init_dcid = b"init_dcid_1"
     addr = ("127.0.0.1", 12345)
-
-    mock_pending_connection._events = [1, 2, 3]
-    mock_pending_connection._streams = {1: Mock()}
 
     await registry.register_pending(
         host_cid, mock_pending_connection, addr, sequence=0, initial_dcid=init_dcid
@@ -979,9 +976,7 @@ async def test_linked_initial_dcid_eviction_and_purge(
     _, p2_after, _ = await registry.find_by_connection_id(init_dcid, is_initial=True)
     assert p2_after is None
 
-    # Buffers should be cleared
-    assert len(mock_pending_connection._events) == 0
-    assert len(mock_pending_connection._streams) == 0
+    mock_pending_connection.close.assert_called_once_with()
 
 
 @pytest.mark.trio
@@ -992,8 +987,6 @@ async def test_cleanup_stale_pending_purges_both_cids(
     host_cid = b"host_cid_stale"
     init_dcid = b"init_dcid_stale"
     addr = ("127.0.0.1", 12345)
-
-    mock_pending_connection._events = [1, 2]
 
     await registry.register_pending(
         host_cid, mock_pending_connection, addr, sequence=0, initial_dcid=init_dcid
@@ -1010,7 +1003,7 @@ async def test_cleanup_stale_pending_purges_both_cids(
     assert host_cid in stale_cids
     assert init_dcid in stale_cids
 
-    assert len(mock_pending_connection._events) == 0
+    mock_pending_connection.close.assert_called_once_with()
     assert len(await registry.get_all_pending_cids()) == 0
     assert len(await registry.get_all_initial_cids()) == 0
 

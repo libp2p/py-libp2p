@@ -18,7 +18,12 @@ import pytest
 from aioquic.buffer import Buffer
 from aioquic.quic.configuration import QuicConfiguration
 from aioquic.quic.connection import QuicConnection, QuicReceiveContext
-from aioquic.quic.events import QuicEvent, StopSendingReceived, StreamDataReceived
+from aioquic.quic.events import (
+    ConnectionTerminated,
+    QuicEvent,
+    StopSendingReceived,
+    StreamDataReceived,
+)
 from aioquic.quic.packet import QuicFrameType
 from aioquic.quic.packet_builder import QuicDeliveryState, QuicPacketBuilder
 from multiaddr import Multiaddr
@@ -67,6 +72,64 @@ def make_conn(
     )
     conn._started = True
     return raw, conn
+
+
+def test_default_idle_timeout_and_keepalive_preserve_existing_behavior():
+    config = QUICTransportConfig()
+    assert config.idle_timeout == 600.0
+    assert config.KEEPALIVE_ENABLED is False
+
+
+@pytest.mark.trio
+async def test_maintenance_preserves_open_stream_adopted_after_aioquic_received_it():
+    raw, conn = make_conn()
+    stream_id = 1
+    native_stream = raw._get_or_create_stream(0x08, stream_id)
+    await conn._cleanup_abandoned_quic_streams()
+    assert stream_id in conn._abandoned_streams
+
+    await conn._handle_quic_event(
+        StreamDataReceived(data=b"hello", end_stream=False, stream_id=stream_id)
+    )
+    stream = await conn.accept_stream(timeout=1)
+    assert stream is not None
+    stream._timeline.last_activity -= 301
+    conn._abandoned_streams[stream_id] -= 301
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(conn._periodic_maintenance)
+        await wait_all_tasks_blocked()
+        assert stream_id not in conn._abandoned_streams
+        assert not native_stream.is_finished
+        assert not stream.is_reset()
+        assert await stream.read(5) == b"hello"
+        nursery.cancel_scope.cancel()
+
+    await conn.close()
+
+
+@pytest.mark.trio
+@pytest.mark.parametrize("peer_closed", [False, True])
+async def test_close_releases_raw_aioquic_connection(peer_closed):
+    transport = make_transport()
+    listener = transport.create_listener(_ignore)
+    raw, conn = make_conn(transport)
+    conn._listener = listener
+    conn._listener_connection_id = raw.host_cid
+    await listener._registry.register_connection(raw.host_cid, conn, conn._remote_addr)
+    raw_ref = weakref.ref(raw)
+    del raw
+
+    if peer_closed:
+        await conn._handle_connection_terminated(
+            ConnectionTerminated(error_code=0, frame_type=None, reason_phrase="")
+        )
+    else:
+        await conn.close()
+    gc.collect()
+
+    assert raw_ref() is None
+    await transport.close()
 
 
 @pytest.mark.trio

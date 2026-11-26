@@ -196,6 +196,10 @@ class ProviderStore:
             logger.debug(f"Loaded {loaded} provider records from {self._persist_path}")
         except Exception as e:
             logger.warning(f"Failed to load provider records: {e}")
+        # Older stores could expire the last record of a local publication
+        # while leaving the key scheduled for republishing.
+        for key in self.providing_keys:
+            self.providers.setdefault(key, {})
 
     async def _republish_provider_records(self) -> None:
         """
@@ -244,7 +248,8 @@ class ProviderStore:
         Returns
         -------
         bool
-            True if the advertisement was successful
+            True if the advertisement was successful. False if the store is
+            full of local publications or no peer received the advertisement.
 
         """
         if not self.host or not self.peer_routing:
@@ -256,11 +261,9 @@ class ProviderStore:
         for addr in self.host.get_addrs():
             local_addrs.append(addr)
 
-        # Track that we're providing this key
-        self.providing_keys.add(key)
-
         local_peer_info = PeerInfo(self.host.get_id(), local_addrs)
-        self.add_provider(key, local_peer_info)
+        if not self._store_provider(key, local_peer_info, local=True):
+            return False
 
         # Find the k closest peers to the key
         closest_peers = await self.peer_routing.find_closest_peers_network(key)
@@ -666,46 +669,49 @@ class ProviderStore:
         None
 
         """
+        self._store_provider(key, provider)
+
+    def _store_provider(
+        self, key: bytes, provider: PeerInfo, *, local: bool = False
+    ) -> bool:
         if not provider or not provider.peer_id:
             logger.debug("Skipping add_provider with invalid PeerInfo")
-            return
+            return False
 
-        # Cap total keys in provider store to prevent unbounded memory growth
+        # A local publication lasts until unprovide(). Only cached remote
+        # keys are replaceable when admitting a new record at capacity.
         if key not in self.providers and len(self.providers) >= MAX_PROVIDER_KEYS:
-            # Prefer evicting a key that is not locally provided. If every
-            # entry is a local publication (e.g. a node that has added more
-            # than MAX_PROVIDER_KEYS blocks), fall back to the oldest entry so
-            # the cap remains effective instead of being silently disabled.
             evicted_key = next(
                 (k for k in self.providers if k not in self.providing_keys), None
             )
-            if evicted_key is None and self.providers:
-                evicted_key = next(iter(self.providers))
-            if evicted_key is not None:
-                self._drop_key(evicted_key)
-
-        # Initialize providers for this key if needed
-        if key not in self.providers:
-            self.providers[key] = {}
+            if evicted_key is None:
+                logger.debug("Provider store is full of local publications")
+                return False
+            self._drop_key(evicted_key)
 
         # Per spec: limit providers per key to k (BUCKET_SIZE)
-        if (
-            len(self.providers[key]) >= BUCKET_SIZE
-            and str(provider.peer_id) not in self.providers[key]
-        ):
-            logger.debug(
-                f"Provider limit ({BUCKET_SIZE}) reached for key {key.hex()}, "
-                f"ignoring new provider {provider.peer_id}"
-            )
-            return
+        records = self.providers.setdefault(key, {})
+        peer_id_str = str(provider.peer_id)
+        if not local and key in self.providing_keys:
+            if provider.peer_id == self.local_peer_id:
+                return False
+        if len(records) >= BUCKET_SIZE and peer_id_str not in records:
+            if not local:
+                logger.debug(
+                    f"Provider limit ({BUCKET_SIZE}) reached for key {key.hex()}, "
+                    f"ignoring new provider {provider.peer_id}"
+                )
+                return False
+            del records[next(iter(records))]
 
-        # Add or update the provider record
-        peer_id_str = str(provider.peer_id)  # Use string representation as dict key
-        self.providers[key][peer_id_str] = ProviderRecord(
+        if local:
+            self.providing_keys.add(key)
+        records[peer_id_str] = ProviderRecord(
             provider_info=provider, timestamp=time.time()
         )
         logger.debug(f"Added provider {provider.peer_id} for key {key.hex()}")
         self._save()
+        return True
 
     def get_providers(self, key: bytes) -> list[PeerInfo]:
         """
@@ -743,8 +749,8 @@ class ProviderStore:
             del self.providers[key][peer_id]
 
         # Remove the key if no providers left
-        if not self.providers[key]:
-            del self.providers[key]
+        if not self.providers[key] and key not in self.providing_keys:
+            self._drop_key(key)
 
         return result
 
@@ -775,27 +781,23 @@ class ProviderStore:
                 removed_any = True
 
             # Track empty keys for removal
-            if not providers:
+            if not providers and key not in self.providing_keys:
                 expired_keys.append(key)
 
         # Remove empty keys
         for key in expired_keys:
-            del self.providers[key]
-            self._last_republish.pop(key, None)
+            self._drop_key(key)
             logger.debug(f"Removed key with no providers: {key.hex()}")
 
-        # Enforce max keys during periodic cleanup. If every record is a local
-        # publication, evict the oldest one so the cap is still enforced.
-        while len(self.providers) > MAX_PROVIDER_KEYS:
-            evicted_key = next(
-                (k for k in self.providers if k not in self.providing_keys), None
-            )
-            if evicted_key is None:
-                evicted_key = next(iter(self.providers), None)
-            if evicted_key is None:
-                break
-            self._drop_key(evicted_key)
-            removed_any = True
+        # Trim older stores to the cap as far as their remote cache allows.
+        overflow = len(self.providers) - MAX_PROVIDER_KEYS
+        if overflow > 0:
+            remote_keys = [
+                key for key in self.providers if key not in self.providing_keys
+            ]
+            for key in remote_keys[:overflow]:
+                self._drop_key(key)
+                removed_any = True
 
         if expired_keys or removed_any:
             self._save()

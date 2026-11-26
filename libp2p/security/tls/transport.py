@@ -607,6 +607,8 @@ class TLSTransport(ISecureTransport):
             raise ValueError("Invalid PEM format - must start with BEGIN marker")
 
         self._trusted_peer_certs_pem.append(pem)
+        self._ssl_context_server = None
+        self._ssl_context_client = None
 
 
 # Factory function for creating TLS transport

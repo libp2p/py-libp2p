@@ -837,26 +837,40 @@ class TestProviderStoreLocalUnprovide:
         assert store.unprovide(b"local-key") is False
 
     @pytest.mark.trio
-    async def test_cap_is_enforced_when_every_key_is_locally_provided(self):
+    async def test_cap_preserves_local_publications_until_unprovide(self):
         store = ProviderStore(
             host=cast(IHost, _FakeHost()), peer_routing=_FakePeerRouting()
         )
 
         with patch("libp2p.kad_dht.provider_store.MAX_PROVIDER_KEYS", 5):
-            for i in range(8):
-                await store.provide(b"local-%d" % i)
+            local_keys = {b"local-%d" % i for i in range(5)}
+            for key in sorted(local_keys):
+                await store.provide(key)
 
-            assert len(store.providers) == 5
-            assert len(store.providing_keys) == 5
+            key = b"local-0"
+            store._last_republish[key] = 1.0
+            # An expired local record still reserves room for its republish.
+            record = store.providers[key][str(store.local_peer_id)]
+            record.timestamp -= PROVIDER_RECORD_EXPIRATION_INTERVAL + 1
+            assert not store.get_providers(key)
+            store.cleanup_expired()
 
-            # The newest key survived; unproviding it must remove it.
-            assert store.unprovide(b"local-7") is True
-            assert b"local-7" not in store.providers
+            remote = PeerInfo(ID(b"remote"), [])
+            store.add_provider(b"remote-key", remote)
+            assert await store.provide(b"excess-local") is False
+            assert store.providers.keys() == store.providing_keys == local_keys
+            assert store._last_republish[key] == 1.0
 
-            # Republishing must not resurrect a key that was unprovided.
-            await store._republish_provider_records()
-            assert b"local-7" not in store.providers
-            assert b"local-7" not in store.providing_keys
+            assert store.unprovide(key) is True
+            store.add_provider(b"remote-key", remote)
+            assert b"remote-key" in store.providers
+            await store.provide(b"new-local")
+            assert b"remote-key" not in store.providers
+            assert b"new-local" in store.providing_keys
+
+        await store._republish_provider_records()
+        assert key not in store.providers
+        assert key not in store.providing_keys
 
 
 class TestRepublishMetadataOwnership:

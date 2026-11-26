@@ -66,9 +66,7 @@ class QUICTransportConfig(ConnectionConfig):
     """Configuration for QUIC transport."""
 
     # Connection settings
-    idle_timeout: float = 30.0  # Seconds before an idle connection is closed.
-    # Matches the quic-go default that kubo uses (kubo does not override it),
-    # kept alive by KEEPALIVE_INTERVAL PINGs below.
+    idle_timeout: float = 600.0  # Seconds before an idle connection is closed.
 
     max_datagram_size: int = (
         1200  # UDP payload MTU. Wired to aioquic max_datagram_size (not DATAGRAM
@@ -122,10 +120,8 @@ class QUICTransportConfig(ConnectionConfig):
     CONNECTION_CLOSE_TIMEOUT: int = 10
     """Timeout for opening new connection (seconds)."""
 
-    # Connection keep-alive (kubo parity: PING every 15 s, like quic-go's
-    # KeepAlivePeriod of 15 s; quic-go skips keep-alive if KeepAlivePeriod >=
-    # the idle timeout, so we do the same).
-    KEEPALIVE_ENABLED: bool = True
+    # Opt-in PINGs keep idle connections alive.
+    KEEPALIVE_ENABLED: bool = False
     """Whether to send QUIC keep-alive PING frames on idle connections."""
 
     KEEPALIVE_INTERVAL: float = 15.0

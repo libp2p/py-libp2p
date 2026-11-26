@@ -28,9 +28,10 @@ def _transport() -> WebTransportTransport:
     return WebTransportTransport(private_key=create_new_key_pair().private_key)
 
 
-async def _spawn(harness: Path, *args: str) -> trio.Process:
+async def _spawn(harness: Path, *args: str, keep_open: bool = False) -> trio.Process:
     return await trio.lowlevel.open_process(
         [str(harness), *args],
+        stdin=subprocess.PIPE if keep_open else subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )
@@ -63,6 +64,8 @@ async def _read_lines(
             text = line.decode(errors="replace").strip()
             if text:
                 logger.debug("go: %s", text)
+            if text.startswith("FAIL "):
+                pytest.fail(f"Go WebTransport harness reported {text}")
             if text.startswith(prefix):
                 found.append(text)
 
@@ -131,18 +134,26 @@ async def test_go_dials_py(go_webtransport_harness: Path) -> None:
         await trio.sleep_forever()
 
     listener = listener_t.create_listener(handler)
-    await listener.listen(Multiaddr("/ip4/0.0.0.0/udp/0/quic-v1/webtransport"))
-    addr = _lan_addr([f"X {a}" for a in map(str, listener.get_addrs())])
-
-    proc = await _spawn(go_webtransport_harness, "dial", addr)
     try:
-        with trio.fail_after(45):
+        await listener.listen(Multiaddr("/ip4/127.0.0.1/udp/0/quic-v1/webtransport"))
+        addr = listener.get_addrs()[0]
+        proc = await _spawn(go_webtransport_harness, "dial", str(addr), keep_open=True)
+        try:
             out = await _read_lines(proc, "DIAL_OK", count=1)
-            await got.wait()
-        assert out and seen
+            assert out, f"Go harness did not dial {addr} (exit code {proc.returncode})"
+            with trio.move_on_after(10):
+                await got.wait()
+            assert seen, "Python listener never observed the authenticated Go peer"
+        finally:
+            # The harness keeps its host alive until this pipe closes.
+            assert proc.stdin is not None
+            with trio.CancelScope() as cleanup_scope:
+                cleanup_scope.shield = True
+                await proc.stdin.aclose()
+                with trio.move_on_after(5):
+                    await proc.wait()
+                if proc.returncode is None:
+                    proc.kill()
+                    await proc.wait()
     finally:
-        proc.terminate()
-        with trio.move_on_after(5):
-            await proc.wait()
-        await listener.close()
         await listener_t.close()
