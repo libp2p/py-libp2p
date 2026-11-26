@@ -29,6 +29,7 @@ import trio
 import libp2p
 from libp2p.abc import (
     IHost,
+    IMuxedConn,
     INetConn,
     INetStream,
     INetwork,
@@ -1653,13 +1654,13 @@ class BasicHost(IHost):
 
     async def upgrade_inbound_connection(
         self, raw_conn: IRawConnection, maddr: multiaddr.Multiaddr
-    ) -> INetConn:
+    ) -> IMuxedConn:
         """
         Upgrade a raw inbound connection using the underlying network.
 
         :param raw_conn: The inbound raw connection to upgrade.
         :param maddr: The multiaddress this connection arrived on.
         :raises SwarmException: raised when security or muxer upgrade fails
-        :return: network connection with security and multiplexing established
+        :return: authenticated and multiplexed inbound connection
         """
         return await self._network.upgrade_inbound_raw_conn(raw_conn, maddr)

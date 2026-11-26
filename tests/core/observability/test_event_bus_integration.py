@@ -14,9 +14,10 @@ import trio
 from trio.testing import wait_all_tasks_blocked
 
 from libp2p import create_yamux_muxer_option, new_host, new_swarm
-from libp2p.abc import IPeerRouting
+from libp2p.abc import IHost, IPeerRouting
 from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.events import EventBus, IEventListener
+from libp2p.host.basic_host import BasicHost
 from libp2p.host.ping import PingEvent, PingService
 from libp2p.metrics.listener import MetricsListener
 from libp2p.metrics.metrics import Metrics
@@ -43,6 +44,21 @@ class CollectingListener(IEventListener):
 
     def handle_event(self, event: object) -> None:
         self.events.append(event)
+
+
+def test_host_implementation_can_inherit_default_event_bus():
+    class LegacyHost(BasicHost):
+        get_event_bus = IHost.get_event_bus
+
+    first = LegacyHost(new_swarm())
+    second = LegacyHost(new_swarm())
+    listener = CollectingListener()
+
+    first.get_event_bus().register_listener(listener)
+    first.get_event_bus().emit("from first host")
+    second.get_event_bus().emit("from second host")
+
+    assert listener.events == ["from first host"]
 
 
 @pytest.mark.trio

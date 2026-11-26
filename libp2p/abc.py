@@ -11,6 +11,7 @@ from collections.abc import (
 )
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
+from threading import Lock
 from types import (
     TracebackType,
 )
@@ -1712,7 +1713,7 @@ class INetwork(ABC):
     @abstractmethod
     async def upgrade_inbound_raw_conn(
         self, raw_conn: IRawConnection, maddr: Multiaddr
-    ) -> INetConn:
+    ) -> IMuxedConn:
         """
         Secure and upgrade a raw inbound connection to a multiplexed network connection
 
@@ -1725,8 +1726,8 @@ class INetwork(ABC):
 
         Returns
         -------
-        INetConn
-            The registered, secure, and multiplexed network connection.
+        IMuxedConn
+            The upgraded, secure, and multiplexed connection.
 
         Raises
         ------
@@ -2183,6 +2184,9 @@ class IHost(ABC):
 
     """
 
+    _fallback_event_bus: EventBus | None = None
+    _fallback_event_bus_lock = Lock()
+
     @abstractmethod
     def get_id(self) -> ID:
         """
@@ -2366,21 +2370,18 @@ class IHost(ABC):
         Returns the recving end of the channel, used for metric events
         """
 
-    @abstractmethod
-    def get_event_bus(self) -> "EventBus":
+    def get_event_bus(self) -> EventBus:
         """
-        Return the host's event bus (INotifee-style listener fan-out).
+        Return the host's observability event bus.
 
-        Modules emit typed events on the bus whenever something happens;
-        any number of listeners can register to be notified (the Prometheus
-        metrics exporter being one).
-
-        Returns
-        -------
-        EventBus
-            The host's event bus instance.
+        The default creates a bus lazily for each host. Implementations
+        can override this method to share a bus with their network.
 
         """
+        with self._fallback_event_bus_lock:
+            if self._fallback_event_bus is None:
+                self._fallback_event_bus = EventBus()
+            return self._fallback_event_bus
 
     @abstractmethod
     async def initiate_autotls_procedure(self, public_ip: str | None = None) -> None:
@@ -2571,7 +2572,7 @@ class IHost(ABC):
     @abstractmethod
     async def upgrade_inbound_connection(
         self, raw_conn: IRawConnection, maddr: Multiaddr
-    ) -> INetConn:
+    ) -> IMuxedConn:
         """
         Upgrade a raw inbound connection to a fully secure and
         multiplexed network connection for the given multiaddress.
@@ -2585,8 +2586,8 @@ class IHost(ABC):
 
         Returns
         -------
-        INetConn
-            The registered and authenticated inbound network connection.
+        IMuxedConn
+            The upgraded and authenticated inbound muxed connection.
 
         Raises
         ------

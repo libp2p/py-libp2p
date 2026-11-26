@@ -2417,21 +2417,27 @@ class Swarm(Service, INetworkService):
         # run the security + muxer upgrade pipeline.
         try:
             raw_conn = RawConnection(read_write_closer, False)
-            return await self.upgrade_inbound_raw_conn(raw_conn, maddr)
+            muxed_conn = await self.upgrade_inbound_raw_conn(raw_conn, maddr)
         except Exception as e:
             logger.debug("Error handling incoming connection: %s", e)
             return None
 
+        # Track the exact registered connection so the limiter slot follows
+        # its lifetime even if the peer has other live connections.
+        for conn in self.connections.get(muxed_conn.peer_id, []):
+            if conn.muxed_conn is muxed_conn:
+                return cast("SwarmConn", conn)
+        return None
+
     async def upgrade_inbound_raw_conn(
         self, raw_conn: IRawConnection, maddr: Multiaddr
-    ) -> "SwarmConn":
+    ) -> IMuxedConn:
         """
-        Secure the inbound raw connection and upgrade it to a multiplexed connection.
+        Secure, multiplex, and register an inbound connection.
 
         :param raw_conn: the inbound raw connection to upgrade
         :raises SwarmException: raised when security or muxer upgrade fails
-        :return: the registered SwarmConn with security and multiplexing
-            established
+        :return: the authenticated, multiplexed connection
         """
         # Fast-fail check on the global connection limit: avoid doing the
         # expensive security+muxer handshake when we are already at capacity.
@@ -2684,7 +2690,7 @@ class Swarm(Service, INetworkService):
         inbound_swarm_conn = await self.add_conn(muxed_conn, direction="inbound")
         logger.debug("successfully opened connection to peer %s", peer_id)
 
-        return inbound_swarm_conn
+        return inbound_swarm_conn.muxed_conn
 
     async def close(self) -> None:
         """
