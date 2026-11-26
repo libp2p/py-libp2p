@@ -1400,7 +1400,7 @@ class Swarm(Service, INetworkService):
                 muxer_event.peer_id = str(peer_id)
                 muxer_event.remote_maddr = str(addr)
                 muxer_event.protocol_id = getattr(
-                    self.upgrader.muxer_multistream, "last_selected_protocol", None
+                    raw_conn, "negotiated_muxer_protocol", None
                 )
                 self._event_bus.emit(muxer_event)
 
@@ -1492,14 +1492,10 @@ class Swarm(Service, INetworkService):
             security_event.direction = "outbound"
             security_event.peer_id = str(peer_id)
             security_event.remote_maddr = remote_maddr
-            security_event.protocol = security_protocol_label(
-                self.upgrader.security_multistream.last_selected_protocol
-            )
+            security_event.protocol_id = error.protocol_id
+            security_event.protocol = security_protocol_label(error.protocol_id)
             if security_event.protocol == "unknown":
                 security_event.protocol = security_label_from_error(error)
-            security_event.protocol_id = getattr(
-                self.upgrader.security_multistream, "last_selected_protocol", None
-            )
             security_event.success = False
             self._event_bus.emit(security_event)
             logger.error("failed to upgrade security for peer %s: %s", peer_id, error)
@@ -1519,12 +1515,10 @@ class Swarm(Service, INetworkService):
         security_event.direction = "outbound"
         security_event.peer_id = str(peer_id)
         security_event.remote_maddr = remote_maddr
-        security_event.protocol = security_protocol_label(
-            self.upgrader.security_multistream.last_selected_protocol
-        )
         security_event.protocol_id = getattr(
-            self.upgrader.security_multistream, "last_selected_protocol", None
+            secured_conn, "negotiated_security_protocol", None
         )
+        security_event.protocol = security_protocol_label(security_event.protocol_id)
         security_event.success = True
         security_event.duration_ms = security_duration_ms
         self._event_bus.emit(security_event)
@@ -1611,9 +1605,7 @@ class Swarm(Service, INetworkService):
         muxer_event.success = True
         muxer_event.peer_id = str(peer_id)
         muxer_event.remote_maddr = remote_maddr
-        muxer_event.protocol_id = getattr(
-            self.upgrader.muxer_multistream, "last_selected_protocol", None
-        )
+        muxer_event.protocol_id = getattr(muxed_conn, "negotiated_muxer_protocol", None)
         self._event_bus.emit(muxer_event)
 
         # Pass endpoint IP to resource manager for outbound
@@ -2398,7 +2390,7 @@ class Swarm(Service, INetworkService):
                 muxer_event.peer_id = str(peer_id) if peer_id is not None else None
                 muxer_event.local_maddr = str(maddr)
                 muxer_event.protocol_id = getattr(
-                    self.upgrader.muxer_multistream, "last_selected_protocol", None
+                    muxed_conn, "negotiated_muxer_protocol", None
                 )
                 self._event_bus.emit(muxer_event)
             except Exception as _inbound_exc:
@@ -2525,16 +2517,10 @@ class Swarm(Service, INetworkService):
                     security_event.handshake = True
                     security_event.direction = "inbound"
                     security_event.local_maddr = str(maddr)
-                    security_event.protocol = security_protocol_label(
-                        self.upgrader.security_multistream.last_selected_protocol
-                    )
+                    security_event.protocol_id = exc.protocol_id
+                    security_event.protocol = security_protocol_label(exc.protocol_id)
                     if security_event.protocol == "unknown":
                         security_event.protocol = security_label_from_error(exc)
-                    security_event.protocol_id = getattr(
-                        self.upgrader.security_multistream,
-                        "last_selected_protocol",
-                        None,
-                    )
                     security_event.success = False
                     self._event_bus.emit(security_event)
                     # Expected churn on a public node: peers dial in that do
@@ -2557,11 +2543,11 @@ class Swarm(Service, INetworkService):
                 security_event.direction = "inbound"
                 security_event.peer_id = str(peer_id)
                 security_event.local_maddr = str(maddr)
-                security_event.protocol = security_protocol_label(
-                    self.upgrader.security_multistream.last_selected_protocol
-                )
                 security_event.protocol_id = getattr(
-                    self.upgrader.security_multistream, "last_selected_protocol", None
+                    secured_conn, "negotiated_security_protocol", None
+                )
+                security_event.protocol = security_protocol_label(
+                    security_event.protocol_id
                 )
                 security_event.success = True
                 security_event.duration_ms = security_duration_ms
@@ -2593,7 +2579,7 @@ class Swarm(Service, INetworkService):
                 muxer_event.peer_id = str(peer_id)
                 muxer_event.local_maddr = str(maddr)
                 muxer_event.protocol_id = getattr(
-                    self.upgrader.muxer_multistream, "last_selected_protocol", None
+                    muxed_conn, "negotiated_muxer_protocol", None
                 )
                 self._event_bus.emit(muxer_event)
         except trio.TooSlowError:

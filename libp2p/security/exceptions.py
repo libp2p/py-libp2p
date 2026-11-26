@@ -4,7 +4,7 @@ from libp2p.exceptions import (
 
 
 class HandshakeFailure(BaseLibp2pError):
-    pass
+    protocol_id: str | None = None
 
 
 class SecurityError(BaseLibp2pError):

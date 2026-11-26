@@ -408,7 +408,7 @@ class BasicHost(IHost):
         self.metric_recv_channel = metric_recv_channel
 
     def get_event_bus(self) -> EventBus:
-        """Return the host's event bus (INotifee-style listener fan-out)."""
+        """Return the host's observability event bus."""
         return self._event_bus
 
     def get_id(self) -> ID:

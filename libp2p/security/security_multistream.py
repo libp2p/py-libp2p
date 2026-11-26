@@ -31,6 +31,7 @@ from libp2p.protocol_muxer.multiselect import (
 from libp2p.protocol_muxer.multiselect_client import (
     MultiselectClient,
 )
+from libp2p.security.exceptions import HandshakeFailure
 
 logger = logging.getLogger(__name__)
 
@@ -51,11 +52,8 @@ class SecurityMultistream(ABC):
 
     _selector: "GenericMultistreamSelector[ISecureTransport]"
 
-    last_selected_protocol: TProtocol | None
-
     def __init__(self, secure_transports_by_protocol: TSecurityOptions) -> None:
         self._selector = GenericMultistreamSelector()
-        self.last_selected_protocol = None
 
         for protocol, transport in secure_transports_by_protocol.items():
             self.add_transport(protocol, transport)
@@ -94,7 +92,11 @@ class SecurityMultistream(ABC):
         logger.debug("SecurityMultistream.secure_inbound: selecting transport")
         protocol, transport = await self.select_transport_and_protocol(conn, False)
         logger.debug("SecurityMultistream: transport selected, securing")
-        secure_conn = await transport.secure_inbound(conn)
+        try:
+            secure_conn = await transport.secure_inbound(conn)
+        except HandshakeFailure as error:
+            error.protocol_id = str(protocol)
+            raise
         setattr(secure_conn, "negotiated_security_protocol", str(protocol))
         logger.debug("SecurityMultistream: secure connection established")
         return secure_conn
@@ -107,7 +109,11 @@ class SecurityMultistream(ABC):
         :return: secure connection object (that implements secure_conn_interface)
         """
         protocol, transport = await self.select_transport_and_protocol(conn, True)
-        secure_conn = await transport.secure_outbound(conn, peer_id)
+        try:
+            secure_conn = await transport.secure_outbound(conn, peer_id)
+        except HandshakeFailure as error:
+            error.protocol_id = str(protocol)
+            raise
         setattr(secure_conn, "negotiated_security_protocol", str(protocol))
         return secure_conn
 
@@ -138,13 +144,5 @@ class SecurityMultistream(ABC):
         :param is_initiator: true if we are the initiator, false otherwise
         :return: selected secure transport
         """
-        try:
-            protocol, transport = await self.select_transport_and_protocol(
-                conn, is_initiator
-            )
-        except (MultiselectError, MultiselectClientError):
-            self.last_selected_protocol = None
-            raise
-        # Keep the fork's negotiated-protocol tracking (used by metrics).
-        self.last_selected_protocol = protocol
+        _, transport = await self.select_transport_and_protocol(conn, is_initiator)
         return transport

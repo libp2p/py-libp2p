@@ -36,6 +36,8 @@ class MetricsListener(IEventListener):
     to register on any host's event bus.
     """
 
+    _replaces_legacy_metrics_bridge = True
+
     def __init__(self, metrics: Metrics | None = None) -> None:
         self.metrics = metrics if metrics is not None else Metrics()
 

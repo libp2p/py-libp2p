@@ -8,7 +8,7 @@ notified. The Prometheus metrics exporter is one such listener; logging,
 tracing and user code can register additional ones.
 
 The bus is separate from the swarm's async ``INotifee`` lifecycle callbacks.
-Each bus listener receives every event, with exceptions isolated and logged.
+Active bus listeners receive events, with exceptions isolated and logged.
 
 Design notes
 ------------
@@ -42,6 +42,8 @@ class IEventListener(ABC):
     typed event objects and filters by type.
     """
 
+    _replaces_legacy_metrics_bridge = False
+
     @abstractmethod
     def handle_event(self, event: Any) -> None:
         """
@@ -57,13 +59,14 @@ class EventBus:
     """
     Fan-out event bus with INotifee-style listener registration.
 
-    Emitters call :meth:`emit` with a typed event object; every registered
-    listener's :meth:`IEventListener.handle_event` is invoked, with
-    exceptions isolated per listener.
+    Emitters call :meth:`emit` with a typed event object. Active listeners
+    receive it through :meth:`IEventListener.handle_event`, with exceptions
+    isolated per listener.
     """
 
     def __init__(self) -> None:
         self._listeners: list[IEventListener] = []
+        self._delivery_listeners: tuple[IEventListener, ...] = ()
         self._lock = threading.Lock()
 
     def register_listener(self, listener: IEventListener) -> None:
@@ -75,12 +78,27 @@ class EventBus:
         with self._lock:
             if listener not in self._listeners:
                 self._listeners.append(listener)
+                self._refresh_delivery_listeners()
 
     def remove_listener(self, listener: IEventListener) -> None:
         """Unsubscribe ``listener`` so it stops receiving events."""
         with self._lock:
             if listener in self._listeners:
                 self._listeners.remove(listener)
+                self._refresh_delivery_listeners()
+
+    def _refresh_delivery_listeners(self) -> None:
+        # Select one metrics path in the same snapshot as the other listeners.
+        # Events already queued before direct recording began can still drain.
+        direct_metrics = any(
+            getattr(listener, "_replaces_legacy_metrics_bridge", False) is True
+            for listener in self._listeners
+        )
+        self._delivery_listeners = tuple(
+            listener
+            for listener in self._listeners
+            if not (direct_metrics and isinstance(listener, ChannelBridgeListener))
+        )
 
     @property
     def listeners(self) -> list[IEventListener]:
@@ -90,13 +108,15 @@ class EventBus:
 
     def emit(self, event: Any) -> None:
         """
-        Fan out ``event`` to every registered listener.
+        Fan out ``event`` to every active listener.
 
         Each listener runs inline, wrapped in try/except so a raising
         listener never propagates into the emitter or blocks other
         listeners (mirrors ``Swarm._notify`` semantics).
         """
-        for listener in self.listeners:
+        with self._lock:
+            listeners = self._delivery_listeners
+        for listener in listeners:
             try:
                 listener.handle_event(event)
             except Exception:
@@ -114,8 +134,10 @@ class ChannelBridgeListener(IEventListener):
     Backward-compatibility shim: the pre-event-bus metrics pipeline flowed
     events from a ``trio.open_memory_channel`` send end attached to every
     stream into a single consumer (``Metrics.start_prometheus_server``).
-    This listener lets that consumer keep working unchanged by forwarding
-    every bus event into its receive channel.
+    This listener supplies bus events to the legacy receive channel.
+    Registering a direct Prometheus listener on the same bus pauses
+    forwarding so each new event is recorded once. Queued events can
+    still drain, and forwarding resumes when the direct listener is removed.
 
     The forward is best-effort: if the channel is full or closed the event
     is dropped (metrics are loss-tolerant). Because trio channels are not

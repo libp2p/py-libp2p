@@ -137,6 +137,11 @@ class Metrics:
         Register a metrics listener on ``event_bus`` and return self.
         Repeated calls on the same bus register only one listener.
 
+        Direct recording takes precedence over the legacy channel bridge for
+        future events on this bus. A running legacy consumer can still drain
+        buffered events. Use :meth:`start_http_server` to expose the registry
+        when using direct recording.
+
         From this point on, every event emitted on the bus (DHT lookups,
         Bitswap block transfers, discovery events, pubsub messages, ping
         RTTs, swarm dials) is recorded into these Prometheus metrics.
@@ -166,6 +171,13 @@ class Metrics:
         self,
         metric_recv_channel: trio.MemoryReceiveChannel[Any],
     ) -> None:
+        """
+        Serve metrics and consume events from the legacy metrics channel.
+
+        For direct bus recording, use :meth:`attach` and
+        :meth:`start_http_server`. If both paths use the same bus, it routes
+        new events directly and the legacy consumer drains its backlog.
+        """
         metrics = find_available_port(8000)
         prometheus = find_available_port(9000)
         grafana = find_available_port(7000)

@@ -1,4 +1,5 @@
 import logging
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 import trio
@@ -6,6 +7,8 @@ import trio
 from libp2p.crypto.rsa import (
     create_new_key_pair,
 )
+from libp2p.peer.id import ID
+from libp2p.security.exceptions import HandshakeFailure
 from libp2p.security.insecure.transport import (
     PLAINTEXT_PROTOCOL_ID,
     InsecureSession,
@@ -17,6 +20,8 @@ from libp2p.security.secure_session import (
 )
 from libp2p.stream_muxer.mplex.mplex import Mplex
 from libp2p.stream_muxer.yamux.yamux import Yamux
+from libp2p.transport.exceptions import SecurityUpgradeFailure
+from libp2p.transport.upgrader import TransportUpgrader
 from tests.utils.factories import (
     host_pair_factory,
 )
@@ -105,3 +110,25 @@ async def test_default_insecure_security():
         assert isinstance(conn, InsecureSession)
 
     await perform_simple_test(assertion_func, None)
+
+
+@pytest.mark.trio
+@pytest.mark.parametrize("is_initiator", [False, True])
+async def test_security_upgrade_failure_retains_negotiated_protocol(
+    is_initiator, monkeypatch
+):
+    failure = HandshakeFailure("handshake failed")
+    transport = Mock(
+        secure_inbound=AsyncMock(side_effect=failure),
+        secure_outbound=AsyncMock(side_effect=failure),
+    )
+    upgrader = TransportUpgrader({NOISE_PROTOCOL_ID: transport}, {})
+    monkeypatch.setattr(
+        upgrader.security_multistream,
+        "select_transport_and_protocol",
+        AsyncMock(return_value=(NOISE_PROTOCOL_ID, transport)),
+    )
+    with pytest.raises(SecurityUpgradeFailure) as exc_info:
+        await upgrader.upgrade_security(Mock(), is_initiator, ID(b"peer"))
+    assert exc_info.value.protocol_id == NOISE_PROTOCOL_ID
+    assert exc_info.value.__cause__ is failure

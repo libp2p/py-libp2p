@@ -1,7 +1,9 @@
 import pytest
 from prometheus_client import REGISTRY, CollectorRegistry
 import trio
+from trio.testing import wait_all_tasks_blocked
 
+from libp2p import new_host
 from libp2p.bitswap.events import BitswapEvent
 from libp2p.discovery.events.events import DiscoveryEvent
 from libp2p.events import EventBus
@@ -232,6 +234,51 @@ def test_metrics_attach_registers_listener_on_bus() -> None:
     event.dial_attempt = True
     bus.emit(event)
     assert REGISTRY.get_sample_value("swarm_dial_attempt_total") == before + 1
+
+
+@pytest.mark.trio
+@pytest.mark.parametrize("attach_first", [False, True])
+async def test_direct_and_legacy_metrics_count_each_bus_emission_once(
+    attach_first, monkeypatch
+) -> None:
+    monkeypatch.setattr("libp2p.metrics.metrics.start_http_server", lambda *_: None)
+    metrics = Metrics()
+    bus = EventBus()
+    if attach_first:
+        metrics.attach(bus)
+    channel = new_host(enable_metrics=True, event_bus=bus).get_metrics_recv_channel()
+    assert channel is not None
+
+    counter = "swarm_dial_attempt_total"
+    before = REGISTRY.get_sample_value(counter)
+    assert before is not None
+    event = SwarmEvent()
+    event.dial_attempt = True
+    if not attach_first:
+        # The queued event predates the switch. It must still be counted.
+        bus.emit(event)
+        metrics.attach(bus)
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(metrics.start_prometheus_server, channel)
+        await wait_all_tasks_blocked()
+        expected = before + (0 if attach_first else 1)
+        assert REGISTRY.get_sample_value(counter) == expected
+
+        # Reusing the same event represents two independent emissions.
+        bus.emit(event)
+        bus.emit(event)
+        await wait_all_tasks_blocked()
+        assert REGISTRY.get_sample_value(counter) == expected + 2
+
+        [listener] = [
+            item for item in bus.listeners if isinstance(item, MetricsListener)
+        ]
+        bus.remove_listener(listener)
+        bus.emit(event)
+        await wait_all_tasks_blocked()
+        assert REGISTRY.get_sample_value(counter) == expected + 3
+        nursery.cancel_scope.cancel()
 
 
 def test_metrics_replaces_resource_manager_collector(monkeypatch) -> None:

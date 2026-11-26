@@ -866,6 +866,8 @@ def new_host(
     :param listen_addrs: optional list of multiaddrs to listen on.  **All**
         addresses are inspected to determine which transports to create.
     :param enable_mDNS: whether to enable mDNS discovery
+    :param enable_metrics: expose the legacy metrics receive channel.
+        New applications can attach metrics directly through the host event bus.
     :param bootstrap: optional list of bootstrap peer addresses as strings
     :param enable_quic: optional choice to use QUIC for transport
     :param enable_autotls: optional choice to use AutoTLS for security

@@ -18,18 +18,27 @@ from trio.testing import wait_all_tasks_blocked
 from libp2p import create_yamux_muxer_option, new_host, new_swarm
 from libp2p.abc import IHost, IPeerRouting
 from libp2p.crypto.secp256k1 import create_new_key_pair
+from libp2p.custom_types import TProtocol
 from libp2p.events import ChannelBridgeListener, EventBus, IEventListener
 from libp2p.host.basic_host import BasicHost
 from libp2p.host.ping import PingEvent, PingService
 from libp2p.metrics.listener import MetricsListener
 from libp2p.metrics.metrics import Metrics
+from libp2p.metrics.muxer import MuxerEvent
+from libp2p.metrics.security import SecurityEvent
 from libp2p.metrics.swarm import SwarmEvent
 from libp2p.metrics.transport import ListenConn, TransportEvent, transport_label
 from libp2p.network.exceptions import SwarmException
 from libp2p.network.swarm import Swarm
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID, InsecureTransport
-from tests.utils.factories import host_pair_factory
+from libp2p.security.noise.transport import PROTOCOL_ID as NOISE_PROTOCOL_ID
+from libp2p.stream_muxer.mplex.mplex import MPLEX_PROTOCOL_ID, Mplex
+from libp2p.stream_muxer.yamux.yamux import (
+    PROTOCOL_ID as YAMUX_PROTOCOL_ID,
+    Yamux,
+)
+from tests.utils.factories import host_pair_factory, noise_transport_factory
 
 
 class RecordingListener(IEventListener):
@@ -307,6 +316,74 @@ async def test_inbound_swarm_lifecycle_emits_events_on_host_bus():
     ]
     assert {e.peer_id for e in lifecycle} == {str(host_a.get_id())}
     assert lifecycle[0].connection_type == lifecycle[1].connection_type
+
+
+@pytest.mark.trio
+async def test_concurrent_dials_report_protocols_per_connection(monkeypatch):
+    addr = Multiaddr("/ip4/127.0.0.1/tcp/0")
+    client_key = create_new_key_pair()
+    noise_key = create_new_key_pair()
+    plaintext_key = create_new_key_pair()
+    client = new_host(
+        key_pair=client_key,
+        sec_opt={
+            NOISE_PROTOCOL_ID: noise_transport_factory(client_key),
+            **security_options(client_key),
+        },
+        muxer_opt=create_yamux_muxer_option(),
+    )
+    noise_host = new_host(
+        key_pair=noise_key,
+        sec_opt={NOISE_PROTOCOL_ID: noise_transport_factory(noise_key)},
+        muxer_opt={TProtocol(YAMUX_PROTOCOL_ID): Yamux},
+    )
+    plaintext_host = new_host(
+        key_pair=plaintext_key,
+        sec_opt=security_options(plaintext_key),
+        muxer_opt={MPLEX_PROTOCOL_ID: Mplex},
+    )
+    listener = RecordingListener()
+    client.get_event_bus().register_listener(listener)
+
+    upgrader = cast(Swarm, client.get_network()).upgrader
+    upgrade = upgrader.upgrade_connection
+    completed = set()
+    both_negotiated = trio.Event()
+
+    async def overlap_upgrades(conn, peer_id):
+        muxed = await upgrade(conn, peer_id)
+        completed.add(peer_id)
+        if len(completed) == 2:
+            both_negotiated.set()
+        # Force both negotiations to complete before either dial emits its event.
+        await both_negotiated.wait()
+        return muxed
+
+    monkeypatch.setattr(upgrader, "upgrade_connection", overlap_upgrades)
+    async with client.run([]), noise_host.run([addr]), plaintext_host.run([addr]):
+        with trio.fail_after(10):
+            async with trio.open_nursery() as nursery:
+                for peer in (noise_host, plaintext_host):
+                    nursery.start_soon(
+                        client.connect, info_from_p2p_addr(peer.get_addrs()[0])
+                    )
+
+    assert {
+        event.peer_id: (event.protocol_id, event.protocol)
+        for event in listener.events
+        if isinstance(event, SecurityEvent) and event.success
+    } == {
+        str(noise_host.get_id()): (NOISE_PROTOCOL_ID, "noise"),
+        str(plaintext_host.get_id()): (PLAINTEXT_PROTOCOL_ID, "plaintext"),
+    }
+    assert {
+        event.peer_id: (event.protocol_id, event.muxer)
+        for event in listener.events
+        if isinstance(event, MuxerEvent) and event.muxer_conn
+    } == {
+        str(noise_host.get_id()): (YAMUX_PROTOCOL_ID, "yamux"),
+        str(plaintext_host.get_id()): (MPLEX_PROTOCOL_ID, "mplex"),
+    }
 
 
 @pytest.mark.trio
