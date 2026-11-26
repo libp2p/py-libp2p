@@ -348,10 +348,8 @@ async def test_fanout():
         # Subscribe message origin
         subs.insert(0, await pubsubs_gsub[0].subscribe(topic))
         await wait_for(
-            lambda: (
-                topic in cast(GossipSub, pubsubs_gsub[0].router).mesh
-                and len(cast(GossipSub, pubsubs_gsub[0].router).mesh[topic]) > 0
-            ),
+            lambda: topic in cast(GossipSub, pubsubs_gsub[0].router).mesh
+            and len(cast(GossipSub, pubsubs_gsub[0].router).mesh[topic]) > 0,
             timeout=10.0,
             fail_msg="Origin peer mesh did not form after subscribe",
         )
@@ -730,14 +728,12 @@ async def test_sparse_connect():
             total_nodes = len(pubsubs_gsub)
             min_required = (total_nodes + 1) // 2
             await wait_for(
-                lambda: (
-                    sum(
-                        1
-                        for msgs in received_messages
-                        if any(msg.data == msg_content for msg in msgs)
-                    )
-                    >= min_required
-                ),
+                lambda: sum(
+                    1
+                    for msgs in received_messages
+                    if any(msg.data == msg_content for msg in msgs)
+                )
+                >= min_required,
                 timeout=10.0,
                 fail_msg=(
                     f"Sparse propagation below minimum {min_required}/{total_nodes}"

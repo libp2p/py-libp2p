@@ -86,9 +86,8 @@ async def test_ping_connection_records_peerstore_latency() -> None:
         await monitor._check_connection_health(peer_b, conn)
 
         await _wait_until(
-            lambda: (
-                health.last_ping > initial_last_ping and health.ping_success_rate > 0
-            )
+            lambda: health.last_ping > initial_last_ping
+            and health.ping_success_rate > 0
         )
         await _wait_until(lambda: len(recorded) > 0)
 
