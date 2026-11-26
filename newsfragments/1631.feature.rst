@@ -1,0 +1,4 @@
+Added a synchronous host event bus for typed observability events and expanded
+Prometheus coverage across libp2p subsystems. Network lifecycle notifees continue
+to drive connection, stream, and listener callbacks. Existing metrics-channel
+consumers can receive bus events through a best-effort bridge.
