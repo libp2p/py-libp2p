@@ -1,0 +1,4 @@
+Circuit Relay v2 RESERVE now keys reservation admission on the authenticated
+connection peer and rejects ``msg.peer`` values that do not match, so a
+connected peer cannot consume reservation slots under unrelated peer IDs
+(`GHSA-76w5-58f3-9p2g <https://github.com/libp2p/py-libp2p/security/advisories/GHSA-76w5-58f3-9p2g>`__).
