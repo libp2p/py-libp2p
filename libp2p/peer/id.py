@@ -251,7 +251,10 @@ class ID:
         try:
             mh_decoded = multihash.decode(self._bytes)
             if mh_decoded.func == IDENTITY_MULTIHASH_CODE:
-                return deserialize_public_key(getattr(mh_decoded, "digest"))
+                # pyrefly cannot see py-multihash's namedtuple fields.
+                return deserialize_public_key(
+                    mh_decoded.digest  # pyrefly: ignore [missing-attribute]
+                )
             return None
         except Exception:
             return None

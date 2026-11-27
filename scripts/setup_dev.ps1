@@ -424,13 +424,6 @@ else {
     }
 }
 
-# Ensure python3.exe exists in .venv\Scripts for parity with POSIX and tools querying python3
-$venvPy = Join-Path $repoRoot ".venv\Scripts\python.exe"
-$venvPy3 = Join-Path $repoRoot ".venv\Scripts\python3.exe"
-if ((Test-Path $venvPy) -and (-not (Test-Path $venvPy3))) {
-    Copy-Item $venvPy $venvPy3
-}
-
 $aliasCmd = Get-Command python3 -ErrorAction SilentlyContinue
 if ($aliasCmd -and ($aliasCmd.Source -match '\\WindowsApps\\')) {
     Write-Host "Tip: Windows App Execution Alias for python3 is active ($($aliasCmd.Source))." -ForegroundColor Yellow

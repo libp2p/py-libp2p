@@ -10,9 +10,12 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from typing import Any
 
 if sys.platform != "win32":
     import fcntl
+else:
+    fcntl: Any = None
 
 import pytest
 
@@ -33,19 +36,17 @@ def _go_available() -> bool:
 
 def _build_harness(bin_path: Path, setup_script: Path, lock_name: str) -> bool:
     """Build a harness under a lock. Returns True if the binary exists."""
-    if sys.platform != "win32":
-        lock = Path(__file__).parent / lock_name
-        with open(lock, "w") as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            if bin_path.exists() and bin_path.stat().st_size > 0:
-                return True
-            try:
-                subprocess.run(["bash", str(setup_script)], check=True, timeout=600)
-            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
-                logger.warning("go harness build failed: %s", e)
-                return False
-        return bin_path.exists() and bin_path.stat().st_size > 0
-    return False
+    lock = Path(__file__).parent / lock_name
+    with open(lock, "w") as f:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        if bin_path.exists() and bin_path.stat().st_size > 0:
+            return True
+        try:
+            subprocess.run(["bash", str(setup_script)], check=True, timeout=600)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+            logger.warning("go harness build failed: %s", e)
+            return False
+    return bin_path.exists() and bin_path.stat().st_size > 0
 
 
 @pytest.fixture(scope="session")

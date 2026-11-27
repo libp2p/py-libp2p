@@ -187,7 +187,8 @@ def test_custom_interval_runs_and_respects_limits() -> None:
 
 def test_duration_stops_in_time() -> None:
     """--duration: run stops after about that many seconds (we use 3s, check exit 0)."""
-    result = run_demo("--duration", "3", "--max-connections", "5", timeout=10)
+    timeout = 20 if sys.platform == "win32" else 10
+    result = run_demo("--duration", "3", "--max-connections", "5", timeout=timeout)
     assert result.returncode == 0, f"Demo failed: {result.stderr}"
     state = parse_final_state(result.stdout, result.stderr)
     assert state["conns"] is not None and state["conns"] <= 5

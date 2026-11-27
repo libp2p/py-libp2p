@@ -4,9 +4,12 @@ import shutil
 import subprocess
 import sys
 import time
+from typing import Any
 
 if sys.platform != "win32":
     import fcntl
+else:
+    fcntl: Any = None
 
 import pytest
 
@@ -27,71 +30,68 @@ def check_nim_binary_built():
 
 def run_nim_setup_with_lock():
     """Run nim setup with file locking to prevent parallel execution."""
-    if sys.platform != "win32":
-        current_dir = Path(__file__).parent
-        lock_file = current_dir / ".setup_lock"
-        setup_script = current_dir / "scripts" / "setup_nim_echo.sh"
+    current_dir = Path(__file__).parent
+    lock_file = current_dir / ".setup_lock"
+    setup_script = current_dir / "scripts" / "setup_nim_echo.sh"
 
-        if not setup_script.exists():
-            raise RuntimeError(f"Setup script not found: {setup_script}")
+    if not setup_script.exists():
+        raise RuntimeError(f"Setup script not found: {setup_script}")
 
-        # Try to acquire lock
-        try:
-            with open(lock_file, "w") as f:
-                # Non-blocking lock attempt
-                fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    # Try to acquire lock
+    try:
+        with open(lock_file, "w") as f:
+            # Non-blocking lock attempt
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
 
-                # Double-check binary doesn't exist (another worker might have built it)
-                if check_nim_binary_built():
-                    logger.info("Binary already exists, skipping setup")
-                    return
+            # Double-check binary doesn't exist (another worker might have built it)
+            if check_nim_binary_built():
+                logger.info("Binary already exists, skipping setup")
+                return
 
-                logger.info("Acquired setup lock, running nim-libp2p setup...")
+            logger.info("Acquired setup lock, running nim-libp2p setup...")
 
-                # Make setup script executable and run it
-                setup_script.chmod(0o755)
-                result = subprocess.run(
-                    [str(setup_script)],
-                    cwd=current_dir,
-                    capture_output=True,
-                    text=True,
-                    timeout=300,  # 5 minute timeout
+            # Make setup script executable and run it
+            setup_script.chmod(0o755)
+            result = subprocess.run(
+                [str(setup_script)],
+                cwd=current_dir,
+                capture_output=True,
+                text=True,
+                timeout=300,  # 5 minute timeout
+            )
+
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"Setup failed (exit {result.returncode}):\n"
+                    f"stdout: {result.stdout}\n"
+                    f"stderr: {result.stderr}"
                 )
 
-                if result.returncode != 0:
-                    raise RuntimeError(
-                        f"Setup failed (exit {result.returncode}):\n"
-                        f"stdout: {result.stdout}\n"
-                        f"stderr: {result.stderr}"
-                    )
+            # Verify binary was built
+            if not check_nim_binary_built():
+                raise RuntimeError("nim_echo_server binary not found after setup")
 
-                # Verify binary was built
-                if not check_nim_binary_built():
-                    raise RuntimeError("nim_echo_server binary not found after setup")
+            logger.info("nim-libp2p setup completed successfully")
 
-                logger.info("nim-libp2p setup completed successfully")
+    except BlockingIOError:
+        # Another worker is running setup, wait for it to complete
+        logger.info("Another worker is running setup, waiting...")
 
-        except BlockingIOError:
-            # Another worker is running setup, wait for it to complete
-            logger.info("Another worker is running setup, waiting...")
+        # Wait for setup to complete (check every 2 seconds, max 5 minutes)
+        for _ in range(150):  # 150 * 2 = 300 seconds = 5 minutes
+            if check_nim_binary_built():
+                logger.info("Setup completed by another worker")
+                return
+            time.sleep(2)
 
-            # Wait for setup to complete (check every 2 seconds, max 5 minutes)
-            for _ in range(150):  # 150 * 2 = 300 seconds = 5 minutes
-                if check_nim_binary_built():
-                    logger.info("Setup completed by another worker")
-                    return
-                time.sleep(2)
+        raise TimeoutError("Timed out waiting for setup to complete")
 
-            raise TimeoutError("Timed out waiting for setup to complete")
-
-        finally:
-            # Clean up lock file
-            try:
-                lock_file.unlink(missing_ok=True)
-            except Exception:
-                pass
-    else:
-        raise RuntimeError("fcntl is not available on this platform")
+    finally:
+        # Clean up lock file
+        try:
+            lock_file.unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
 @pytest.fixture(scope="function")  # Changed to function scope
