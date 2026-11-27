@@ -1,9 +1,15 @@
-import fcntl
 import logging
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import time
+from typing import Any
+
+if sys.platform != "win32":
+    import fcntl
+else:
+    fcntl: Any = None
 
 import pytest
 
@@ -91,6 +97,8 @@ def run_nim_setup_with_lock():
 @pytest.fixture(scope="function")  # Changed to function scope
 def nim_echo_binary():
     """Get nim echo server binary path."""
+    if sys.platform == "win32":
+        pytest.skip("fcntl is not available (Unix-only interop harness)")
     current_dir = Path(__file__).parent
     binary_path = current_dir / "nim_echo_server"
 

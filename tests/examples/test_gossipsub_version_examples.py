@@ -27,6 +27,10 @@ SCRIPTS = [
 ]
 
 
+EXAMPLE_TIMEOUT = 180 if sys.platform == "win32" else 90
+COMPARE_TIMEOUT = 240 if sys.platform == "win32" else 120
+
+
 @pytest.mark.parametrize(("script", "args"), SCRIPTS)
 def test_gossipsub_version_example_runs(script: str, args: list[str]) -> None:
     path = GOSSIPSUB_DIR / script
@@ -36,7 +40,7 @@ def test_gossipsub_version_example_runs(script: str, args: list[str]) -> None:
         cwd=str(PROJECT_ROOT),
         capture_output=True,
         text=True,
-        timeout=90,
+        timeout=EXAMPLE_TIMEOUT,
         check=False,
     )
     assert result.returncode == 0, (
@@ -64,7 +68,7 @@ def test_compare_versions_runs() -> None:
         cwd=str(PROJECT_ROOT),
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=COMPARE_TIMEOUT,
         check=False,
     )
     assert result.returncode == 0, (

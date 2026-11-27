@@ -32,7 +32,7 @@ async def test_multi_port_demux():
         ws_port = None
         for a in addrs:
             port = a.value_for_protocol("tcp")
-            if "ws" in str(a):
+            if any(p.name in ("ws", "wss") for p in a.protocols()):
                 ws_port = port
             else:
                 tcp_port = port

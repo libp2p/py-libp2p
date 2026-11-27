@@ -22,7 +22,7 @@ import time
 import pytest
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
-ENV = {**os.environ, "PYTHONUNBUFFERED": "1"}
+ENV = {**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"}
 TCP = r"/ip4/127\.0\.0\.1/tcp/\d+/p2p/\w+"
 WS = r"/ip4/127\.0\.0\.1/tcp/\d+/ws/p2p/\w+"
 QUIC = r"/ip4/127\.0\.0\.1/udp/\d+/quic(?:-v1)?/p2p/\w+"
@@ -168,12 +168,13 @@ def _wait_for(logs: list[Path], pattern: str, timeout: float) -> re.Match[str]:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         for log in logs:
-            m = re.search(pattern, log.read_text(errors="replace"))
+            m = re.search(pattern, log.read_text(encoding="utf-8", errors="replace"))
             if m:
                 return m
         time.sleep(0.1)
     tails = "\n".join(
-        f"--- {log.name}\n{log.read_text(errors='replace')[-1500:]}" for log in logs
+        f"--- {log.name}\n{log.read_text(encoding='utf-8', errors='replace')[-1500:]}"
+        for log in logs
     )
     raise AssertionError(f"no output matched {pattern!r} in {timeout}s\n{tails}")
 
@@ -197,7 +198,8 @@ def test_listener_and_dialer(pair: Pair, tmp_path: Path) -> None:
     listener = _start(listener_log, pair.listener)
     dialer = None
     try:
-        addr = _wait_for([listener_log], pair.addr, timeout=30)[0]
+        timeout = 60 if sys.platform == "win32" else 30
+        addr = _wait_for([listener_log], pair.addr, timeout=timeout)[0]
         args = tuple(a.format(addr=addr) for a in pair.dialer)
         dialer = _start(dialer_log, args, stdin=subprocess.PIPE if pair.stdin else None)
         if pair.stdin and dialer.stdin is not None:
@@ -207,16 +209,18 @@ def test_listener_and_dialer(pair: Pair, tmp_path: Path) -> None:
             dialer.stdin.write(pair.stdin.encode())
             dialer.stdin.flush()
 
-        _wait_for([dialer_log, listener_log], pair.expect, timeout=30)
+        _wait_for([dialer_log, listener_log], pair.expect, timeout=timeout)
 
         if pair.exits:
             try:
-                rc = dialer.wait(timeout=20)
+                rc = dialer.wait(timeout=30 if sys.platform == "win32" else 20)
             except subprocess.TimeoutExpired:
                 raise AssertionError(
                     f"{pair.id}: the dialer printed its result but did not exit"
                 ) from None
-            assert rc == 0, dialer_log.read_text(errors="replace")[-1500:]
+            assert rc == 0, dialer_log.read_text(encoding="utf-8", errors="replace")[
+                -1500:
+            ]
     finally:
         if dialer is not None:
             _stop(dialer)
@@ -252,6 +256,6 @@ def test_self_contained_demo_exits_cleanly(
         rc = proc.wait(timeout=120)
     finally:
         _stop(proc)
-    output = log.read_text(errors="replace")
+    output = log.read_text(encoding="utf-8", errors="replace")
     assert rc == 0, output[-1500:]
     assert re.search(expect, output), output[-1500:]

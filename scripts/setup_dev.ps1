@@ -83,6 +83,8 @@ Prerequisites (checked before install):
   - uv >= 0.13.4 unless -Pip (auto-tries winget install astral-sh.uv;
     no system Python required - uv downloads CPython)
   - Git recommended (winget install --id Git.Git -e)
+  - Disable Windows App Execution Aliases for Python (Settings > Apps >
+    Advanced app settings > App execution aliases -> toggle OFF python/python3)
   - With -Pip: a supported system Python on PATH and pip >= 26.2.2
     (eMudhra/emSign CA incident; Discussion #1570)
 
@@ -429,6 +431,12 @@ else {
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         }
     }
+}
+
+$aliasCmd = Get-Command python3 -ErrorAction SilentlyContinue
+if ($aliasCmd -and ($aliasCmd.Source -match '\\WindowsApps\\')) {
+    Write-Host "Tip: Windows App Execution Alias for python3 is active ($($aliasCmd.Source))." -ForegroundColor Yellow
+    Write-Host "If external tools fail to locate Python, disable it in: Settings > Apps > Advanced app settings > App execution aliases." -ForegroundColor Yellow
 }
 
 Write-Host "Setup complete! Run 'make pr' (Git Bash) or pytest via the venv." -ForegroundColor Green

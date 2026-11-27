@@ -5,11 +5,17 @@ Builds small go-libp2p harnesses once (guarded by a file lock so xdist workers
 don't race) and skips the whole module when the Go toolchain is unavailable.
 """
 
-import fcntl
 import logging
 from pathlib import Path
 import shutil
 import subprocess
+import sys
+from typing import Any
+
+if sys.platform != "win32":
+    import fcntl
+else:
+    fcntl: Any = None
 
 import pytest
 
@@ -53,6 +59,8 @@ def _build_harness(bin_path: Path, setup_script: Path, lock_name: str) -> bool:
 
 @pytest.fixture(scope="session")
 def go_harness() -> Path:
+    if sys.platform == "win32":
+        pytest.skip("fcntl is not available (Unix-only interop harness)")
     if not _go_available():
         pytest.skip("go toolchain not available")
     if not _build_harness(_WEBRTC_BIN, _WEBRTC_SETUP, ".setup_lock"):
@@ -62,6 +70,8 @@ def go_harness() -> Path:
 
 @pytest.fixture(scope="session")
 def go_webtransport_harness() -> Path:
+    if sys.platform == "win32":
+        pytest.skip("fcntl is not available (Unix-only interop harness)")
     if not _go_available():
         pytest.skip("go toolchain not available")
     if not _build_harness(_WT_BIN, _WT_SETUP, ".setup_wt_lock"):

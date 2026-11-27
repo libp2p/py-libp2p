@@ -54,6 +54,7 @@ test:
 		tests/core/identity/identify/test_identify_integration.py::test_identify_multi_transport_host_addresses \
 		tests/core/test_libp2p/test_libp2p.py::test_host_connect \
 		tests/core/transport/quic/test_integration.py::test_yamux_stress_ping \
+		tests/core/transport/test_tcp.py::test_tcp_yamux_stress_ping \
 		-n 0 --durations=40 --durations-min=1.0
 
 pr: clean fix lint typecheck test
@@ -125,14 +126,14 @@ check-docs: build-docs validate-newsfragments
 
 build-docs:
 	sphinx-apidoc -o docs/ . "*conftest*" tests/ "examples/pubsub/gossipsub*" libp2p/events
-	$(MAKE) -C docs clean
-	$(MAKE) -C docs html
-	$(MAKE) -C docs doctest
+	"$(MAKE)" -C docs clean
+	"$(MAKE)" -C docs html
+	"$(MAKE)" -C docs doctest
 
 check-docs-ci: build-docs build-docs-ci validate-newsfragments
 
 build-docs-ci:
-	$(MAKE) -C docs epub
+	"$(MAKE)" -C docs epub
 
 # release commands
 

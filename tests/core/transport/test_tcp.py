@@ -223,6 +223,7 @@ async def test_tcp_dial(nursery):
 
 
 @pytest.mark.trio
+@pytest.mark.serial_only
 @pytest.mark.flaky(reruns=3, reruns_delay=2)
 async def test_tcp_yamux_stress_ping():
     """TCP + Yamux version of stress ping test for comparison with QUIC."""

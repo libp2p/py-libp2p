@@ -5,11 +5,17 @@ Installs the pinned js-libp2p harness dependencies once (guarded by a file
 lock so xdist workers don't race) and skips when Node.js is unavailable.
 """
 
-import fcntl
 import logging
 from pathlib import Path
 import shutil
 import subprocess
+import sys
+from typing import Any
+
+if sys.platform != "win32":
+    import fcntl
+else:
+    fcntl: Any = None
 
 import pytest
 
@@ -42,6 +48,8 @@ def _install_harness() -> bool:
 @pytest.fixture(scope="session")
 def js_webrtc_harness() -> tuple[str, Path]:
     """Return ``(node, harness_script)`` for the js-libp2p WebRTC-Direct harness."""
+    if sys.platform == "win32":
+        pytest.skip("js-libp2p interop tests are not supported on Windows")
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node.js not available")
