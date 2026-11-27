@@ -63,6 +63,45 @@ Production QUIC listeners should always use the transport's default security
 manager; disabling ``_security_manager`` skips libp2p identity verification even
 when a TLS certificate is present.
 
+Post-quantum key exchange
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+From py-libp2p 0.8.3, QUIC connections use the hybrid post-quantum key exchange
+``X25519MLKEM768`` whenever the remote peer supports it. There is nothing to configure.
+The dialer offers the group in its TLS ClientHello, and the listener selects it when the
+dialer offers it.
+
+The group comes from aioquic, which added it in version 1.9.0. py-libp2p 0.8.3 requires
+``aioquic>=1.9.1`` and sets no TLS groups of its own, so the installed aioquic decides
+what is offered. To check an installation:
+
+.. code-block:: console
+
+    $ python -c "import aioquic; print(aioquic.__version__)"
+
+A peer that does not support ``X25519MLKEM768`` still connects. aioquic keeps offering
+X25519, P-256 and P-384, and the handshake then settles on one of those.
+
+What this covers, and what it does not:
+
+- The session keys are derived from both an X25519 exchange and an ML-KEM-768
+  encapsulation, so recorded traffic stays confidential as long as one of the two holds.
+  This is the protection against an attacker who stores traffic today to decrypt it with
+  a future quantum computer.
+- Peer authentication is unchanged. The TLS certificate and the libp2p identity key
+  still use classical signatures, so this does not protect against an attacker who has
+  a quantum computer at the time of the handshake.
+- This section is about the QUIC transport only.
+
+go-libp2p and rust-libp2p offer the same group on QUIC by default. On loopback, with
+aioquic 1.9.0 and 1.9.1, py-libp2p selected ``X25519MLKEM768`` with go-libp2p v0.51.0
+and rust-libp2p 0.57.1 as dialer and as listener; the method and results are in
+`issue #1581 <https://github.com/libp2p/py-libp2p/issues/1581>`__.
+
+``tests/core/transport/quic/test_post_quantum_key_exchange.py`` reads the TLS hello
+messages from the wire and fails if a handshake between two py-libp2p peers stops
+offering or selecting the group.
+
 Submodules
 ----------
 
