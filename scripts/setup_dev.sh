@@ -82,7 +82,7 @@ Activation:
 Python selection (default):
   Parse requires-python and Programming Language :: Python :: 3.X classifiers
   from pyproject.toml. Use the intersection as the supported set (today:
-  3.10–3.13). Pick the newest installed interpreter in that set. If a needed
+  3.10–3.14). Pick the newest installed interpreter in that set. If a needed
   version is missing and uv is available (including with --python / UV_PYTHON),
   install it via ``uv python install``.
 
@@ -277,9 +277,9 @@ for c in classifiers:
         continue
     minors.append(ver)
 
-# Fallback if no classifiers matched: 3.10 .. max_exclusive-1 or 3.13
+# Fallback if no classifiers matched: 3.10 .. max_exclusive-1 or 3.14
 if not minors:
-    end = (max_v[1] - 1) if max_v and max_v[0] == 3 else 13
+    end = (max_v[1] - 1) if max_v and max_v[0] == 3 else 14
     start = min_v[1] if min_v[0] == 3 else 10
     minors = [(3, m) for m in range(start, end + 1)]
 

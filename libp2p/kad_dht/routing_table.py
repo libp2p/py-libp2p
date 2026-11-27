@@ -224,6 +224,13 @@ class KBucket:
             # If bucket has space, add the peer
             if len(self.peers) < self.bucket_size:
                 self.peers[peer_id] = (peer_info, current_time)
+                try:
+                    if hasattr(self.host, "conn_manager"):
+                        self.host.conn_manager.tag_peer(peer_id, "dht", 100)
+                    elif hasattr(self.host, "get_network"):
+                        self.host.get_network().tag_peer(peer_id, "dht", 100)
+                except Exception:
+                    pass
                 return True
 
             # If bucket is full, we need to replace the least-recently seen peer
@@ -253,8 +260,22 @@ class KBucket:
             )
             if oldest_peer_id in self.peers:
                 del self.peers[oldest_peer_id]
+                try:
+                    if hasattr(self.host, "conn_manager"):
+                        self.host.conn_manager.untag_peer(oldest_peer_id, "dht")
+                    elif hasattr(self.host, "get_network"):
+                        self.host.get_network().untag_peer(oldest_peer_id, "dht")
+                except Exception:
+                    pass
 
             self.peers[peer_id] = (peer_info, current_time)
+            try:
+                if hasattr(self.host, "conn_manager"):
+                    self.host.conn_manager.tag_peer(peer_id, "dht", 100)
+                elif hasattr(self.host, "get_network"):
+                    self.host.get_network().tag_peer(peer_id, "dht", 100)
+            except Exception:
+                pass
             return True
 
     def _peers_in_subnet(self, subnet: str) -> int:
@@ -273,6 +294,13 @@ class KBucket:
         """
         if peer_id in self.peers:
             del self.peers[peer_id]
+            try:
+                if hasattr(self.host, "conn_manager"):
+                    self.host.conn_manager.untag_peer(peer_id, "dht")
+                elif hasattr(self.host, "get_network"):
+                    self.host.get_network().untag_peer(peer_id, "dht")
+            except Exception:
+                pass
             return True
         return False
 
@@ -330,19 +358,23 @@ class KBucket:
         """
         from libp2p.host.ping import PingService
 
+        ping_service = PingService(self.host)
+        responsive = False
         try:
-            ping_service = PingService(self.host)
             rtts = await ping_service.ping(peer_id, ping_amt=1)
             if rtts:
                 logger.debug(
                     f"Successfully pinged peer {peer_id} "
                     f"(RTT: {rtts[0]}ms via libp2p ping)"
                 )
-                return True
-            return False
+                responsive = True
         except Exception as e:
             logger.debug(f"Failed to ping peer {peer_id} via libp2p ping: {e}")
-            return False
+        finally:
+            # This is a one-shot probe, not a long-lived reusable service.
+            # Swarm keeps strong references to registered notifees.
+            await ping_service.aclose()
+        return responsive
 
     def refresh_peer_last_seen(self, peer_id: ID) -> bool:
         """

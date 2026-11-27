@@ -224,3 +224,17 @@ async def test_handle_ping_closes_gracefully_on_idle_timeout(monkeypatch):
 
     fake_stream.close.assert_awaited_once()
     fake_stream.reset.assert_not_called()
+
+
+@pytest.mark.trio
+async def test_ping_service_evicts_stream_on_peer_disconnect(security_protocol):
+    async with host_pair_factory(security_protocol=security_protocol) as (
+        host_a,
+        host_b,
+    ):
+        ping_service = PingService(host_b)
+        await ping_service.ping(host_a.get_id())
+        assert host_a.get_id() in ping_service._outbound_streams
+        await host_b.disconnect(host_a.get_id())
+        await trio.sleep(0.1)
+        assert host_a.get_id() not in ping_service._outbound_streams

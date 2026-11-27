@@ -109,7 +109,8 @@ class InternalManagerAPI(ManagerAPI):
         *args: Any,
         daemon: bool = False,
         name: str | None = None,
-    ) -> None:
+        parent: Any = None,
+    ) -> Any:
         """Run a task in the background."""
         ...
 

@@ -157,6 +157,70 @@ def is_relay_address(addr: Multiaddr) -> bool:
         return False
 
 
+def _ip_is_routable(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """
+    Return True if ``ip`` (an ipaddress address) is publicly routable.
+
+    Rejects loopback, link-local, unspecified, multicast, reserved and
+    private ranges.  CGNAT (100.64.0.0/10) is treated as routable because
+    it is used by Tailscale/WireGuard networks that peers may legitimately
+    reach (``ipaddress`` only classifies it as private on Python 3.13+).
+    """
+    if ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_multicast:
+        return False
+    if getattr(ip, "is_reserved", False):
+        return False
+    if ip.is_private:
+        if (
+            isinstance(ip, ipaddress.IPv4Address)
+            and (int(ip) & 0xFFC00000) == 0x64400000
+        ):  # 100.64.0.0/10 (CGNAT/Tailscale)
+            return True
+        return False
+    return True
+
+
+def is_routable_address(addr: Multiaddr) -> bool:
+    """
+    Return True if ``addr`` is directly dialable from a public node.
+
+    DNS addresses pass (they resolve to peers that may be dialable).  For
+    IP addresses, only public / globally routable IPs count — loopback
+    (``127.0.0.1``, ``::1``), Docker-internal (``172.x/10.x``), LAN
+    (``192.168.x``) and link-local addresses never match, so a peer whose
+    advertised addrs are self-referential (our own container IP) is
+    rejected instead of causing a wasteful self-dial that fails with "Peer
+    ID mismatch".
+    """
+    try:
+        for part in addr.split():
+            protos = part.protocols()
+            if not protos:
+                continue
+            name = getattr(protos[0], "name", "")
+            if name.startswith("dns"):
+                return True
+            if name not in ("ip4", "ip6"):
+                continue
+            try:
+                ip_str = part.value_for_protocol(name)
+            except Exception:
+                continue
+            if not ip_str:
+                continue
+            try:
+                ip = ipaddress.ip_address(ip_str)
+            except Exception:
+                continue
+            if _ip_is_routable(ip):
+                return True
+    except Exception:  # pragma: no cover - defensive
+        return False
+
+    # No IP/DNS component (e.g. relay-only addrs), or only private IPs.
+    return False
+
+
 def is_public_ipv6_address(addr: Multiaddr) -> bool:
     """
     Return True if the multiaddr contains a public / globally routable IPv6
@@ -355,4 +419,5 @@ __all__ = [
     "is_public_ipv6_address",
     "is_public_or_dns_address",
     "is_relay_address",
+    "is_routable_address",
 ]

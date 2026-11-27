@@ -37,6 +37,11 @@ logger = logging.getLogger("libp2p.pubsub.extensions")
 
 ReportMisbehaviour = Callable[[ID], None]
 
+# Upper bound on topics one peer may register an observation for.  Matches the
+# default per-peer subscription limit so an observer cannot track more topics
+# than it could subscribe to.
+MAX_OBSERVED_TOPICS_PER_PEER = 100
+
 
 @dataclass
 class PeerExtensions:
@@ -380,6 +385,9 @@ class TopicObservationState:
         # topic -> set of observer peer IDs.
         self._observers: dict[str, set[ID]] = {}
 
+        # Per-peer reverse index, used to bound remote OBSERVE tracking.
+        self._topics_by_observer: dict[ID, set[str]] = {}
+
     # ------------------------------------------------------------------
     # Outbound: this node is an observer
     # ------------------------------------------------------------------
@@ -422,19 +430,40 @@ class TopicObservationState:
     # Inbound: remote peers are observing us
     # ------------------------------------------------------------------
 
-    def add_observer(self, topic: str, observer_peer: ID) -> None:
+    def add_observer(self, topic: str, observer_peer: ID) -> bool:
         """
         Record that *observer_peer* wants to observe *topic* from us.
 
-        Called when we handle an incoming OBSERVE control message.
+        Called when we handle an incoming OBSERVE control message.  A peer may
+        advertise the topic-observation extension and then ask about arbitrary
+        topics, so the number of topics tracked per peer is capped; otherwise
+        the table grows with peer-controlled strings until the peer disconnects.
 
         :param topic:         the topic the peer wants to observe.
         :param observer_peer: the peer that sent us the OBSERVE.
+        :return: True if the observation was recorded, False if the per-peer
+            cap was reached.
         """
+        observed = self._topics_by_observer.setdefault(observer_peer, set())
+        if topic not in observed:
+            if len(observed) >= MAX_OBSERVED_TOPICS_PER_PEER:
+                logger.warning(
+                    "Peer %s exceeded the topic-observation limit (%d), "
+                    "ignoring OBSERVE for topic '%s'.",
+                    observer_peer,
+                    MAX_OBSERVED_TOPICS_PER_PEER,
+                    topic,
+                )
+                if not observed:
+                    del self._topics_by_observer[observer_peer]
+                return False
+            observed.add(topic)
+
         self._observers.setdefault(topic, set()).add(observer_peer)
         logger.debug(
             "Peer %s is now observing topic '%s' via us.", observer_peer, topic
         )
+        return True
 
     def remove_observer(self, topic: str, observer_peer: ID) -> None:
         """
@@ -455,6 +484,12 @@ class TopicObservationState:
                 observer_peer,
                 topic,
             )
+
+        observed = self._topics_by_observer.get(observer_peer)
+        if observed is not None:
+            observed.discard(topic)
+            if not observed:
+                del self._topics_by_observer[observer_peer]
 
     def get_observers(self, topic: str) -> set[ID]:
         """
@@ -480,6 +515,8 @@ class TopicObservationState:
             self._observing[topic].discard(peer_id)
             if not self._observing[topic]:
                 del self._observing[topic]
+
+        self._topics_by_observer.pop(peer_id, None)
 
     def get_observing_topics(self) -> set[str]:
         """

@@ -1,3 +1,0 @@
-Enforce yamux per-stream receive-window limits on incoming DATA frames and
-treat window violations as a protocol error that terminates the session, so a
-remote peer cannot grow stream buffers without bound.

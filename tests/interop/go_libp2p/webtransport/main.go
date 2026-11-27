@@ -7,7 +7,7 @@
 //	                            address, then "CONNECTED <peer>" for each
 //	                            secured inbound connection.
 //	./harness dial <addr>     — dial a /quic-v1/webtransport multiaddr,
-//	                            print "DIAL_OK <peer>" and exit 0.
+//	                            print "DIAL_OK <peer>" and wait for stdin EOF.
 //
 // Uses WebTransport only (ALPN h3); no native quic-v1 / TCP.
 package main
@@ -15,6 +15,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -82,6 +83,11 @@ func main() {
 			fail(err)
 		}
 		fmt.Printf("DIAL_OK %s\n", ai.ID)
+		// Let the Python listener finish its handshake and dispatch its
+		// callback before closing the transport.
+		if _, err := io.Copy(io.Discard, os.Stdin); err != nil {
+			fail(err)
+		}
 	default:
 		fail(fmt.Errorf("usage: harness [listen | dial <multiaddr>]"))
 	}

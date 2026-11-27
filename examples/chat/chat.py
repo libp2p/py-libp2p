@@ -64,8 +64,9 @@ async def run(port: int, destination: str) -> None:
         if not destination:  # its the server
 
             async def stream_handler(stream: INetStream) -> None:
-                nursery.start_soon(read_data, stream)
-                nursery.start_soon(write_data, stream)
+                async with trio.open_nursery() as s_nursery:
+                    s_nursery.start_soon(read_data, stream)
+                    s_nursery.start_soon(write_data, stream)
 
             host.set_stream_handler(PROTOCOL_ID, stream_handler)
 

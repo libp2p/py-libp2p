@@ -22,6 +22,7 @@ from libp2p.identity.identify.pb.identify_pb2 import (
 from libp2p.identity.update import (
     update_peerstore_from_identify,
 )
+from libp2p.metrics.identity import IdentityEvent
 from libp2p.network.stream.exceptions import (
     StreamClosed,
     StreamReset,
@@ -85,21 +86,45 @@ def identify_push_handler_for(
             )
 
             logger.debug("Successfully processed identify/push from peer %s", peer_id)
+            event = IdentityEvent()
+            event.push = True
+            event.direction = "inbound"
+            event.peer_id = str(peer_id)
+            event.success = True
+            host.get_event_bus().emit(event)
 
         except (StreamClosed, StreamReset):
             logger.debug(
                 "Stream closed/reset while processing identify/push from %s", peer_id
             )
+            event = IdentityEvent()
+            event.push = True
+            event.direction = "inbound"
+            event.peer_id = str(peer_id)
+            event.success = False
+            host.get_event_bus().emit(event)
         except MuxedStreamError:
             logger.debug(
                 "Muxed stream error while processing identify/push from %s", peer_id
             )
+            event = IdentityEvent()
+            event.push = True
+            event.direction = "inbound"
+            event.peer_id = str(peer_id)
+            event.success = False
+            host.get_event_bus().emit(event)
             try:
                 await stream.reset()
             except Exception:
                 pass
         except Exception as e:
             logger.error("Error processing identify/push from %s: %s", peer_id, e)
+            event = IdentityEvent()
+            event.push = True
+            event.direction = "inbound"
+            event.peer_id = str(peer_id)
+            event.success = False
+            host.get_event_bus().emit(event)
         finally:
             # Close the stream after processing
             try:
@@ -160,15 +185,30 @@ async def push_identify_to_peer(
             stream = None
 
             logger.debug("Successfully pushed identify to peer %s", peer_id)
-            return True
+            success = True
         except Exception as e:
             logger.error("Error pushing identify to peer %s: %s", peer_id, e)
+            success = False
+        finally:
+            # Trio cancellation derives from BaseException, so the handler above
+            # never sees it. Without this the acquired stream is neither closed
+            # nor reset, and the transport keeps it (plus its buffers) until the
+            # connection dies.
             if stream is not None:
-                try:
-                    await stream.reset()
-                except Exception:
-                    pass
-            return False
+                with trio.CancelScope() as shield:
+                    shield.shield = True
+                    try:
+                        await stream.reset()
+                    except Exception:
+                        pass
+
+        event = IdentityEvent()
+        event.push = True
+        event.direction = "outbound"
+        event.peer_id = str(peer_id)
+        event.success = success
+        host.get_event_bus().emit(event)
+        return success
 
 
 async def push_identify_to_peers(

@@ -10,6 +10,7 @@ This module tests the core functionality of provider record management including
 """
 
 import time
+from typing import cast
 from unittest.mock import (
     AsyncMock,
     Mock,
@@ -20,7 +21,9 @@ import pytest
 from multiaddr import (
     Multiaddr,
 )
+import trio
 
+from libp2p.abc import IHost
 from libp2p.kad_dht.provider_store import (
     PROVIDER_RECORD_EXPIRATION_INTERVAL,
     PROVIDER_RECORD_REPUBLISH_INTERVAL,
@@ -773,3 +776,133 @@ class TestProviderStore:
                 # Should be present
                 assert len(providers) == 1
                 assert providers[0].peer_id == peer_id
+
+    def test_max_provider_keys_bounding(self):
+        """Test ProviderStore bounds total keys to MAX_PROVIDER_KEYS."""
+        mock_host = Mock()
+        mock_host.get_id.return_value = ID.from_base58("QmTest123")
+        store = ProviderStore(host=mock_host)
+        provider = PeerInfo(
+            ID.from_base58("QmPeer1"),
+            [Multiaddr("/ip4/127.0.0.1/tcp/8000")],
+        )
+
+        with patch("libp2p.kad_dht.provider_store.MAX_PROVIDER_KEYS", 5):
+            for i in range(5):
+                store.add_provider(f"key_{i}".encode(), provider)
+            assert len(store.providers) == 5
+
+            # Adding a 6th key should evict an older key and keep count at 5
+            store.add_provider(b"key_5", provider)
+            assert len(store.providers) == 5
+            assert b"key_5" in store.providers
+
+
+class _FakeHost:
+    def __init__(self) -> None:
+        self.peer_id = ID(b"local-probe-peer")
+
+    def get_id(self):
+        return self.peer_id
+
+    def get_addrs(self):
+        return []
+
+    def get_event_bus(self):
+        return Mock(emit=Mock())
+
+
+class _FakePeerRouting:
+    async def find_closest_peers_network(self, key):
+        return []
+
+
+class TestProviderStoreLocalUnprovide:
+    """A local publication must be forgettable, and the cap must still apply."""
+
+    @pytest.mark.trio
+    async def test_unprovide_removes_all_metadata(self):
+        store = ProviderStore(
+            host=cast(IHost, _FakeHost()), peer_routing=_FakePeerRouting()
+        )
+        await store.provide(b"local-key")
+        assert b"local-key" in store.providing_keys
+        assert b"local-key" in store.providers
+
+        assert store.unprovide(b"local-key") is True
+
+        assert b"local-key" not in store.providing_keys
+        assert b"local-key" not in store.providers
+        assert b"local-key" not in store._last_republish
+        assert store.unprovide(b"local-key") is False
+
+    @pytest.mark.trio
+    async def test_cap_preserves_local_publications_until_unprovide(self):
+        store = ProviderStore(
+            host=cast(IHost, _FakeHost()), peer_routing=_FakePeerRouting()
+        )
+
+        with patch("libp2p.kad_dht.provider_store.MAX_PROVIDER_KEYS", 5):
+            local_keys = {b"local-%d" % i for i in range(5)}
+            for key in sorted(local_keys):
+                await store.provide(key)
+
+            key = b"local-0"
+            store._last_republish[key] = 1.0
+            # An expired local record still reserves room for its republish.
+            record = store.providers[key][str(store.local_peer_id)]
+            record.timestamp -= PROVIDER_RECORD_EXPIRATION_INTERVAL + 1
+            assert not store.get_providers(key)
+            store.cleanup_expired()
+
+            remote = PeerInfo(ID(b"remote"), [])
+            store.add_provider(b"remote-key", remote)
+            assert await store.provide(b"excess-local") is False
+            assert store.providers.keys() == store.providing_keys == local_keys
+            assert store._last_republish[key] == 1.0
+
+            assert store.unprovide(key) is True
+            store.add_provider(b"remote-key", remote)
+            assert b"remote-key" in store.providers
+            await store.provide(b"new-local")
+            assert b"remote-key" not in store.providers
+            assert b"new-local" in store.providing_keys
+
+        await store._republish_provider_records()
+        assert key not in store.providers
+        assert key not in store.providing_keys
+
+
+class TestRepublishMetadataOwnership:
+    """Republish must not recreate metadata for a key that is no longer local."""
+
+    @pytest.mark.trio
+    async def test_unprovide_during_republish_leaves_no_metadata(self):
+        store = ProviderStore(
+            host=cast(IHost, _FakeHost()), peer_routing=_FakePeerRouting()
+        )
+        key = b"racy-key"
+        await store.provide(key)
+        store._last_republish[key] = 0  # Force a republish pass to consider it.
+
+        started = trio.Event()
+        release = trio.Event()
+
+        async def gated_provide(provided_key):
+            started.set()
+            await release.wait()
+            return True
+
+        store.provide = gated_provide  # type: ignore[method-assign]
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(store._republish_provider_records)
+            await started.wait()
+            store.unprovide(key)
+            release.set()
+
+        # provide() yielded after the key was removed; its completion must not
+        # write a timestamp that no record or cleanup pass would ever visit.
+        assert key not in store.providing_keys
+        assert key not in store.providers
+        assert key not in store._last_republish

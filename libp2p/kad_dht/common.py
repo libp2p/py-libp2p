@@ -19,6 +19,15 @@ MAX_RECORD_AGE = 48 * 60 * 60  # 48 hours in seconds (go-libp2p default)
 MAX_RECORD_SIZE = 1024 * 1024  # 1MB max record size
 MAX_PROVIDERS_PER_MSG = 20  # Max provider records per ADD_PROVIDER message
 MAX_VALUE_STORE_SIZE = 50000  # Max entries in value store
+MAX_PROVIDER_KEYS = 2000  # Max unique content keys in provider store to bound RAM
+
+# Bounds for the hand-rolled iterative value/provider lookups. Both accept
+# closer peers from every response, so a peer that keeps returning fresh peer
+# IDs could otherwise keep a lookup running forever while its candidate,
+# queried and result sets grow without limit.
+MAX_LOOKUP_QUERIES = 256  # peers contacted in one lookup
+MAX_LOOKUP_CANDIDATES = 512  # closer peers held as candidates
+MAX_LOOKUP_DURATION = 60.0  # seconds for one lookup
 
 TTL = DEFAULT_TTL = 24 * 60 * 60  # 24 hours in seconds
 

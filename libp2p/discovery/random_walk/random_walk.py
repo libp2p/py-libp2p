@@ -1,3 +1,4 @@
+from collections import deque
 from collections.abc import Awaitable, Callable
 import logging
 import secrets
@@ -5,6 +6,7 @@ import secrets
 import trio
 
 from libp2p.abc import IHost
+from libp2p.discovery.events.events import DiscoveryEvent
 from libp2p.discovery.random_walk.config import (
     RANDOM_WALK_CONCURRENCY,
     RANDOM_WALK_RT_THRESHOLD,
@@ -73,11 +75,14 @@ class RandomWalk:
 
         """
         try:
+            random_id: str | None = None
             if target_key is None:
                 random_peer_id = self.generate_random_peer_id()
                 target_key = bytes.fromhex(random_peer_id)
+                random_id = random_peer_id
                 key_desc = f"{random_peer_id[:8]}..."
             else:
+                random_id = target_key.hex()
                 key_desc = f"{target_key.hex()[:8]}..."
 
             logger.info(f"Starting random walk for target key: {key_desc}")
@@ -90,6 +95,9 @@ class RandomWalk:
 
             if not discovered_peer_ids:
                 logger.debug(f"No peers discovered in random walk for {key_desc}")
+                self._emit_walk_event(
+                    random_id=random_id, peers_found=0, peers=[], success=False
+                )
                 return []
 
             logger.info(
@@ -111,11 +119,40 @@ class RandomWalk:
                     logger.debug(f"Failed to create PeerInfo for {peer_id}: {e}")
                     continue
 
+            self._emit_walk_event(
+                random_id=random_id,
+                peers_found=len(discovered_peer_ids),
+                peers=[str(pid) for pid in discovered_peer_ids],
+                success=True,
+            )
             return validated_peers
 
         except Exception as e:
             logger.error(f"Random walk failed: {e}")
+            self._emit_walk_event(
+                random_id=random_id, peers_found=0, peers=[], success=False
+            )
             raise RandomWalkError(f"Random walk operation failed: {e}") from e
+
+    def _emit_walk_event(
+        self,
+        *,
+        random_id: str | None,
+        peers_found: int,
+        peers: list[str],
+        success: bool,
+    ) -> None:
+        """Emit a random-walk discovery event on the host's event bus."""
+        event = DiscoveryEvent()
+        event.random_walk = True
+        event.source = "random_walk"
+        event.peers_found = peers_found
+        event.success = success
+        event.target_key = random_id
+        # Bound the peer list to keep the event bus payload small; the count
+        # always carries the full total.
+        event.peers = peers[:10]
+        self.host.get_event_bus().emit(event)
 
     async def run_concurrent_random_walks(
         self,
@@ -157,10 +194,22 @@ class RandomWalk:
             except Exception as e:
                 logger.warning(f"Error processing peerstore peers: {e}")
 
-        sem = trio.Semaphore(count)
+        # Bounded worker pool, mirroring go-libp2p-kad-dht's crawler: it starts
+        # exactly `parallelism` workers and feeds them a jobs channel.  Prior
+        # code spawned one task per target key and only limited *execution*
+        # with a semaphore, so a large routing table enqueued hundreds of
+        # dormant tasks whose coroutine frames (and everything reachable from
+        # them) stayed alive for the whole refresh window.
+        pending_keys: deque[bytes | None] = deque(keys_to_query)
+        worker_count = max(1, min(count, len(pending_keys)))
+        queue_lock = trio.Lock()
 
-        async def single_walk(key: bytes | None) -> None:
-            async with sem:
+        async def walk_worker() -> None:
+            while True:
+                async with queue_lock:
+                    if not pending_keys:
+                        return
+                    key = pending_keys.popleft()
                 try:
                     peers = await self.perform_random_walk(target_key=key)
                     all_validated_peers.extend(peers)
@@ -169,8 +218,8 @@ class RandomWalk:
 
         try:
             async with trio.open_nursery() as nursery:
-                for key in keys_to_query:
-                    nursery.start_soon(single_walk, key)
+                for _ in range(worker_count):
+                    nursery.start_soon(walk_worker)
         except Exception as e:
             logger.debug(f"Random walk batch scope ended: {e}")
 
@@ -186,9 +235,12 @@ class RandomWalk:
         )
         return result
 
-    def _get_peerstore_peers(self) -> list[PeerInfo]:
+    def _get_peerstore_peers(self, limit: int = 50) -> list[PeerInfo]:
         """
         Get peer info objects from the host's peerstore.
+
+        Args:
+            limit: Maximum number of peer infos to return (default: 50)
 
         Returns:
             List of PeerInfo objects from peerstore
@@ -196,7 +248,14 @@ class RandomWalk:
         """
         try:
             peerstore = self.host.get_peerstore()
-            peer_ids = peerstore.peers_with_addrs()
+            sample_peer_ids = getattr(peerstore, "sample_peer_ids", None)
+            valid_peer_ids = getattr(peerstore, "valid_peer_ids", None)
+            if sample_peer_ids is not None:
+                peer_ids = sample_peer_ids(limit=limit, random_order=True)
+            elif valid_peer_ids is not None:
+                peer_ids = valid_peer_ids()[:limit]
+            else:
+                peer_ids = peerstore.peers_with_addrs()[:limit]
 
             peer_infos = []
             for peer_id in peer_ids:
@@ -209,6 +268,8 @@ class RandomWalk:
                     if peer_info and peer_info.addrs:
                         if self._has_compatible_addresses(peer_info):
                             peer_infos.append(peer_info)
+                            if len(peer_infos) >= limit:
+                                break
                 except Exception as e:
                     logger.debug(f"Error getting peer info for {peer_id}: {e}")
 

@@ -6,9 +6,15 @@ import os
 from typing import Any
 
 __all__ = [
+    "MAX_COLLECTED_ERRORS",
     "get_task_name",
     "is_verbose_logging_enabled",
 ]
+
+# Upper bound on retained task errors. Each entry carries a traceback, which
+# keeps every frame local (streams, connections, buffers) alive. A long-lived
+# service must not accumulate one such object graph per failed task.
+MAX_COLLECTED_ERRORS = 25
 
 
 def get_task_name(value: Any, explicit_name: str | None = None) -> str:

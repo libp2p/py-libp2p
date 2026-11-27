@@ -4,11 +4,20 @@ Unit tests for ConnectionIDRegistry.
 Tests the Connection ID routing state management and all registry operations.
 """
 
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
+from aioquic.quic import events
+from aioquic.quic.configuration import QuicConfiguration
+from aioquic.quic.connection import QuicConnection
+from multiaddr import Multiaddr
 import trio
 
+from libp2p.peer.id import ID
+from libp2p.transport.quic.config import QUICTransportConfig
+from libp2p.transport.quic.connection import QUICConnection
 from libp2p.transport.quic.connection_id_registry import ConnectionIDRegistry
 
 
@@ -935,3 +944,148 @@ async def test_reset_stats(registry, mock_connection):
         stats_after["established_connections"]
         == stats_before["established_connections"]
     )
+
+
+@pytest.mark.trio
+async def test_pending_close_removes_linked_initial_dcid(
+    registry, mock_pending_connection
+):
+    """Removing a pending connection drops both routing entries and closes it."""
+    host_cid = b"host_cid_1"
+    init_dcid = b"init_dcid_1"
+    addr = ("127.0.0.1", 12345)
+
+    await registry.register_pending(
+        host_cid, mock_pending_connection, addr, sequence=0, initial_dcid=init_dcid
+    )
+    await registry.register_initial_connection_id(
+        init_dcid, mock_pending_connection, addr, sequence=0, host_cid=host_cid
+    )
+
+    # Both CIDs should route to mock_pending_connection
+    _, p1, is_p1 = await registry.find_by_connection_id(host_cid)
+    assert is_p1 and p1 is mock_pending_connection
+
+    _, p2, is_p2 = await registry.find_by_connection_id(init_dcid, is_initial=True)
+    assert is_p2 and p2 is mock_pending_connection
+
+    # Removing pending connection should clean up initial connection id as well
+    await registry.remove_pending_connection(host_cid)
+    _, p1_after, _ = await registry.find_by_connection_id(host_cid)
+    assert p1_after is None
+    _, p2_after, _ = await registry.find_by_connection_id(init_dcid, is_initial=True)
+    assert p2_after is None
+
+    mock_pending_connection.close.assert_called_once_with()
+
+
+@pytest.mark.trio
+async def test_cleanup_stale_pending_purges_both_cids(
+    registry, mock_pending_connection
+):
+    """Test cleanup_stale_pending cleans both host CID and initial DCID."""
+    host_cid = b"host_cid_stale"
+    init_dcid = b"init_dcid_stale"
+    addr = ("127.0.0.1", 12345)
+
+    await registry.register_pending(
+        host_cid, mock_pending_connection, addr, sequence=0, initial_dcid=init_dcid
+    )
+    await registry.register_initial_connection_id(
+        init_dcid, mock_pending_connection, addr, sequence=0, host_cid=host_cid
+    )
+
+    # Set creation time to 20 seconds ago
+    registry._pending_created_at[host_cid] -= 20.0
+    registry._pending_created_at[init_dcid] -= 20.0
+
+    stale_cids = await registry.cleanup_stale_pending(max_age=15.0)
+    assert host_cid in stale_cids
+    assert init_dcid in stale_cids
+
+    mock_pending_connection.close.assert_called_once_with()
+    assert len(await registry.get_all_pending_cids()) == 0
+    assert len(await registry.get_all_initial_cids()) == 0
+
+
+@pytest.mark.trio
+async def test_unregister_pending_connection_clears_every_mapping(
+    registry, mock_connection, mock_pending_connection
+):
+    """
+    Ending a handshaking connection must purge all of its registry state.
+
+    Such a connection has no promoted CID yet, so it is invisible to the
+    connection-keyed cleanup. Its initial-CID link pair, address mapping and
+    sequence counter would otherwise stay in the registry for the lifetime of
+    the listener, growing with every aborted handshake.
+    """
+    host_cid = b"host_cid_pending"
+    initial_dcid = b"initial_dcid_pending"
+    addr = ("127.0.0.1", 41234)
+
+    await registry.register_pending(
+        host_cid, mock_pending_connection, addr, sequence=0, initial_dcid=initial_dcid
+    )
+    await registry.register_initial_connection_id(
+        initial_dcid, mock_pending_connection, addr, sequence=0, host_cid=host_cid
+    )
+    mock_connection._quic = mock_pending_connection
+
+    await registry.unregister_connection_object(mock_connection)
+
+    assert len(await registry.get_all_pending_cids()) == 0
+    assert len(await registry.get_all_initial_cids()) == 0
+    assert not registry._host_cid_to_initial_dcid
+    assert not registry._initial_dcid_to_host_cid
+    assert addr not in registry._addr_to_connection_id
+    assert not registry._connection_id_to_addr
+    assert not registry._connection_id_sequences
+    assert not registry._connection_sequence_counters
+
+
+@pytest.mark.trio
+async def test_connection_keeps_only_bounded_recent_cid_history(monkeypatch):
+    transport: Any = SimpleNamespace(_config=QUICTransportConfig())
+    conn = QUICConnection(
+        QuicConnection(configuration=QuicConfiguration(is_client=True)),
+        ("127.0.0.1", 4001),
+        ID(b"peer"),
+        ID(b"local"),
+        True,
+        Multiaddr("/ip4/127.0.0.1/udp/4001/quic-v1"),
+        transport,
+    )
+
+    async def notify(*args):
+        pass
+
+    monkeypatch.setattr(conn, "_notify_listener_of_new_connection_id", notify)
+    await conn._handle_connection_id_issued(events.ConnectionIdIssued(b"anchor"))
+    for i in range(5000):
+        cid = i.to_bytes(8, "big")
+        await conn._handle_connection_id_issued(events.ConnectionIdIssued(cid))
+        await conn._handle_connection_id_retired(events.ConnectionIdRetired(cid))
+    assert conn._available_connection_ids == {b"anchor"}
+    assert conn.get_current_connection_id() == b"anchor"
+    assert conn._stats["connection_ids_issued"] == 5001
+    assert conn._stats["connection_ids_retired"] == 5000
+    assert len(conn._retired_connection_ids) <= 128
+    assert len(conn._connection_id_sequence_numbers) <= 128
+
+
+@pytest.mark.trio
+async def test_registry_histogram_does_not_keep_every_lifetime_sequence():
+    registry = ConnectionIDRegistry(trio.Lock())
+    conn = Mock()
+    conn._remote_addr = ("127.0.0.1", 4001)
+    for sequence in range(2000):
+        cid = sequence.to_bytes(8, "big")
+        await registry.register_connection(cid, conn, conn._remote_addr, sequence)
+        await registry.unregister_connection_object(conn)
+    stats = registry.get_stats()
+    assert stats["total_connection_ids"] == 0
+    distribution = stats["sequence_distribution"]
+    assert isinstance(distribution, dict)
+    assert len(distribution) <= 129
+    assert sum(distribution.values()) == 2000

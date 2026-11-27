@@ -544,8 +544,17 @@ class PeerStore(IPeerStore):
         send, receive = trio.open_memory_channel(0)
         self.addr_update_channels[peer_id] = send
 
-        async for addr in receive:
-            yield addr
+        try:
+            async for addr in receive:
+                yield addr
+        finally:
+            # The subscriber is gone (finished, cancelled or errored).  Drop
+            # the channel from the registry so it cannot retain the peer store
+            # entry and any pending addresses for the process lifetime.
+            if self.addr_update_channels.get(peer_id) is send:
+                self.addr_update_channels.pop(peer_id, None)
+            send.close()
+            receive.close()
 
     # -------KEY-BOOK---------
 

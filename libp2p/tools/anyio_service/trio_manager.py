@@ -25,7 +25,11 @@ from .trio_tasks import (
     TaskType,
     TaskWithChildrenAPI,
 )
-from .utils import get_task_name, is_verbose_logging_enabled
+from .utils import (
+    MAX_COLLECTED_ERRORS,
+    get_task_name,
+    is_verbose_logging_enabled,
+)
 
 if TYPE_CHECKING:
     from .api import AsyncFn, ManagerAPI, ServiceAPI
@@ -42,6 +46,7 @@ ERROR_SERVICE_TASK_ERROR = (
     "Service {service} task {task} {msg} with {exc_type}: {exc_value}"
 )
 ERROR_CANNOT_SCHEDULE_AFTER_STOP = "Cannot schedule task after service has stopped"
+_USE_CALLER_PARENT = object()
 
 
 class TrioManager(InternalManagerAPI):
@@ -123,6 +128,22 @@ class TrioManager(InternalManagerAPI):
     @property
     def did_error(self) -> bool:
         return len(self._errors) > 0
+
+    def _record_error(self, exc_info: EXC_INFO) -> None:
+        """
+        Record a task error without retaining unbounded traceback history.
+
+        Each entry keeps a traceback, and a traceback keeps all of its frame
+        locals alive.  A long-lived manager that appended one entry per task
+        failure would therefore pin the whole object graph (streams,
+        connections, buffers) of every failed task for the process lifetime.
+        Retain only the most recent errors; that is enough to build the
+        ExceptionGroup raised when the service finally exits.
+        """
+        self._errors.append(exc_info)
+        overflow = len(self._errors) - MAX_COLLECTED_ERRORS
+        if overflow > 0:
+            del self._errors[:overflow]
 
     @property
     def stats(self) -> Stats:
@@ -222,7 +243,7 @@ class TrioManager(InternalManagerAPI):
 
                     except Exception:
                         # Collect exceptions from tasks
-                        self._errors.append(cast(EXC_INFO, sys.exc_info()))
+                        self._record_error(cast(EXC_INFO, sys.exc_info()))
 
                     finally:
                         # Cancel system nursery to clean up
@@ -368,8 +389,6 @@ class TrioManager(InternalManagerAPI):
                     direction="task_exit",
                     exc=err,
                 )
-                if task.parent is None:
-                    self._root_tasks.discard(task)
                 if isinstance(task, FunctionTask) and task.count_in_stats:
                     self._finished_task_count += 1
             else:
@@ -381,13 +400,11 @@ class TrioManager(InternalManagerAPI):
                     exc_info=not isinstance(err, DaemonTaskExit),
                 )
                 # HIGH COMPLEXITY: Collect error and trigger cancellation
-                self._errors.append(cast(EXC_INFO, sys.exc_info()))
+                self._record_error(cast(EXC_INFO, sys.exc_info()))
                 self.cancel()
 
         else:
             # Task completed successfully
-            if task.parent is None:
-                self._root_tasks.discard(task)
             # Only count user tasks in finished stats (not internal framework tasks)
             if isinstance(task, FunctionTask) and task.count_in_stats:
                 self._finished_task_count += 1
@@ -395,6 +412,10 @@ class TrioManager(InternalManagerAPI):
                 self.logger.debug("%s: task %s exited cleanly.", self._service, task)
 
         finally:
+            if task.parent is None:
+                self._root_tasks.discard(task)
+            elif hasattr(task.parent, "discard_child"):
+                task.parent.discard_child(task)
             self._done_task_count += 1
 
     # ========================================================================
@@ -409,7 +430,8 @@ class TrioManager(InternalManagerAPI):
         daemon: bool = False,
         name: str | None = None,
         _internal: bool = False,
-    ) -> None:
+        parent: Any = _USE_CALLER_PARENT,
+    ) -> Any:
         """
         Run a task in the background.
 
@@ -420,11 +442,15 @@ class TrioManager(InternalManagerAPI):
         - Schedules for execution
         """
         count_in_stats = not _internal
+        if parent is _USE_CALLER_PARENT:
+            actual_parent = self._find_parent_task(trio.lowlevel.current_task())
+        else:
+            actual_parent = parent
 
         task = FunctionTask(
             name=get_task_name(async_fn, name),
             daemon=daemon,
-            parent=self._find_parent_task(trio.lowlevel.current_task()),
+            parent=actual_parent,
             async_fn=async_fn,
             async_fn_args=args,
             count_in_stats=count_in_stats,
@@ -440,6 +466,7 @@ class TrioManager(InternalManagerAPI):
 
         # Schedule
         self._schedule_task(task)
+        return task
 
     @trio_typing.takes_callable_and_args
     def run_daemon_task(

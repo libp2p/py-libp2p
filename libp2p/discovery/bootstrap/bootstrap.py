@@ -1,4 +1,5 @@
 import logging
+from typing import TYPE_CHECKING
 
 from multiaddr import Multiaddr
 from multiaddr.resolvers import DNSResolver
@@ -6,6 +7,7 @@ import trio
 
 from libp2p.abc import ID, INetworkService, PeerInfo
 from libp2p.discovery.bootstrap.utils import validate_bootstrap_addresses
+from libp2p.discovery.events.events import DiscoveryEvent
 from libp2p.discovery.events.peerDiscovery import peerDiscovery
 from libp2p.network.exceptions import SwarmDialAllFailedError, SwarmException
 from libp2p.peer.peerinfo import InvalidAddrError, info_from_p2p_addr
@@ -14,6 +16,9 @@ from libp2p.utils.dns_utils import (
     DNSResolutionMetrics,
     resolve_multiaddr_with_retry,
 )
+
+if TYPE_CHECKING:
+    from libp2p.events import EventBus
 
 logger = logging.getLogger(__name__)
 resolver = DNSResolver()
@@ -48,6 +53,7 @@ class BootstrapDiscovery:
         dns_max_retries: int = 3,
         dns_metrics: DNSResolutionMetrics | None = None,
         reconnect_interval: float = DEFAULT_RECONNECT_INTERVAL,
+        event_bus: "EventBus | None" = None,
     ):
         """
         Initialize BootstrapDiscovery.
@@ -63,6 +69,7 @@ class BootstrapDiscovery:
             dns_metrics: Optional metrics to record DNS success/failure counts.
             reconnect_interval: Seconds between periodic reconnection attempts
                 to bootstrap peers (go-libp2p spec compliance).
+            event_bus: Optional event bus for emitting discovery metric events.
 
         """
         self.swarm = swarm
@@ -79,6 +86,7 @@ class BootstrapDiscovery:
         # go-libp2p spec: track consecutive failures per peer for removal.
         self._failure_counts: dict[str, int] = {}
         self._reconnect_scope: trio.CancelScope | None = None
+        self.event_bus = event_bus
 
     async def start(self) -> None:
         """Process bootstrap addresses and emit peer discovery events in parallel."""
@@ -267,6 +275,13 @@ class BootstrapDiscovery:
         if peer_id_str not in self.discovered_peers:
             self.discovered_peers.add(peer_id_str)
             peerDiscovery.emit_peer_discovered(peer_info)
+            if self.event_bus is not None:
+                event = DiscoveryEvent()
+                event.peer_id = str(peer_info.peer_id)
+                event.peer_discovered = True
+                event.source = "bootstrap"
+                event.addr_count = len(supported_addrs)
+                self.event_bus.emit(event)
             logger.info("Peer discovered: %s", peer_info.peer_id)
             await self._connect_to_peer(peer_info.peer_id)
         else:
@@ -295,6 +310,7 @@ class BootstrapDiscovery:
             return
 
         connection_start_time = trio.current_time()
+        connect_success = False
 
         try:
             with trio.fail_after(self.connection_timeout):
@@ -307,6 +323,7 @@ class BootstrapDiscovery:
                     )
                     # go-libp2p spec: reset failure count on success.
                     self._failure_counts.pop(peer_id_str, None)
+                    connect_success = True
                 else:
                     logger.warning(
                         "Dial succeeded but connection not found for %s", peer_id
@@ -360,6 +377,14 @@ class BootstrapDiscovery:
                 e,
                 failed_connection_time,
             )
+        finally:
+            if self.event_bus is not None:
+                event = DiscoveryEvent()
+                event.peer_id = peer_id_str
+                event.bootstrap_connect = True
+                event.success = connect_success
+                event.duration_ms = (trio.current_time() - connection_start_time) * 1000
+                self.event_bus.emit(event)
 
     def _record_failure(self, peer_id_str: str) -> None:
         """

@@ -70,9 +70,7 @@ class WebsocketConfig:
     max_buffered_amount: int = 4 * 1024 * 1024
     max_connections: int = 1000
 
-    # DNS resolution (for dial when the multiaddr is a /dnsaddr; a /dns, /dns4
-    # or /dns6 name is resolved by the socket connect and kept as the TLS
-    # server name and the Host header)
+    # DNS resolution (for dial when multiaddr has dns/dns4/dns6/dnsaddr)
     dns_resolution_timeout: float = 5.0
     dns_max_retries: int = 3
 
@@ -634,6 +632,8 @@ class WebsocketTransport(ITransport):
     async def _track_connection(self, conn: P2PWebSocketConnection) -> None:
         """Track a new connection."""
         async with self._connection_lock:
+            if conn.is_closed():
+                raise OpenConnectionError("WebSocket closed before registration")
             if self._current_connections >= self._config.max_connections:
                 raise OpenConnectionError("Maximum connections reached")
 
@@ -641,6 +641,11 @@ class WebsocketTransport(ITransport):
             self._connections[conn_id] = conn
             self._current_connections += 1
             self._total_connections += 1
+
+            async def untrack() -> None:
+                await self._untrack_connection(conn)
+
+            conn._on_close = untrack
 
     async def _untrack_connection(self, conn: P2PWebSocketConnection) -> None:
         """Stop tracking a connection."""
@@ -728,7 +733,13 @@ class WebsocketTransport(ITransport):
                 raise OpenConnectionError(f"Failed to create connection to {ws_url}")
 
             # Track connection
-            await self._track_connection(conn)
+            try:
+                await self._track_connection(conn)
+            except BaseException:
+                with trio.move_on_after(5) as cleanup_scope:
+                    cleanup_scope.shield = True
+                    await conn.close()
+                raise
 
             logger.info(f"Connection established to {ws_url}")
             return conn
@@ -747,10 +758,7 @@ class WebsocketTransport(ITransport):
         except Exception as e:
             self._failed_connections += 1
             logger.error(f"Failed to connect to {ws_url}: {e}", exc_info=True)
-            # Chain the cause: a refused certificate or a rejected upgrade is
-            # what the caller needs to see, and str(e) alone is empty for some
-            # ssl and trio errors.
-            raise OpenConnectionError(f"Failed to connect to {ws_url}: {e!r}") from e
+            raise OpenConnectionError(f"Failed to connect to {ws_url}: {str(e)}")
 
     async def _create_direct_connection(
         self, proto_info: ParsedWebSocketMultiaddr, ssl_context: ssl.SSLContext | None
@@ -775,82 +783,164 @@ class WebsocketTransport(ITransport):
 
         logger.debug(f"WebsocketTransport.dial connecting to {ws_url}")
 
-        # Apply timeout to the connection process
-        with trio.fail_after(self._config.handshake_timeout):
-            from trio import aclose_forcefully
-            from trio_websocket import wrap_client_stream
-
-            # Use background nursery if available (set by Swarm),
-            # otherwise create temporary one
-            if self._background_nursery is None:
-                raise OpenConnectionError(
-                    "No background nursery available. "
-                    "WebSocket transport requires Swarm to set background nursery."
-                )
-
-            # Open the stream, and for wss complete the TLS handshake, in this
-            # task rather than letting trio_websocket do it from the background
-            # nursery. connect_websocket_url() starts its reader task there and
-            # then waits on an Event that is only ever set on success, so a
-            # refused certificate or an unanswered upgrade never reaches the
-            # dialer: it waits out handshake_timeout and reports a timeout,
-            # while the failed connection keeps the socket open. Owning the
-            # stream here means TLS errors surface with their cause and the
-            # socket is closed on every failure path.
-            stream: trio.SocketStream | trio.SSLStream
-            stream = await trio.open_tcp_stream(host, port)
-            try:
-                if ssl_context is not None:
-                    stream = trio.SSLStream(
-                        stream,
-                        ssl_context,
-                        server_hostname=server_name,
-                        https_compatible=True,
-                    )
-                    try:
-                        await stream.do_handshake()
-                    except Exception as exc:
-                        # trio reports a failed handshake as BrokenResourceError
-                        # and keeps the ssl error as the cause, so report the
-                        # cause: "certificate verify failed" is the actionable
-                        # part, "BrokenResourceError()" is not.
-                        ssl_error = _find_ssl_error(exc)
-                        if ssl_error is None:
-                            raise
-                        raise OpenConnectionError(
-                            f"TLS handshake failed for {ws_url}: {ssl_error}"
-                        ) from ssl_error
-
-                # trio_websocket omits the port from the Host header on the
-                # default ports, so keep that behaviour.
-                host_header = (
-                    server_name if port in (80, 443) else f"{server_name}:{port}"
-                )
-                ws = await wrap_client_stream(
-                    self._background_nursery,
-                    stream,
-                    host_header,
-                    "/",
-                    message_queue_size=1024,
-                    max_message_size=self._config.max_message_size,
-                )
-            except BaseException:
-                # Includes the trio.Cancelled from fail_after: without the
-                # shield the close itself would be cancelled and the socket
-                # would leak exactly when the handshake timed out.
-                with trio.CancelScope(shield=True):  # type: ignore[call-arg]
-                    await aclose_forcefully(stream)
-                raise
-
-            # Create our connection wrapper
-            conn = P2PWebSocketConnection(
-                ws,
-                None,  # local_addr will be set after upgrade
-                is_secure=proto_info.is_wss,
-                max_buffered_amount=self._config.max_buffered_amount,
+        # Use background nursery if available (set by Swarm),
+        # otherwise create temporary one
+        if self._background_nursery is None:
+            raise OpenConnectionError(
+                "No background nursery available. "
+                "WebSocket transport requires Swarm to set background nursery."
             )
 
-            return conn
+        # trio_websocket runs the connection's reader task in the nursery
+        # passed to connect_websocket_url. When the remote rejects the
+        # handshake (e.g. a plain HTTP/nginx endpoint that answers 404),
+        # the reader task raises ConnectionRejected. If that task ran in
+        # the *shared* Swarm background nursery, the exception would escape
+        # into the TrioManager nursery and crash the whole node.
+        #
+        # Each client connection therefore owns a private nursery hosted by
+        # a wrapper task; any reader/connect error is caught by the wrapper
+        # and delivered to the dialer as a result over a memory channel.
+        result_send, result_recv = trio.open_memory_channel[object](1)
+        host_scope = trio.CancelScope()
+
+        async def _ws_client_host_body() -> None:
+            conn: P2PWebSocketConnection | None = None
+            stream: trio.SocketStream | trio.SSLStream | None = None
+            try:
+                async with trio.open_nursery() as conn_nursery:
+                    try:
+                        from trio import aclose_forcefully
+                        from trio_websocket import wrap_client_stream
+
+                        # Own the socket in this task instead of letting
+                        # connect_websocket_url open and manage it from a
+                        # background reader task: a refused certificate or an
+                        # unanswered upgrade would otherwise leave the socket
+                        # open on every failed dial, which leaked both file
+                        # descriptors and RSS in production. (Upstream fix.)
+                        with trio.fail_after(self._config.handshake_timeout):
+                            stream = await trio.open_tcp_stream(host, port)
+                            try:
+                                if ssl_context is not None:
+                                    stream = trio.SSLStream(
+                                        stream,
+                                        ssl_context,
+                                        server_hostname=server_name,
+                                        https_compatible=True,
+                                    )
+                                    try:
+                                        await stream.do_handshake()
+                                    except Exception as exc:
+                                        ssl_error = _find_ssl_error(exc)
+                                        if ssl_error is None:
+                                            raise
+                                        raise OpenConnectionError(
+                                            "TLS handshake failed for "
+                                            f"{ws_url}: {ssl_error}"
+                                        ) from ssl_error
+
+                                # trio_websocket omits the port from the Host
+                                # header on the default ports.
+                                host_header = (
+                                    server_name
+                                    if port in (80, 443)
+                                    else f"{server_name}:{port}"
+                                )
+                                ws = await wrap_client_stream(
+                                    conn_nursery,
+                                    stream,
+                                    host_header,
+                                    "/",
+                                    message_queue_size=1024,
+                                    max_message_size=self._config.max_message_size,
+                                )
+                            except BaseException:
+                                # Includes the trio.Cancelled raised by
+                                # fail_after: shield the close, otherwise the
+                                # socket leaks exactly when the handshake times
+                                # out.
+                                with trio.CancelScope() as shield_scope:
+                                    shield_scope.shield = True
+                                    await aclose_forcefully(stream)
+                                raise
+                    except BaseException as exc:
+                        await result_send.send(exc)
+                        return
+
+                    conn = P2PWebSocketConnection(
+                        ws,
+                        None,  # local_addr will be set after upgrade
+                        is_secure=proto_info.is_wss,
+                        max_buffered_amount=self._config.max_buffered_amount,
+                        close_timeout=self._config.close_timeout,
+                    )
+                    try:
+                        await result_send.send(conn)
+                    except (trio.BrokenResourceError, trio.ClosedResourceError):
+                        return
+
+                    # Keep the private nursery (and the reader task) alive for
+                    # as long as the connection is open.
+                    while not conn._close_finished:
+                        if ws.closed is not None:
+                            # closed is set when a local close STARTS. Its
+                            # reader must survive to receive the acknowledgement.
+                            await conn.close()
+                            break
+                        await trio.sleep(1)
+                    conn_nursery.cancel_scope.cancel()
+            except trio.Cancelled:
+                raise
+            except BaseException as exc:
+                # Reader/connection error after the handshake: deliver it to
+                # the dialer (if it is still listening) and exit; never let it
+                # propagate into the shared Swarm background nursery.
+                try:
+                    await result_send.send(exc)
+                except (trio.BrokenResourceError, trio.ClosedResourceError):
+                    pass
+                except BaseException:
+                    pass
+            finally:
+                if conn is not None:
+                    with trio.move_on_after(5) as cleanup_scope:
+                        cleanup_scope.shield = True
+                        await conn.close()
+                if stream is not None:
+                    with trio.move_on_after(5) as socket_cleanup_scope:
+                        socket_cleanup_scope.shield = True
+                        await trio.aclose_forcefully(stream)
+                result_send.close()
+
+        async def _ws_client_host() -> None:
+            with host_scope:
+                await _ws_client_host_body()
+
+        self._background_nursery.start_soon(_ws_client_host)
+
+        # Apply timeout to the connection process. The wrapper task enforces
+        # the same timeout on its side; the receive below unblocks as soon as
+        # either the connection or the error is delivered.
+        try:
+            with trio.fail_after(self._config.handshake_timeout):
+                result = await result_recv.receive()
+        except BaseException:
+            # The caller can cancel earlier than our handshake deadline.
+            # Its private reader/nursery must not outlive that abandoned dial.
+            host_scope.cancel()
+            raise
+        finally:
+            result_recv.close()
+        if isinstance(result, OpenConnectionError):
+            raise result
+        if isinstance(result, BaseException):
+            raise OpenConnectionError(f"Failed to dial {ws_url}: {result}") from result
+        if not isinstance(result, P2PWebSocketConnection):
+            raise OpenConnectionError(
+                f"Failed to dial {ws_url}: unexpected result {result!r}"
+            )
+        return result
 
     async def _create_proxy_connection(
         self,
@@ -910,6 +1000,7 @@ class WebsocketTransport(ITransport):
                     None,  # local_addr will be set after upgrade
                     is_secure=proto_info.is_wss,
                     max_buffered_amount=self._config.max_buffered_amount,
+                    close_timeout=self._config.close_timeout,
                 )
 
                 logger.debug("Proxy connection established, tracking connection")
@@ -928,12 +1019,7 @@ class WebsocketTransport(ITransport):
         """
         Dial a WebSocket connection to the given multiaddr.
 
-        A ``/dnsaddr`` address is resolved through its TXT records first; the
-        records name the concrete addresses. A ``/dns``, ``/dns4`` or ``/dns6``
-        address is dialed by name: the name becomes the TLS server name and
-        the ``Host`` header of the WebSocket handshake, which a TLS-terminating
-        proxy in front of the peer selects the origin by, and the socket
-        connect resolves it. This matches go-libp2p and js-libp2p.
+        Resolves DNS (dns, dns4, dns6, dnsaddr) before dialing (Phase 3.1).
 
         Args:
             maddr: The multiaddr to dial (e.g., /ip4/127.0.0.1/tcp/8000/ws)
@@ -982,7 +1068,7 @@ class WebsocketTransport(ITransport):
         return await self._dial_resolved(maddr)
 
     async def _dial_resolved(self, maddr: Multiaddr) -> RawConnection:
-        """Dial a multiaddr the socket can connect to: an IP or a DNS name."""
+        """Dial using a multiaddr that has an IP (no DNS)."""
         if not self.can_dial(maddr):
             raise OpenConnectionError(f"Cannot dial {maddr}")
 
@@ -1028,7 +1114,7 @@ class WebsocketTransport(ITransport):
         ):
             self._background_nursery.start_soon(self._initialize_autotls)
 
-        listener = WebsocketListener(
+        return WebsocketListener(
             handler,
             self._upgrader,
             WebsocketListenerConfig(
@@ -1045,8 +1131,6 @@ class WebsocketTransport(ITransport):
             ),
             peer_id=self._peer_id,
         )
-        self._active_listeners.add(listener)
-        return listener
 
     async def get_connections(self) -> dict[str, P2PWebSocketConnection]:
         """Get all active connections."""
@@ -1067,29 +1151,6 @@ class WebsocketTransport(ITransport):
             "proxy_connections": self._proxy_connections,
             "has_proxy_config": bool(self._config.proxy_url),
         }
-
-    async def close(self) -> None:
-        """
-        Close all tracked WebSocket connections and listeners.
-
-        Invoked from ``Swarm.close()`` / ``Swarm.run()`` shutdown via
-        ``TransportManager.close_all()`` so dialed/accepted sockets are released
-        (#1498).
-        """
-        async with self._connection_lock:
-            connections = list(self._connections.values())
-            self._connections.clear()
-            self._current_connections = 0
-        listeners = list(self._active_listeners)
-        self._active_listeners.clear()
-
-        async with trio.open_nursery() as nursery:
-            for connection in connections:
-                nursery.start_soon(connection.close)
-            for listener in listeners:
-                nursery.start_soon(listener.close)
-
-        logger.debug("WebSocket transport closed")
 
     def resolve(self, maddr: Multiaddr) -> list[Multiaddr]:
         """

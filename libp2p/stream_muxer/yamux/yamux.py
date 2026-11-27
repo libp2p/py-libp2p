@@ -180,6 +180,9 @@ class YamuxStream(IMuxedStream):
         # holding unread buffered data (used by the stale-stream sweeper to
         # reclaim the entry after a grace period). 0.0 = not fully closed yet.
         self._closed_at = 0.0
+        # Full application close abandons reads, unlike a deliberate write
+        # half-close. Give the peer time to finish before resetting this side.
+        self._read_abandoned_at: float | None = None
         self.send_window = DEFAULT_WINDOW_SIZE
         self.recv_window = DEFAULT_WINDOW_SIZE
         self.window_lock = trio.Lock()
@@ -595,6 +598,21 @@ class YamuxStream(IMuxedStream):
 
     async def close(self) -> None:
         self._log_perf_yamux_summary()
+        try:
+            await self._close_locked()
+        finally:
+            # Cancellation derives from BaseException and would otherwise skip
+            # the finalize below (it is reached only after the FIN write),
+            # stranding this stream in the connection's registries. NetStream
+            # shields its own close, but the muxed stream is also closed
+            # directly by other callers.
+            with trio.CancelScope() as finalize_scope:
+                finalize_scope.shield = True
+                await self.conn._finalize_stream(
+                    self, fully_closed=(self.send_closed and self.recv_closed)
+                )
+
+    async def _close_locked(self) -> None:
         async with self.close_lock:
             if not self.send_closed:
                 logger.debug(f"Half-closing stream {self.stream_id} (local end)")
@@ -620,37 +638,42 @@ class YamuxStream(IMuxedStream):
                 # Stream is half-closed but not fully closed
                 self.closed = False
 
-            # Release the backlog slot now that the local side is done with
-            # this stream. If the peer already closed its side as well, drop
-            # the stream bookkeeping entirely.
-            await self.conn._finalize_stream(
-                self, fully_closed=(self.send_closed and self.recv_closed)
-            )
+    async def close_read(self) -> None:
+        """Abandon reads, allowing a grace period for the peer's FIN."""
+        if not self.recv_closed and self._read_abandoned_at is None:
+            self._read_abandoned_at = trio.current_time()
 
     async def reset(self) -> None:
-        if not self.closed:
-            async with self.close_lock:
-                logger.debug(f"Resetting stream {self.stream_id}")
-                try:
-                    header = struct.pack(
-                        YAMUX_HEADER_FORMAT,
-                        0,
-                        TYPE_WINDOW_UPDATE,
-                        FLAG_RST,
-                        self.stream_id,
-                        0,
-                    )
-                    await self.conn._write_frame(header)
-                except (RawConnError, ConnectionClosedError) as e:
-                    logger.debug(f"Error sending RST, connection likely closed: {e}")
-                finally:
-                    self.closed = True
-                    self.send_closed = True
-                    self.recv_closed = True
-                    self.reset_received = True  # Mark as reset
+        try:
+            if not self.closed:
+                async with self.close_lock:
+                    logger.debug(f"Resetting stream {self.stream_id}")
+                    try:
+                        header = struct.pack(
+                            YAMUX_HEADER_FORMAT,
+                            0,
+                            TYPE_WINDOW_UPDATE,
+                            FLAG_RST,
+                            self.stream_id,
+                            0,
+                        )
+                        await self.conn._write_frame(header)
+                    except (RawConnError, ConnectionClosedError) as e:
+                        logger.debug(
+                            f"Error sending RST, connection likely closed: {e}"
+                        )
+                    finally:
+                        self.closed = True
+                        self.send_closed = True
+                        self.recv_closed = True
+                        self.reset_received = True  # Mark as reset
+        finally:
             # A reset kills the stream in both directions immediately, so the
-            # backlog slot can be released and the bookkeeping dropped.
-            await self.conn._finalize_stream(self, fully_closed=True)
+            # backlog slot can be released and the bookkeeping dropped. Shield
+            # this step so cancellation cannot strand the entry.
+            with trio.CancelScope() as finalize_scope:
+                finalize_scope.shield = True
+                await self.conn._finalize_stream(self, fully_closed=True)
 
     def set_deadline(self, ttl: int) -> None:
         """
@@ -809,6 +832,14 @@ class Yamux(IMuxedConn):
                 self.event_shutting_down.set()
                 # Close channel to unblock accept_stream
                 self.new_stream_send_channel.close()
+                # go-yamux's Session.Close tears the session down synchronously
+                # and waits for the send/recv goroutines to exit.  Cancel the
+                # muxer's background loops here instead of relying on the RTT
+                # loop's 30s sleep to notice the shutdown flag, otherwise a
+                # retired connection keeps its task tree (and all objects
+                # reachable from it) alive long after it closed.
+                if self._nursery is not None:
+                    self._nursery.cancel_scope.cancel()
                 for stream in self.streams.values():
                     stream.closed = True
                     stream.send_closed = True
@@ -824,14 +855,15 @@ class Yamux(IMuxedConn):
         except Exception as e:
             logger.debug(f"Error closing secured_conn for peer {self.peer_id}: {e}")
         self.event_closed.set()
-        if self.on_close:
+        on_close = getattr(self, "on_close", None)
+        if on_close:
             logger.debug(f"Calling on_close in Yamux.close for peer {self.peer_id}")
-            if inspect.iscoroutinefunction(self.on_close):
-                if self.on_close is not None:
-                    await self.on_close()
+            if inspect.iscoroutinefunction(on_close):
+                if on_close is not None:
+                    await on_close()
             else:
-                if self.on_close is not None:
-                    await self.on_close()
+                if on_close is not None:
+                    await on_close()
         await trio.sleep(0.1)
 
     @property
@@ -907,7 +939,13 @@ class Yamux(IMuxedConn):
                 f"{self.stream_backlog_semaphore.value}"
             )
 
-        # If stream is rejected or errors, release the semaphore
+        # If stream is rejected, errors, or the caller is cancelled, release
+        # the bookkeeping and the backlog slot: the stream was never returned,
+        # so no caller can ever close it.  Cancellation derives from
+        # BaseException, so an ``except Exception`` here used to leave the
+        # stream, its buffer and its event registered and keep the backlog slot
+        # charged for the lifetime of the connection; enough of those and
+        # ``open_stream`` blocks forever on a full semaphore.
         try:
             header = struct.pack(
                 YAMUX_HEADER_FORMAT,
@@ -920,18 +958,20 @@ class Yamux(IMuxedConn):
             logger.debug(f"Sending SYN header for stream {stream_id}")
             await self._write_frame(header)
             return stream
-        except Exception as e:
-            self.stream_backlog_semaphore.release()
-            stream._backlog_slot_released = True
-            # Clean up stream if SYN fails
-            async with self.streams_lock:
-                if stream_id in self.streams:
-                    del self.streams[stream_id]
-                if stream_id in self.stream_buffers:
-                    del self.stream_buffers[stream_id]
-                if stream_id in self.stream_events:
-                    del self.stream_events[stream_id]
-            raise MuxedStreamError(f"Failed to send SYN: {e}") from e
+        except BaseException as e:
+            with trio.CancelScope() as cleanup_scope:
+                cleanup_scope.shield = True
+                if not stream._backlog_slot_released:
+                    stream._backlog_slot_released = True
+                    if stream._owns_backlog_slot:
+                        self.stream_backlog_semaphore.release()
+                async with self.streams_lock:
+                    self.streams.pop(stream_id, None)
+                    self.stream_buffers.pop(stream_id, None)
+                    self.stream_events.pop(stream_id, None)
+            if isinstance(e, Exception):
+                raise MuxedStreamError(f"Failed to send SYN: {e}") from e
+            raise
 
     async def accept_stream(self) -> IMuxedStream:
         """
@@ -1051,12 +1091,29 @@ class Yamux(IMuxedConn):
             )
         return reclaimed
 
+    async def _reset_abandoned_streams(self, now: float | None = None) -> int:
+        """Bound the lifetime of streams fully closed by the application."""
+        if now is None:
+            now = trio.current_time()
+        async with self.streams_lock:
+            abandoned = [
+                stream
+                for stream in self.streams.values()
+                if stream._read_abandoned_at is not None
+                and not stream.recv_closed
+                and now - stream._read_abandoned_at >= _STALE_STREAM_GRACE_SECONDS
+            ]
+        for stream in abandoned:
+            await stream.reset()
+        return len(abandoned)
+
     async def _stale_stream_sweeper(self) -> None:
         """Periodically reclaim bookkeeping of fully-closed stale streams."""
         while not self.event_shutting_down.is_set():
             await trio.sleep(_STALE_STREAM_SWEEP_INTERVAL)
             if self.event_shutting_down.is_set():
                 break
+            await self._reset_abandoned_streams()
             async with self.streams_lock:
                 self._sweep_stale_streams()
 
@@ -1798,12 +1855,13 @@ class Yamux(IMuxedConn):
         self.event_closed.set()
 
         # Call on_close callback if provided
-        if self.on_close:
+        on_close = getattr(self, "on_close", None)
+        if on_close:
             logger.debug(f"Calling on_close for peer {self.peer_id}")
             try:
-                if inspect.iscoroutinefunction(self.on_close):
-                    await self.on_close()
+                if inspect.iscoroutinefunction(on_close):
+                    await on_close()
                 else:
-                    self.on_close()
+                    on_close()
             except Exception as callback_error:
                 logger.error(f"Error in on_close callback: {callback_error}")

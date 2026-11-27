@@ -3,6 +3,7 @@ QUIC Stream implementation
 Provides stream interface over QUIC's native multiplexing.
 """
 
+from collections.abc import Awaitable, Callable
 from enum import Enum
 import logging
 import time
@@ -73,6 +74,7 @@ class StreamTimeline:
         self.closed_at: float | None = None
         self.reset_at: float | None = None
         self.error_code: int | None = None
+        self.last_activity: float = time.time()
 
     def record_open(self) -> None:
         self.opened_at = time.time()
@@ -80,6 +82,7 @@ class StreamTimeline:
     def record_first_data(self) -> None:
         if self.first_data_at is None:
             self.first_data_at = time.time()
+        self.last_activity = time.time()
 
     def record_close(self) -> None:
         self.closed_at = time.time()
@@ -87,6 +90,10 @@ class StreamTimeline:
     def record_reset(self, error_code: int) -> None:
         self.reset_at = time.time()
         self.error_code = error_code
+
+    def touch(self) -> None:
+        """Update last_activity timestamp."""
+        self.last_activity = time.time()
 
 
 class QUICStream(IMuxedStream):
@@ -144,7 +151,9 @@ class QUICStream(IMuxedStream):
         # Close/reset state
         self._write_closed = False
         self._read_closed = False
+        self._cleaned_up = False
         self._close_event = trio.Event()
+        self._close_callback: Callable[[], Awaitable[None]] | None = None
         self._reset_error_code: int | None = None
 
         # Lifecycle tracking
@@ -395,7 +404,11 @@ class QUICStream(IMuxedStream):
         are closed and resources are cleaned up.
         """
         async with self._state_lock:
-            if self._state in (StreamState.CLOSED, StreamState.RESET):
+            if self._cleaned_up and self._state in (
+                StreamState.CLOSED,
+                StreamState.RESET,
+            ):
+                self._receive_buffer.clear()
                 return
 
             logger.debug(f"Closing stream {self.stream_id}")
@@ -434,6 +447,7 @@ class QUICStream(IMuxedStream):
                 logger.debug(f"Stream {self.stream_id} write side already ended")
 
             self._write_closed = True
+            self._timeline.touch()
 
             async with self._state_lock:
                 if self._read_closed:
@@ -442,6 +456,7 @@ class QUICStream(IMuxedStream):
                     self._state = StreamState.WRITE_CLOSED
 
             logger.debug(f"Stream {self.stream_id} write side closed")
+            await self._finish_graceful_close()
 
         except Exception as e:
             logger.error(f"Error closing write side of stream {self.stream_id}: {e}")
@@ -452,7 +467,15 @@ class QUICStream(IMuxedStream):
             return
 
         try:
+            if self._connection and getattr(self._connection, "_quic", None):
+                try:
+                    self._connection._quic.stop_stream(self._stream_id, 0)
+                    await self._connection._transmit()
+                except ValueError:
+                    # aioquic may already have discarded a finished stream.
+                    logger.debug("Receive side already gone for %s", self.stream_id)
             self._read_closed = True
+            self._timeline.touch()
 
             async with self._state_lock:
                 if self._write_closed:
@@ -464,6 +487,7 @@ class QUICStream(IMuxedStream):
             self._receive_event.set()
 
             logger.debug(f"Stream {self.stream_id} read side closed")
+            await self._finish_graceful_close()
 
         except Exception as e:
             logger.error(f"Error closing read side of stream {self.stream_id}: {e}")
@@ -489,8 +513,13 @@ class QUICStream(IMuxedStream):
 
         try:
             # Send QUIC reset frame
-            self._connection._quic.reset_stream(self._stream_id, error_code)
-            await self._connection._transmit()
+            if self._connection and getattr(self._connection, "_quic", None):
+                self._connection._quic.reset_stream(self._stream_id, error_code)
+                try:
+                    self._connection._quic.stop_stream(self._stream_id, error_code)
+                except ValueError:
+                    logger.debug("Receive side already gone for %s", self.stream_id)
+                await self._connection._transmit()
 
         except StreamStateError as e:
             # The peer has not opened the stream, expected during shutdown races.
@@ -499,9 +528,13 @@ class QUICStream(IMuxedStream):
             logger.error(f"Error sending reset for stream {self.stream_id}: {e}")
         finally:
             # Always cleanup resources
-            await self._cleanup_resources()
-            self._timeline.record_reset(error_code)
-            self._close_event.set()
+            with trio.CancelScope() as cleanup_scope:
+                cleanup_scope.shield = True
+                await self._cleanup_resources()
+                self._timeline.record_reset(error_code)
+                self._close_event.set()
+                self._receive_event.set()
+                self._backpressure_event.set()
 
     def is_closed(self) -> bool:
         """Check if stream is completely closed."""
@@ -604,6 +637,7 @@ class QUICStream(IMuxedStream):
             self._receive_event.set()
 
             logger.debug(f"Stream {self.stream_id} received FIN")
+            await self._finish_graceful_close()
 
     async def handle_stop_sending(self, error_code: int) -> None:
         """
@@ -625,24 +659,37 @@ class QUICStream(IMuxedStream):
         # Wake up any pending write operations
         self._backpressure_event.set()
 
+        terminal = False
         async with self._state_lock:
             if self.direction == StreamDirection.OUTBOUND:
                 self._state = StreamState.CLOSED
+                terminal = True
             elif self._read_closed:
                 self._state = StreamState.CLOSED
+                terminal = True
             else:
                 # Only write side closed - add WRITE_CLOSED state if needed
                 self._state = StreamState.WRITE_CLOSED
 
         # Send RESET_STREAM in response (QUIC protocol requirement)
         try:
-            self._connection._quic.reset_stream(int(self.stream_id), error_code)
-            await self._connection._transmit()
-            logger.debug(f"Sent RESET_STREAM for stream {self.stream_id}")
+            if self._connection and getattr(self._connection, "_quic", None):
+                self._connection._quic.reset_stream(int(self.stream_id), error_code)
+                await self._connection._transmit()
+                logger.debug(f"Sent RESET_STREAM for stream {self.stream_id}")
         except Exception as e:
             logger.warning(
                 f"Could not send RESET_STREAM for stream {self.stream_id}: {e}"
             )
+        finally:
+            # The state transition above is already committed, so terminal
+            # streams must still record their close and release resources if
+            # this task is cancelled while transmitting. Otherwise the wrapper
+            # is neither open nor closed, and retrying close() does nothing.
+            if terminal:
+                with trio.CancelScope() as cleanup_scope:
+                    cleanup_scope.shield = True
+                    await self._finish_graceful_close()
 
     async def handle_reset(self, error_code: int) -> None:
         """
@@ -804,14 +851,49 @@ class QUICStream(IMuxedStream):
                     f"Failed to release memory for stream {self.stream_id}: {e}"
                 )
 
-    async def _cleanup_resources(self) -> None:
+    async def set_close_callback(self, callback: Callable[[], Awaitable[None]]) -> None:
+        """
+        Bridge transport termination to its outer network-stream owner.
+
+        Registration may race with a remote reset while opened-stream listeners
+        run. Deliver that termination immediately if it already happened.
+        """
+        self._close_callback = callback
+        if self.is_closed():
+            await self._notify_closed()
+
+    async def _notify_closed(self) -> None:
+        callback, self._close_callback = self._close_callback, None
+        if callback is not None:
+            with trio.move_on_after(5) as scope:
+                scope.shield = True
+                await callback()
+
+    async def _finish_graceful_close(self) -> None:
+        if self.is_closed():
+            self._timeline.record_close()
+            # FIN completes transport ownership, but queued reply bytes must
+            # remain readable after the local write side has been half-closed.
+            await self._cleanup_resources(discard_buffer=False)
+            self._close_event.set()
+
+    async def _cleanup_resources(self, discard_buffer: bool = True) -> None:
         """Clean up stream resources."""
+        # Clear the receive buffer to release C-level memory immediately.
+        # The old comment ("allow application to drain") kept the buffer
+        # alive until GC collected the QUICStream, but reference cycles
+        # between QUICStream → QUICConnection → aioquic prevent timely
+        # collection, causing indefinite RSS growth.
+        if discard_buffer:
+            self._receive_buffer.clear()
+
+        if self._cleaned_up:
+            return
+        self._cleaned_up = True
+
         # Release all reserved memory
         if self._memory_reserved > 0:
             self._release_memory(self._memory_reserved)
-
-        # Do not clear receive buffer here. Allow application to drain it
-        # before surfacing EOF/reset.
 
         # Release resource scope if present
         if self._resource_scope:
@@ -828,6 +910,7 @@ class QUICStream(IMuxedStream):
 
         # Remove from connection's stream registry
         self._connection._remove_stream(self._stream_id)
+        await self._notify_closed()
 
         logger.debug(f"Stream {self.stream_id} resources cleaned up")
 

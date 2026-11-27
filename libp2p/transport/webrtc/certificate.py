@@ -75,13 +75,10 @@ class WebRTCCertificate:
             private_key = ec.generate_private_key(ec.SECP256R1())
 
             now = datetime.now(timezone.utc)
-            subject = issuer = x509.Name(
-                [
-                    x509.NameAttribute(
-                        NameOID.COMMON_NAME, common_name
-                    )  # pyrefly: ignore[bad-argument-type]
-                ]
-            )
+            name_attr = x509.NameAttribute(
+                NameOID.COMMON_NAME, common_name
+            )  # pyrefly: ignore[bad-argument-type]
+            subject = issuer = x509.Name([name_attr])
             certificate = (
                 x509.CertificateBuilder()
                 .subject_name(subject)

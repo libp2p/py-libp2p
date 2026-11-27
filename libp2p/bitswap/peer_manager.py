@@ -49,6 +49,11 @@ class BitswapPeerManager:
         if cid in stats._pending_requests:
             del stats._pending_requests[cid]
 
+    def cancel_pending_request(self, cid: CIDObject) -> None:
+        """Forget cancelled latency samples without recording a timeout."""
+        for stats in self.peers.values():
+            stats._pending_requests.pop(cid, None)
+
     def remove_peer(self, peer_id: PeerID) -> None:
         """Drop all stats recorded for a peer (e.g. on disconnect)."""
         self.peers.pop(peer_id, None)

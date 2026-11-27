@@ -1,1 +1,0 @@
-The WebRTC-Direct listener no longer monkey-patches aioice into a fake local ICE-Lite agent. It uses a full controlled muxed ``Connection``; the dialer still synthesises an ``a=ice-lite`` answer so it remains controlling (aiortc/aioice#114).

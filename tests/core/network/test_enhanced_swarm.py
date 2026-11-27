@@ -1,12 +1,13 @@
 import time
 from typing import cast
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from multiaddr import Multiaddr
 import trio
 
-from libp2p.abc import ConnectionType, INetConn, INetStream
+from libp2p import new_host
+from libp2p.abc import ConnectionType, IMuxedConn, INetConn, INetStream
 from libp2p.network.exceptions import SwarmException
 from libp2p.network.swarm import (
     ConnectionConfig,
@@ -14,6 +15,7 @@ from libp2p.network.swarm import (
     Swarm,
 )
 from libp2p.peer.id import ID
+from tests.utils.factories import raw_conn_factory
 
 
 class MockConnection(INetConn):
@@ -344,6 +346,43 @@ def _swarm_with_unanswered_transport() -> tuple[Swarm, ID]:
     transport_manager.transport_for_dialing.return_value = _UnansweredTransport()
     swarm.transport_manager = transport_manager
     return swarm, ID.from_pubkey(create_new_key_pair().public_key)
+
+
+@pytest.mark.trio
+@pytest.mark.parametrize("responder_dial", [False, True])
+async def test_inbound_upgrade_preserves_muxed_connection_contract(
+    responder_dial, monkeypatch
+):
+    initiator = new_host()
+    responder = new_host()
+    network = cast(Swarm, responder.get_network())
+    addr = Multiaddr("/ip4/127.0.0.1/tcp/0")
+
+    async with (
+        initiator.run([]),
+        responder.run([]),
+        trio.open_nursery() as nursery,
+        raw_conn_factory(nursery) as (outbound, inbound),
+    ):
+        peer_id = initiator.get_id()
+        async with trio.open_nursery() as upgrades:
+            upgrades.start_soon(
+                initiator.upgrade_outbound_connection, outbound, responder.get_id()
+            )
+            if responder_dial:
+                monkeypatch.setattr(
+                    network, "_dial_transport", AsyncMock(return_value=inbound)
+                )
+                registered = await network.dial_addr_as_responder(addr, peer_id)
+                assert registered in network.get_connections(peer_id)
+                muxed_conn = registered.muxed_conn
+            else:
+                muxed_conn = await responder.upgrade_inbound_connection(inbound, addr)
+
+        assert isinstance(muxed_conn, IMuxedConn)
+        assert muxed_conn.peer_id == peer_id
+        [registered] = network.get_connections(peer_id)
+        assert registered.muxed_conn is muxed_conn
 
 
 @pytest.mark.trio

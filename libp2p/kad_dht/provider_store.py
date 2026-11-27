@@ -41,9 +41,14 @@ from .common import (
     ALPHA,
     BUCKET_SIZE,
     MAX_DHT_MESSAGE_SIZE,
+    MAX_LOOKUP_CANDIDATES,
+    MAX_LOOKUP_DURATION,
+    MAX_LOOKUP_QUERIES,
+    MAX_PROVIDER_KEYS,
     PROTOCOL_ID,
     QUERY_TIMEOUT,
 )
+from .events import KadDhtEvent
 from .pb.kademlia_pb2 import (
     Message,
 )
@@ -191,6 +196,10 @@ class ProviderStore:
             logger.debug(f"Loaded {loaded} provider records from {self._persist_path}")
         except Exception as e:
             logger.warning(f"Failed to load provider records: {e}")
+        # Older stores could expire the last record of a local publication
+        # while leaving the key scheduled for republishing.
+        for key in self.providing_keys:
+            self.providers.setdefault(key, {})
 
     async def _republish_provider_records(self) -> None:
         """
@@ -203,12 +212,30 @@ class ProviderStore:
         providing_keys_snapshot = list(self.providing_keys)
 
         # Only republish keys that are due (last republish > 22h ago or never)
+        republished = 0
         for key in providing_keys_snapshot:
+            # The snapshot goes stale while earlier keys in this pass await
+            # network work: unprovide() or capacity eviction can drop a key.
+            if key not in self.providing_keys:
+                continue
             last_republished = self._last_republish.get(key, 0)
             if (current_time - last_republished) >= PROVIDER_RECORD_REPUBLISH_INTERVAL:
                 logger.debug(f"Republishing provider record for key {key.hex()}")
                 await self.provide(key)
-                self._last_republish[key] = current_time
+                # provide() yields while finding peers and announcing. If the
+                # key was removed meanwhile, writing the timestamp back would
+                # leave metadata that no record or cleanup pass ever visits.
+                if key in self.providing_keys:
+                    self._last_republish[key] = current_time
+                    republished += 1
+
+        if republished > 0:
+            event = KadDhtEvent()
+            event.republish = True
+            event.record_type = "provider"
+            event.count = republished
+            event.success = True
+            self.host.get_event_bus().emit(event)
 
     async def provide(self, key: bytes) -> bool:
         """
@@ -221,7 +248,8 @@ class ProviderStore:
         Returns
         -------
         bool
-            True if the advertisement was successful
+            True if the advertisement was successful. False if the store is
+            full of local publications or no peer received the advertisement.
 
         """
         if not self.host or not self.peer_routing:
@@ -233,11 +261,9 @@ class ProviderStore:
         for addr in self.host.get_addrs():
             local_addrs.append(addr)
 
-        # Track that we're providing this key
-        self.providing_keys.add(key)
-
         local_peer_info = PeerInfo(self.host.get_id(), local_addrs)
-        self.add_provider(key, local_peer_info)
+        if not self._store_provider(key, local_peer_info, local=True):
+            return False
 
         # Find the k closest peers to the key
         closest_peers = await self.peer_routing.find_closest_peers_network(key)
@@ -276,7 +302,38 @@ class ProviderStore:
 
         success_count = success_count_list[0]
         logger.info(f"Successfully advertised to {success_count} peers")
+
+        # Emit provide metric event on the host's event bus
+        event = KadDhtEvent()
+        event.provide = True
+        event.key = key.hex()
+        event.peers_announced = success_count
+        event.success = success_count > 0
+        self.host.get_event_bus().emit(event)
         return success_count > 0
+
+    def unprovide(self, key: bytes) -> bool:
+        """
+        Stop tracking a local provider record for *key*.
+
+        Removes the key from ``providing_keys`` and ``_last_republish`` and
+        drops the locally stored provider record. Returns True if the key was
+        being provided. This is local bookkeeping only; it does not send a
+        network revocation (Bitswap/DHT have no unprovide message).
+
+        :param key: The content key (multihash) to forget
+
+        Returns
+        -------
+        bool
+            True if the key was previously tracked as locally provided
+
+        """
+        was_providing = key in self.providing_keys
+        self._drop_key(key)
+        if was_providing:
+            self._save()
+        return was_providing
 
     async def _send_add_provider(self, peer_id: ID, key: bytes) -> bool:
         """
@@ -379,6 +436,12 @@ class ProviderStore:
             logger.debug(
                 f"Found {len(local_providers)} providers locally for {key.hex()}"
             )
+            event = KadDhtEvent()
+            event.find_providers = True
+            event.key = key.hex()
+            event.providers_found = len(local_providers[:count])
+            event.success = True
+            self.host.get_event_bus().emit(event)
             return local_providers[:count]
 
         # Get initial closest peers
@@ -386,13 +449,19 @@ class ProviderStore:
         logger.debug(
             f"Searching {len(closest_peers)} peers for providers of {key.hex()}"
         )
+        find_start = time.monotonic()
 
         # Iterative provider lookup
         all_providers: list[PeerInfo] = []
         queried_peers: set[ID] = set()
         candidate_peers = list(closest_peers)
 
-        while candidate_peers and len(all_providers) < count:
+        while (
+            candidate_peers
+            and len(all_providers) < count
+            and len(queried_peers) < MAX_LOOKUP_QUERIES
+            and time.monotonic() - find_start < MAX_LOOKUP_DURATION
+        ):
             # Take ALPHA peers from candidates
             batch = candidate_peers[:ALPHA]
             candidate_peers = candidate_peers[ALPHA:]
@@ -445,6 +514,7 @@ class ProviderStore:
                         peer not in queried_peers
                         and peer not in candidate_peers
                         and peer != self.local_peer_id
+                        and len(candidate_peers) < MAX_LOOKUP_CANDIDATES
                     ):
                         candidate_peers.append(peer)
 
@@ -460,7 +530,22 @@ class ProviderStore:
             if not candidate_peers:
                 break
 
+        if len(queried_peers) >= MAX_LOOKUP_QUERIES:
+            logger.debug(
+                "Provider lookup stopped at query cap (%d peers)",
+                MAX_LOOKUP_QUERIES,
+            )
         logger.debug(f"Found {len(all_providers)} providers for key {key.hex()}")
+
+        event = KadDhtEvent()
+        event.find_providers = True
+        event.key = key.hex()
+        event.providers_found = len(all_providers[:count])
+        event.peers_queried = len(queried_peers)
+        event.peers_responded = [str(p.peer_id) for p in all_providers[:count]][:10]
+        event.success = len(all_providers) > 0
+        event.duration_ms = (time.monotonic() - find_start) * 1000
+        self.host.get_event_bus().emit(event)
         return all_providers[:count]
 
     async def _get_providers_from_peer_with_closers(
@@ -566,6 +651,12 @@ class ProviderStore:
 
         return providers, closer_peers
 
+    def _drop_key(self, key: bytes) -> None:
+        """Forget everything tracked for *key* (provider record and metadata)."""
+        self.providers.pop(key, None)
+        self._last_republish.pop(key, None)
+        self.providing_keys.discard(key)
+
     def add_provider(self, key: bytes, provider: PeerInfo) -> None:
         """
         Add a provider for a given content key.
@@ -578,32 +669,49 @@ class ProviderStore:
         None
 
         """
+        self._store_provider(key, provider)
+
+    def _store_provider(
+        self, key: bytes, provider: PeerInfo, *, local: bool = False
+    ) -> bool:
         if not provider or not provider.peer_id:
             logger.debug("Skipping add_provider with invalid PeerInfo")
-            return
+            return False
 
-        # Initialize providers for this key if needed
-        if key not in self.providers:
-            self.providers[key] = {}
+        # A local publication lasts until unprovide(). Only cached remote
+        # keys are replaceable when admitting a new record at capacity.
+        if key not in self.providers and len(self.providers) >= MAX_PROVIDER_KEYS:
+            evicted_key = next(
+                (k for k in self.providers if k not in self.providing_keys), None
+            )
+            if evicted_key is None:
+                logger.debug("Provider store is full of local publications")
+                return False
+            self._drop_key(evicted_key)
 
         # Per spec: limit providers per key to k (BUCKET_SIZE)
-        if (
-            len(self.providers[key]) >= BUCKET_SIZE
-            and str(provider.peer_id) not in self.providers[key]
-        ):
-            logger.debug(
-                f"Provider limit ({BUCKET_SIZE}) reached for key {key.hex()}, "
-                f"ignoring new provider {provider.peer_id}"
-            )
-            return
+        records = self.providers.setdefault(key, {})
+        peer_id_str = str(provider.peer_id)
+        if not local and key in self.providing_keys:
+            if provider.peer_id == self.local_peer_id:
+                return False
+        if len(records) >= BUCKET_SIZE and peer_id_str not in records:
+            if not local:
+                logger.debug(
+                    f"Provider limit ({BUCKET_SIZE}) reached for key {key.hex()}, "
+                    f"ignoring new provider {provider.peer_id}"
+                )
+                return False
+            del records[next(iter(records))]
 
-        # Add or update the provider record
-        peer_id_str = str(provider.peer_id)  # Use string representation as dict key
-        self.providers[key][peer_id_str] = ProviderRecord(
+        if local:
+            self.providing_keys.add(key)
+        records[peer_id_str] = ProviderRecord(
             provider_info=provider, timestamp=time.time()
         )
         logger.debug(f"Added provider {provider.peer_id} for key {key.hex()}")
         self._save()
+        return True
 
     def get_providers(self, key: bytes) -> list[PeerInfo]:
         """
@@ -641,8 +749,8 @@ class ProviderStore:
             del self.providers[key][peer_id]
 
         # Remove the key if no providers left
-        if not self.providers[key]:
-            del self.providers[key]
+        if not self.providers[key] and key not in self.providing_keys:
+            self._drop_key(key)
 
         return result
 
@@ -673,13 +781,23 @@ class ProviderStore:
                 removed_any = True
 
             # Track empty keys for removal
-            if not providers:
+            if not providers and key not in self.providing_keys:
                 expired_keys.append(key)
 
         # Remove empty keys
         for key in expired_keys:
-            del self.providers[key]
+            self._drop_key(key)
             logger.debug(f"Removed key with no providers: {key.hex()}")
+
+        # Trim older stores to the cap as far as their remote cache allows.
+        overflow = len(self.providers) - MAX_PROVIDER_KEYS
+        if overflow > 0:
+            remote_keys = [
+                key for key in self.providers if key not in self.providing_keys
+            ]
+            for key in remote_keys[:overflow]:
+                self._drop_key(key)
+                removed_any = True
 
         if expired_keys or removed_any:
             self._save()

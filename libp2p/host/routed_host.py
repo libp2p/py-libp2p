@@ -3,8 +3,10 @@ from __future__ import annotations
 from collections.abc import (
     Sequence,
 )
+from typing import TYPE_CHECKING, Any
 
 import multiaddr
+import trio
 
 from libp2p.abc import (
     INetworkService,
@@ -21,6 +23,9 @@ from libp2p.peer.peerinfo import (
     PeerInfo,
 )
 from libp2p.rcmgr import ResourceManager
+
+if TYPE_CHECKING:
+    from libp2p.events import EventBus
 
 
 # RoutedHost is a p2p Host that includes a routing system.
@@ -42,7 +47,9 @@ class RoutedHost(BasicHost):
         enable_upnp: bool = False,
         bootstrap: list[str] | None = None,
         resource_manager: ResourceManager | None = None,
+        event_bus: EventBus | None = None,
         *,
+        metric_recv_channel: trio.MemoryReceiveChannel[Any] | None = None,
         bootstrap_allow_ipv6: bool = False,
         bootstrap_dns_timeout: float = 10.0,
         bootstrap_dns_max_retries: int = 3,
@@ -76,6 +83,8 @@ class RoutedHost(BasicHost):
             enable_upnp=enable_upnp,
             bootstrap=bootstrap,
             resource_manager=resource_manager,
+            metric_recv_channel=metric_recv_channel,
+            event_bus=event_bus,
             bootstrap_allow_ipv6=bootstrap_allow_ipv6,
             bootstrap_dns_timeout=bootstrap_dns_timeout,
             bootstrap_dns_max_retries=bootstrap_dns_max_retries,

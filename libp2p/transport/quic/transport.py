@@ -263,6 +263,7 @@ class QUICTransport(ITransport):
         if not is_quic_multiaddr(maddr):
             raise QUICDialError(f"Invalid QUIC multiaddr: {maddr}")
 
+        connection: QUICConnection | None = None
         try:
             # Extract connection details from multiaddr
             host, port = quic_multiaddr_to_endpoint(maddr)
@@ -326,6 +327,15 @@ class QUICTransport(ITransport):
                 raise QUICDialError("No nursery found to execute tasks")
 
             await connection.connect(self._background_nursery)
+
+            if self._closed:
+                # close() can run while the handshake is in progress. Do not
+                # publish a connection into a closed transport: nothing will
+                # ever close it, so it and its streams stay alive forever.
+                with trio.CancelScope() as close_scope:
+                    close_scope.shield = True
+                    await connection.close()
+                raise QUICDialError("Transport closed during dial")
 
             # Store connection for management
             conn_id = f"{host}:{port}"
@@ -420,6 +430,13 @@ class QUICTransport(ITransport):
         logger.debug("Created QUIC listener with security")
         return listener
 
+    def _remove_listener(self, listener: "QUICListener") -> None:
+        """Unregister a listener that has finished closing."""
+        try:
+            self._listeners.remove(listener)
+        except ValueError:
+            pass
+
     def can_dial(self, maddr: multiaddr.Multiaddr) -> bool:
         """
         Check if this transport can dial the given multiaddr.
@@ -485,8 +502,9 @@ class QUICTransport(ITransport):
             for connection in self._connections.values():
                 nursery.start_soon(connection.close)
 
-            # Close all listeners
-            for listener in self._listeners:
+            # Close all listeners. Iterate a snapshot: each listener removes
+            # itself from the registry as it closes.
+            for listener in list(self._listeners):
                 nursery.start_soon(listener.close)
 
         self._connections.clear()

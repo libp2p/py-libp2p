@@ -28,6 +28,8 @@ class QUICTransportKwargs(TypedDict, total=False):
 
     # Connection settings
     idle_timeout: float
+    keepalive_enabled: bool
+    keepalive_interval: float
     max_datagram_size: int
     local_port: int | None
 
@@ -65,7 +67,6 @@ class QUICTransportConfig(ConnectionConfig):
 
     # Connection settings
     idle_timeout: float = 600.0  # Seconds before an idle connection is closed.
-    # Matches go-libp2p default (10 minutes).
 
     max_datagram_size: int = (
         1200  # UDP payload MTU. Wired to aioquic max_datagram_size (not DATAGRAM
@@ -118,6 +119,13 @@ class QUICTransportConfig(ConnectionConfig):
 
     CONNECTION_CLOSE_TIMEOUT: int = 10
     """Timeout for opening new connection (seconds)."""
+
+    # Opt-in PINGs keep idle connections alive.
+    KEEPALIVE_ENABLED: bool = False
+    """Whether to send QUIC keep-alive PING frames on idle connections."""
+
+    KEEPALIVE_INTERVAL: float = 15.0
+    """Interval between keep-alive PINGs (seconds). Must be < idle_timeout."""
 
     # Stream timeouts
     STREAM_OPEN_TIMEOUT: float = 30.0
@@ -263,6 +271,24 @@ class QUICTransportConfig(ConnectionConfig):
 
         if self.idle_timeout <= 0:
             raise ValueError("Idle timeout must be positive")
+
+        # Keep-alive validation (mirrors quic-go: keep-alive is only effective
+        # when the keep-alive period is shorter than the idle timeout).
+        if self.KEEPALIVE_ENABLED and self.KEEPALIVE_INTERVAL <= 0:
+            raise ValueError(
+                "KEEPALIVE_INTERVAL must be positive when keep-alive is enabled"
+            )
+
+        if self.KEEPALIVE_ENABLED and self.KEEPALIVE_INTERVAL >= self.idle_timeout:
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                "KEEPALIVE_INTERVAL (%s) must be shorter than idle_timeout (%s); "
+                "keep-alive will be ineffective (quic-go disables it in this case)",
+                self.KEEPALIVE_INTERVAL,
+                self.idle_timeout,
+            )
 
         if self.max_datagram_size < 1200:
             raise ValueError("Max datagram size must be at least 1200 bytes")

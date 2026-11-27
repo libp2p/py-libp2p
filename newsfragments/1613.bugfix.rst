@@ -1,1 +1,0 @@
-``tls-client-demo`` in its default echo mode now gets a reply from ``tls-demo``: the server answers ``/echo/1.0.0``, and the client's echo mode uses it instead of the interactive chat protocol, which waited for someone to type at the server.

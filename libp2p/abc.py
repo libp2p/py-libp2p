@@ -11,6 +11,7 @@ from collections.abc import (
 )
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
+from threading import Lock
 from types import (
     TracebackType,
 )
@@ -41,6 +42,7 @@ from libp2p.custom_types import (
     TProtocol,
     ValidatorFn,
 )
+from libp2p.events.bus import EventBus
 from libp2p.io.abc import (
     Closer,
     ReadWriteCloser,
@@ -1725,7 +1727,7 @@ class INetwork(ABC):
         Returns
         -------
         IMuxedConn
-            The upgraded, secure, and multiplexed network connection.
+            The upgraded, secure, and multiplexed connection.
 
         Raises
         ------
@@ -2182,6 +2184,9 @@ class IHost(ABC):
 
     """
 
+    _fallback_event_bus: EventBus | None = None
+    _fallback_event_bus_lock = Lock()
+
     @abstractmethod
     def get_id(self) -> ID:
         """
@@ -2364,6 +2369,19 @@ class IHost(ABC):
         """
         Returns the recving end of the channel, used for metric events
         """
+
+    def get_event_bus(self) -> EventBus:
+        """
+        Return the host's observability event bus.
+
+        The default creates a bus lazily for each host. Implementations
+        can override this method to share a bus with their network.
+
+        """
+        with self._fallback_event_bus_lock:
+            if self._fallback_event_bus is None:
+                self._fallback_event_bus = EventBus()
+            return self._fallback_event_bus
 
     @abstractmethod
     async def initiate_autotls_procedure(self, public_ip: str | None = None) -> None:

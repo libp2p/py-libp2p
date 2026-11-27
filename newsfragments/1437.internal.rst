@@ -1,1 +1,0 @@
-Add js-libp2p WebRTC-Direct interop tests (``@libp2p/webrtc`` 7.0.2): py-libp2p and js-libp2p dial each other with both the v1 and v2 flows.

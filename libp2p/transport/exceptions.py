@@ -12,7 +12,7 @@ class UpgradeFailure(BaseLibp2pError):
 
 
 class SecurityUpgradeFailure(UpgradeFailure):
-    pass
+    protocol_id: str | None = None
 
 
 class MuxerUpgradeFailure(UpgradeFailure):

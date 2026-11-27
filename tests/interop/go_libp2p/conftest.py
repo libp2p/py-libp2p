@@ -39,8 +39,16 @@ def _build_harness(bin_path: Path, setup_script: Path, lock_name: str) -> bool:
     lock = Path(__file__).parent / lock_name
     with open(lock, "w") as f:
         fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-        if bin_path.exists() and bin_path.stat().st_size > 0:
-            return True
+        if bin_path.exists():
+            binary = bin_path.stat()
+            sources = [
+                setup_script,
+                *(bin_path.parent / name for name in ("main.go", "go.mod", "go.sum")),
+            ]
+            if binary.st_size > 0 and all(
+                binary.st_mtime_ns >= source.stat().st_mtime_ns for source in sources
+            ):
+                return True
         try:
             subprocess.run(["bash", str(setup_script)], check=True, timeout=600)
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:

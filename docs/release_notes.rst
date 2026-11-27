@@ -3,6 +3,69 @@ Release Notes
 
 .. towncrier release notes start
 
+py-libp2p v0.8.3 (2026-11-27)
+-----------------------------
+
+Bugfixes
+~~~~~~~~
+
+- Fixed the SECIO key exchange on Windows, which used secp256k1 instead of P-256 and so could not agree on a shared secret with other platforms or implementations. (`#1100 <https://github.com/libp2p/py-libp2p/issues/1100>`__)
+- Leaving ``host.run()`` without calling ``host.close()`` now closes the host's connections, listeners and transports. Previously the teardown in ``Swarm.run()`` ran in an already-cancelled scope and stopped at its first ``await``. (`#1584 <https://github.com/libp2p/py-libp2p/issues/1584>`__)
+- Fixes ping command to give correct complete instruction to run ping-demo while also handle ws case (`#1591 <https://github.com/libp2p/py-libp2p/issues/1591>`__)
+- Fixed the circuit relay example so a source can reach a destination through the relay: the circuit address now names the relay, the destination keeps its relay services running and makes its reservation as soon as it connects, and a malformed log call no longer raises ``TypeError``. (`#1606 <https://github.com/libp2p/py-libp2p/issues/1606>`__)
+- ``tls-client-demo`` in its default echo mode now gets a reply from ``tls-demo``: the server answers ``/echo/1.0.0``, and the client's echo mode uses it instead of the interactive chat protocol, which waited for someone to type at the server. (`#1613 <https://github.com/libp2p/py-libp2p/issues/1613>`__)
+- Raise ``QUICStreamClosedError`` again when writing to a QUIC stream whose sending side has ended, instead of letting aioquic's ``StreamStateError`` through and resetting the stream, which happened with aioquic 1.8 and later. (`#1619 <https://github.com/libp2p/py-libp2p/issues/1619>`__)
+- The WebRTC-Direct listener no longer monkey-patches aioice into a fake local ICE-Lite agent. It uses a full controlled muxed ``Connection``; the dialer still synthesises an ``a=ice-lite`` answer so it remains controlling (aiortc/aioice#114). (`#1626 <https://github.com/libp2p/py-libp2p/issues/1626>`__)
+- ``AutoConnector.stop()`` now cancels the running connect cycle, including in-flight dials and on-demand discovery, and returns only once it has unwound, so no auto-connect dial can register a connection after ``stop()`` returns. (`#1630 <https://github.com/libp2p/py-libp2p/issues/1630>`__)
+- Released retained connection, stream, and task state across QUIC, stream
+  multiplexers, WebSocket, pubsub, Bitswap, and Kad-DHT. Bounded peerstore and
+  swarm bookkeeping, reclaimed inbound connection slots after disconnect, and
+  improved auto-connector recovery after peer churn.
+
+  Persistent peerstores now prune older uncached peers on writes when the
+  datastore exceeds the configured ``max_stored_peers`` limit. It defaults to
+  ``max_records`` (10,000 unless configured).
+
+  Kad-DHT preserves existing local provider publications at capacity.
+  When all slots hold local publications, new publications are refused until
+  a local key is removed with ``unprovide()``. (`#1632 <https://github.com/libp2p/py-libp2p/issues/1632>`__)
+- Bound inbound pubsub subscription state per peer: enforce
+  ``max_subscriptions_per_peer`` / ``max_subscriptions_per_rpc`` and inbound RPC
+  size limits, track per-peer subscription counts, and drop empty ``peer_topics``
+  entries on unsubscribe and disconnect
+  (`GHSA-3p7x-v3jj-qxj7 <https://github.com/libp2p/py-libp2p/security/advisories/GHSA-3p7x-v3jj-qxj7>`__). (`#1633 <https://github.com/libp2p/py-libp2p/issues/1633>`__)
+- Circuit Relay v2 RESERVE now keys reservation admission on the authenticated
+  connection peer and rejects ``msg.peer`` values that do not match, so a
+  connected peer cannot consume reservation slots under unrelated peer IDs
+  (`GHSA-76w5-58f3-9p2g <https://github.com/libp2p/py-libp2p/security/advisories/GHSA-76w5-58f3-9p2g>`__).
+- Enforce yamux per-stream receive-window limits on incoming DATA frames and
+  treat window violations as a protocol error that terminates the session, so a
+  remote peer cannot grow stream buffers without bound
+  (`GHSA-xx4q-fj82-qjp5 <https://github.com/libp2p/py-libp2p/security/advisories/GHSA-xx4q-fj82-qjp5>`__).
+
+
+Features
+~~~~~~~~
+
+- Added Python 3.14 to tox test matrix and supported Python classifiers. (`#1100 <https://github.com/libp2p/py-libp2p/issues/1100>`__)
+- Require aioquic 1.9.1 or later, so that QUIC and WebTransport connections use the post-quantum X25519MLKEM768 key exchange whenever the peer supports it, and stop relying on aioquic internals which it now covers with public API. (`#1619 <https://github.com/libp2p/py-libp2p/issues/1619>`__)
+- Added a synchronous host event bus for typed observability events and expanded
+  Prometheus coverage across libp2p subsystems. Network lifecycle notifees continue
+  to drive connection, stream, and listener callbacks. Existing metrics-channel
+  consumers can receive bus events through a best-effort bridge. (`#1631 <https://github.com/libp2p/py-libp2p/issues/1631>`__)
+
+
+Internal Changes - for py-libp2p Contributors
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- Run the example programs themselves in the ``demos`` test environment (listener, dialer and printed result, as a user runs them), so a broken example script now fails CI. (`#523 <https://github.com/libp2p/py-libp2p/issues/523>`__)
+- Replaced coincurve and fastecdsa with cryptography for secp256k1 and P-256 keys, since coincurve 21.0.0 cannot be installed on Python 3.14 and later. Signatures are unchanged: deterministic (RFC 6979) and in low-S form. Installing py-libp2p no longer needs GMP, CMake or pkg-config, which were only used to build coincurve and fastecdsa from source. (`#1100 <https://github.com/libp2p/py-libp2p/issues/1100>`__)
+- Moved the iterative Kademlia lookup loop out of ``PeerRouting.find_closest_peers_network`` into a reusable ``Lookup`` engine in ``libp2p.kad_dht.lookup``, with no change in behaviour, as the first step of the #1384 Part 2 plan. (`#1384 <https://github.com/libp2p/py-libp2p/issues/1384>`__)
+- Add js-libp2p WebRTC-Direct interop tests (``@libp2p/webrtc`` 7.0.2): py-libp2p and js-libp2p dial each other with both the v1 and v2 flows. (`#1437 <https://github.com/libp2p/py-libp2p/issues/1437>`__)
+- Added a test that a QUIC handshake between two py-libp2p peers offers and selects the post-quantum X25519MLKEM768 key exchange, so that a dependency change cannot drop it unnoticed. (`#1581 <https://github.com/libp2p/py-libp2p/issues/1581>`__)
+- Updated the test suite for ``multiaddr`` 0.3, which now validates multiaddr bytes eagerly, and silenced two ``pyrefly`` false positives on ``py-multihash`` 4.0.0's ``Multihash`` fields. This restores the CI ``core`` and ``lint`` environments. (`#1620 <https://github.com/libp2p/py-libp2p/issues/1620>`__)
+
+
 py-libp2p v0.8.2 (2026-11-21)
 -----------------------------
 
